@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClickUp Gmail Tracker</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+    <div class="popup-container">
+        <header class="popup-header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 180 180" fill="url(#gradient)">
+                    <defs>
+                        <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#49CCF9" />
+                            <stop offset="50%" style="stop-color:#8930FD" />
+                            <stop offset="100%" style="stop-color:#FF02F0" />
+                        </linearGradient>
+                    </defs>
+                    <path
+                        d="M25.4 129.1L49.2 110.9C61.9 127.4 75.3 135 90.3 135C105.1 135 118.2 127.5 130.3 111.1L154.4 128.9C137 152.5 115.3 165 90.3 165C65.3 165 43.4 152.6 25.4 129.1Z" />
+                    <polygon points="90.2 49.8 47.8 86.4 28.2 63.6 90.3 10.2 151.8 63.7 132.2 86.3" />
+                </svg>
+                <h1>ClickUp Gmail</h1>
+            </div>
+        </header>
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
+
+        <!-- Login Required -->
+        <div id="login-required" class="section hidden">
+            <div class="card">
+                <h2>OAuth Configuration</h2>
+                <p class="help-text">Create a ClickUp OAuth App to connect:</p>
+
+                <!-- Step 1: Redirect URL -->
+                <div class="step-card">
+                    <span class="step-number">1</span>
+                    <div class="step-content">
+                        <p>Copy this <strong>Redirect URL</strong>:</p>
+                        <div class="url-box">
+                            <input type="text" id="redirectUrl" readonly>
+                            <button id="copyUrl" class="btn-icon" title="Copy URL">📋</button>
+                        </div>
+                        <p class="hint">Click the 📋 button to copy</p>
+                    </div>
+                </div>
+
+                <!-- Step 2: Create App -->
+                <div class="step-card">
+                    <span class="step-number">2</span>
+                    <div class="step-content">
+                        <p>Go to <a href="https://app.clickup.com/settings/integrations" target="_blank">ClickUp
+                                Integrations</a></p>
+                        <p class="hint">Click "Create an App" and paste the Redirect URL</p>
+                    </div>
+                </div>
+
+                <!-- Step 3: Enter credentials -->
+                <div class="step-card">
+                    <span class="step-number">3</span>
+                    <div class="step-content">
+                        <p>Enter your credentials below:</p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="clientId">Client ID</label>
+                    <input type="text" id="clientId" placeholder="Enter Client ID">
+                </div>
+
+                <div class="form-group">
+                    <label for="clientSecret">Client Secret</label>
+                    <input type="password" id="clientSecret" placeholder="Enter Client Secret">
+                </div>
+
+                <button id="saveConfig" class="btn btn-secondary">Save Configuration</button>
+            </div>
+
+            <button id="signIn" class="btn btn-primary" disabled>
+                Sign in with ClickUp
+            </button>
+
+            <button id="openWindow" class="btn btn-link">
+                📐 Open in separate window (recommended)
+            </button>
+        </div>
+
+        <!-- Logged In -->
+        <div id="logged-in" class="section hidden">
+            <div class="user-info">
+                <img id="userAvatar" src="" alt="Avatar" class="avatar">
+                <div class="user-details">
+                    <span id="userName" class="user-name">User Name</span>
+                    <span id="userEmail" class="user-email">email@example.com</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Default List</h3>
+                <p class="help-text">Tasks will be created in this list:</p>
+                <select id="teamSelect" class="select">
+                    <option value="">Select Workspace...</option>
+                </select>
+                <select id="spaceSelect" class="select hidden">
+                    <option value="">Select Space...</option>
+                </select>
+                <select id="listSelect" class="select hidden">
+                    <option value="">Select List...</option>
+                </select>
+                <button id="clearDefaultList" class="btn btn-link btn-small hidden">🗑️ Clear default list</button>
+            </div>
+
+            <!-- Dev Tools -->
+            <div class="card dev-tools">
+                <h3>🔧 Dev Tools</h3>
+                <button id="testTokenRefresh" class="btn btn-warning">🧪 Test Token Refresh</button>
+                <p class="hint" id="testResult"></p>
+            </div>
+
+            <button id="signOut" class="btn btn-danger">Sign Out</button>
+        </div>
+
+        <footer class="popup-footer">
+            <p>Built by <strong>Leandro Iramain</strong> with ❤️ and AI</p>
+        </footer>
+    </div>
+    <script src="popup.js"></script>
+</body>
+
+</html>
