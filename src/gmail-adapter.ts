@@ -40,7 +40,7 @@ interface IGmailAdapter {
     getInboxRows(): NodeListOf<Element>;
     getRowLegacyThreadId(row: Element): string | null;
     getSubjectContainer(row: Element): SubjectContainer;
-    getAttachmentUrls(): string[];
+    getAttachmentUrls(): { url: string; filename: string; mimeType: string }[];
     getUserEmail(): string;
     isViewingEmail(): boolean;
     isViewingInbox(): boolean;
@@ -195,16 +195,26 @@ const GmailAdapter: IGmailAdapter = {
     },
 
     /**
-     * Get attachments download URLs
+     * Get attachments info from email
+     * Gmail download_url format: "mimeType:filename:actualUrl"
      */
-    getAttachmentUrls(): string[] {
-        const urls: string[] = [];
+    getAttachmentUrls(): { url: string; filename: string; mimeType: string }[] {
+        const attachments: { url: string; filename: string; mimeType: string }[] = [];
         const elements = document.querySelectorAll(this.SELECTORS.attachments);
         elements.forEach(el => {
-            const url = el.getAttribute('download_url');
-            if (url) urls.push(url);
+            const downloadUrl = el.getAttribute('download_url');
+            if (downloadUrl) {
+                // Parse Gmail's download_url format: "mimeType:filename:actualUrl"
+                const parts = downloadUrl.split(':');
+                if (parts.length >= 3) {
+                    const mimeType = parts[0];
+                    const filename = parts[1];
+                    const url = parts.slice(2).join(':'); // URL may contain ':'
+                    attachments.push({ url, filename, mimeType });
+                }
+            }
         });
-        return urls;
+        return attachments;
     },
 
     /**

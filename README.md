@@ -11,6 +11,7 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails.
 
 ## ✨ Features
 
+### Core
 - **Create Tasks from Gmail** - Add emails to ClickUp with one click
 - **Attach to Existing** - Link emails to existing tasks
 - **Smart Defaults** - Auto-fills dates, assignee, and location
@@ -18,6 +19,15 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails.
 - **WYSIWYG Editor** - Rich text description with markdown support
 - **Success Popup** - Quick link to view created task
 - **Task Search** - Find tasks by ID, URL, or name
+
+### Performance
+- **List Cache** - Pre-load all spaces/folders/lists for instant modal loading
+- **Stale-While-Revalidate** - Use cached data while refreshing in background
+
+### Sync & Migration
+- **Email Tasks Sync** - Sync existing email-task links when migrating PC/browser
+- **Thread ID Tracking** - Email links stored in task description for efficient sync
+- **Email Attachments** - Attach email files directly to ClickUp tasks
 
 ## 🛠️ Tech Stack
 

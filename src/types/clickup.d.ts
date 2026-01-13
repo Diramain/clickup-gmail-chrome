@@ -230,12 +230,22 @@ export interface EmailData {
     html: string;
     email?: string;
     userEmail?: string;
+    attachments?: AttachmentInfo[];
+}
+
+export interface AttachmentInfo {
+    url: string;
+    filename: string;
+    mimeType: string;
+    size?: number;
 }
 
 export interface EmailTaskMapping {
     id: string;
     name: string;
     url: string;
+    status?: string;
+    createdAt?: number;
 }
 
 export interface StorageData {
@@ -285,7 +295,11 @@ export type MessageAction =
     | 'saveDefaultList'
     | 'setDefaultList'
     | 'getDefaultList'
-    | 'getTaskById';
+    | 'getTaskById'
+    | 'preloadFullHierarchy'
+    | 'getHierarchyCache'
+    | 'syncEmailTasks'
+    | 'getEmailTasksSyncStatus';
 
 export interface ExtensionMessage {
     action: MessageAction;

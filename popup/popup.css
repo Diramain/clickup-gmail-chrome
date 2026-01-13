@@ -150,6 +150,58 @@ input::placeholder {
     margin-top: 8px;
 }
 
+/* Fix dropdown options for dark mode */
+select option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+/* Sync button spinner */
+.sync-card .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.sync-card .btn .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0;
+}
+
+.sync-card .btn-text {
+    display: inline-block;
+}
+
+/* Sync status message */
+#syncStatus {
+    transition: color 0.3s ease;
+}
+
+/* Email tasks sync options */
+.sync-options {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.select-inline {
+    flex: 1;
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 12px;
+    width: auto;
+}
+
 /* Buttons */
 .btn {
     width: 100%;

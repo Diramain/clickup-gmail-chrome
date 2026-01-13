@@ -220,6 +220,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // Load teams
     await loadTeams();
 
+    // Load cache status (last sync time)
+    await loadCacheStatus();
+
     // Sign out handler
     document.getElementById('signOut')!.addEventListener('click', async () => {
         await sendMessage({ action: 'logout' });
@@ -253,6 +256,87 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
         btn.disabled = false;
         btn.textContent = '🧪 Test Token Refresh';
+    });
+
+    // Sync Lists button handler
+    document.getElementById('syncLists')?.addEventListener('click', async () => {
+        const btn = document.getElementById('syncLists') as HTMLButtonElement;
+        const status = document.getElementById('syncStatus') as HTMLElement;
+        const btnText = btn.querySelector('.btn-text') as HTMLElement;
+        const spinner = btn.querySelector('.spinner') as HTMLElement;
+
+        btn.disabled = true;
+        btnText.textContent = 'Syncing...';
+        spinner?.classList.remove('hidden');
+        status.textContent = 'Loading all spaces and lists...';
+        status.style.color = '#666';
+
+        try {
+            const startTime = Date.now();
+            const result = await sendMessage<{ success: boolean; listCount: number }>({
+                action: 'preloadFullHierarchy'
+            });
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (result.success) {
+                status.textContent = `✅ Synced ${result.listCount} lists in ${elapsed}s`;
+                status.style.color = '#00c853';
+            } else {
+                status.textContent = '❌ Sync failed';
+                status.style.color = '#ff5252';
+            }
+        } catch (error: any) {
+            status.textContent = '❌ Error: ' + error.message;
+            status.style.color = '#ff5252';
+        }
+
+        btn.disabled = false;
+        btnText.textContent = '🔄 Sync Lists';
+        spinner?.classList.add('hidden');
+    });
+
+    // Load email tasks sync status
+    await loadEmailTasksSyncStatus();
+
+    // Sync Email Tasks button handler
+    document.getElementById('syncEmailTasks')?.addEventListener('click', async () => {
+        const btn = document.getElementById('syncEmailTasks') as HTMLButtonElement;
+        const status = document.getElementById('emailSyncStatus') as HTMLElement;
+        const daysSelect = document.getElementById('emailSyncDays') as HTMLSelectElement;
+        const btnText = btn.querySelector('.btn-text') as HTMLElement;
+        const spinner = btn.querySelector('.spinner') as HTMLElement;
+
+        const days = parseInt(daysSelect.value);
+
+        btn.disabled = true;
+        btnText.textContent = 'Syncing...';
+        spinner?.classList.remove('hidden');
+        status.textContent = `Scanning tasks from last ${days} days...`;
+        status.style.color = '#666';
+
+        try {
+            const startTime = Date.now();
+            const result = await sendMessage<{ success: boolean; foundCount: number }>({
+                action: 'syncEmailTasks',
+                data: { days }
+            });
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (result.success) {
+                status.textContent = `✅ Found ${result.foundCount} linked tasks in ${elapsed}s`;
+                status.style.color = '#00c853';
+            } else {
+                status.textContent = '❌ Sync failed';
+                status.style.color = '#ff5252';
+            }
+        } catch (error: any) {
+            status.textContent = '❌ Error: ' + error.message;
+            status.style.color = '#ff5252';
+        }
+
+        btn.disabled = false;
+        btnText.textContent = '🔄 Sync';
+        spinner?.classList.add('hidden');
     });
 }
 
@@ -442,6 +526,83 @@ function showClearedIndicator(): void {
 
     document.getElementById('teamSelect')?.parentElement?.appendChild(indicator);
     setTimeout(() => indicator.remove(), 3000);
+}
+
+// ============================================================================
+// Cache Status
+// ============================================================================
+
+async function loadCacheStatus(): Promise<void> {
+    const status = document.getElementById('syncStatus') as HTMLElement;
+
+    try {
+        const cache = await sendMessage<{ timestamp?: number; lists?: any[] } | null>({
+            action: 'getHierarchyCache'
+        });
+
+        if (cache && cache.timestamp) {
+            const elapsed = Date.now() - cache.timestamp;
+            const minutes = Math.floor(elapsed / 60000);
+            const hours = Math.floor(minutes / 60);
+
+            let timeAgo = '';
+            if (hours > 24) {
+                const days = Math.floor(hours / 24);
+                timeAgo = `${days} day${days > 1 ? 's' : ''} ago`;
+            } else if (hours > 0) {
+                timeAgo = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            } else if (minutes > 0) {
+                timeAgo = `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+            } else {
+                timeAgo = 'just now';
+            }
+
+            const listCount = cache.lists?.length || 0;
+            status.textContent = `✅ ${listCount} lists synced ${timeAgo}`;
+            status.style.color = '#00c853';
+        } else {
+            status.textContent = '⚠️ Not synced yet - click to sync';
+            status.style.color = '#ff9800';
+        }
+    } catch (e) {
+        status.textContent = 'Pre-load lists for faster task creation';
+    }
+}
+
+async function loadEmailTasksSyncStatus(): Promise<void> {
+    const status = document.getElementById('emailSyncStatus') as HTMLElement;
+
+    try {
+        const syncData = await sendMessage<{ lastSync?: number; foundCount?: number; days?: number } | null>({
+            action: 'getEmailTasksSyncStatus'
+        });
+
+        if (syncData && syncData.lastSync) {
+            const elapsed = Date.now() - syncData.lastSync;
+            const minutes = Math.floor(elapsed / 60000);
+            const hours = Math.floor(minutes / 60);
+
+            let timeAgo = '';
+            if (hours > 24) {
+                const days = Math.floor(hours / 24);
+                timeAgo = `${days} day${days > 1 ? 's' : ''} ago`;
+            } else if (hours > 0) {
+                timeAgo = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            } else if (minutes > 0) {
+                timeAgo = `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+            } else {
+                timeAgo = 'just now';
+            }
+
+            status.textContent = `✅ ${syncData.foundCount || 0} links found ${timeAgo}`;
+            status.style.color = '#00c853';
+        } else {
+            status.textContent = '⚠️ Not synced - for migrating to new PC';
+            status.style.color = '#ff9800';
+        }
+    } catch (e) {
+        status.textContent = 'Sync tasks linked to emails';
+    }
 }
 
 // ============================================================================

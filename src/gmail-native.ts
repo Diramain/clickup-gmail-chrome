@@ -30,6 +30,7 @@ interface EmailData {
     subject: string;
     from: string;
     html: string;
+    attachments?: { url: string; filename: string; mimeType: string }[];
 }
 
 interface ValidationResponse {
@@ -429,7 +430,8 @@ function openTaskModal(threadId: string): void {
         threadId: threadId,
         subject: getEmailSubject(),
         from: getSenderEmail(),
-        html: getEmailBody()
+        html: getEmailBody(),
+        attachments: GmailAdapter.getAttachmentUrls()
     };
 
     if (typeof TaskModal !== 'undefined') {

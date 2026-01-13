@@ -25,13 +25,24 @@ Bienvenido a la Wiki de la extensión de Chrome para ClickUp y Gmail. Esta docum
 
 ## Características Principales
 
+### Funcionalidades Core
 *   **Creación Rápida**: Convierte correos electrónicos en tareas de ClickUp con un solo clic.
 *   **Adjuntar a Existentes**: Vincula correos a tareas que ya existen en tu espacio de trabajo.
-*   **Valores Predeterminados Inteligentes**: La extensión autocompleta fechas, asignados y ubicación basándose en el contexto.
-*   **Selector de Prioridad**: Establece la prioridad de la tarea (Urgente, Alta, Normal, Baja) al momento de crearla.
-*   **Editor WYSIWYG**: Descripción de tarea con formato de texto enriquecido y soporte para Markdown.
-*   **Popup de Éxito**: Enlace directo para ver la tarea creada inmediatamente.
+*   **Valores Predeterminados Inteligentes**: Autocompleta fechas, asignados y ubicación.
+*   **Selector de Prioridad**: Establece la prioridad (Urgente, Alta, Normal, Baja).
+*   **Editor WYSIWYG**: Descripción con formato de texto enriquecido y Markdown.
+*   **Popup de Éxito**: Enlace directo para ver la tarea creada.
 *   **Búsqueda de Tareas**: Encuentra tareas por ID, URL o nombre.
+
+### Rendimiento
+*   **Cache de Listas**: Pre-carga todos los espacios/carpetas/listas para apertura instantánea del modal.
+*   **Stale-While-Revalidate**: Usa datos cacheados mientras refresca en segundo plano.
+*   **Sync Lists**: Botón en popup para sincronizar listas manualmente.
+
+### Sincronización y Migración
+*   **Email Tasks Sync**: Sincroniza vinculaciones email-tarea al migrar de PC/navegador.
+*   **Thread ID Tracking**: El ID del hilo de Gmail se guarda en la descripción de la tarea para sincronización eficiente.
+*   **Adjuntos de Email**: Adjunta archivos del correo directamente a tareas de ClickUp.
 
 ---
 
@@ -93,11 +104,28 @@ Para que la extensión funcione, necesitas conectarla con tu cuenta de ClickUp:
 
 ## Guía de Uso
 
+### Crear Tareas desde Gmail
 1.  Abre cualquier correo en Gmail.
-2.  Verás un botón o icono de ClickUp integrado en la interfaz del correo.
-3.  Haz clic en el botón para abrir el modal de creación de tareas.
-4.  Edita los detalles si es necesario (título, descripción, prioridad).
-5.  Haz clic en "Crear Tarea" o vincula el correo a una tarea existente buscándola en la pestaña correspondiente.
+2.  Verás un botón "Add to ClickUp" integrado en la interfaz.
+3.  Haz clic para abrir el modal de creación.
+4.  Edita los detalles (título, descripción, prioridad).
+5.  Haz clic en "Crear Tarea" o vincula a una existente.
+
+### Funciones del Popup
+
+Haz clic en el icono de la extensión para acceder a:
+
+**📦 List Cache (Sync Lists)**
+- Pre-carga espacios y listas para apertura rápida del modal
+- Muestra tiempo transcurrido desde el último sync
+
+**📧 Email Tasks (Sync)**
+- Sincroniza vinculaciones email-tarea desde ClickUp
+- Útil al migrar de PC o navegador
+- Selecciona rango: 30/60/90 días
+
+**🔧 Dev Tools**
+- Test Token Refresh: Verifica que el refresh de tokens funcione
 
 ---
 

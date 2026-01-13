@@ -12,6 +12,7 @@ interface EmailData {
     subject: string;
     from: string;
     html: string;
+    attachments?: { url: string; filename: string; mimeType: string }[];
 }
 
 interface ListItem {
@@ -131,6 +132,9 @@ class TaskModal {
     private selectedTaskData: TaskResult | null = null;
     private isResizing: boolean = false;
     private teamId: string | null = null;
+    private listCache: Map<string, ListItem[]> = new Map();
+    private searchTimeout: ReturnType<typeof setTimeout> | null = null;
+    private isSearching: boolean = false;
 
     constructor() { }
 
@@ -282,6 +286,12 @@ class TaskModal {
                 Attach email as HTML file
               </label>
             </div>
+            <div class="cu-form-row cu-attach-files-row">
+              <label class="cu-checkbox-label">
+                <input type="checkbox" id="cu-attach-files" checked>
+                Attach email files <span id="cu-attach-files-count"></span>
+              </label>
+            </div>
           </div>
           
           <!-- Attach to Existing Tab -->
@@ -331,6 +341,18 @@ class TaskModal {
         const today = new Date().toISOString().split('T')[0];
         (this.modal!.querySelector('#cu-start-date') as HTMLInputElement).value = today;
         (this.modal!.querySelector('#cu-due-date') as HTMLInputElement).value = today;
+
+        // Show/hide attachments checkbox based on attachment count
+        const attachCount = this.emailData.attachments?.length || 0;
+        const attachFilesRow = this.modal!.querySelector('.cu-attach-files-row') as HTMLElement;
+        const attachFilesCount = this.modal!.querySelector('#cu-attach-files-count') as HTMLElement;
+
+        if (attachCount > 0) {
+            attachFilesRow.style.display = '';
+            attachFilesCount.textContent = `(${attachCount} file${attachCount > 1 ? 's' : ''})`;
+        } else {
+            attachFilesRow.style.display = 'none';
+        }
     }
 
     async prefillCurrentUser(): Promise<void> {
@@ -712,9 +734,31 @@ class TaskModal {
 
     async loadFullHierarchy(): Promise<void> {
         try {
-            console.log('[Modal] Loading hierarchy...');
+            console.log('[Modal] Loading hierarchy (cache-first mode)...');
+
+            // Try to load from cache first (instant)
+            const cache = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
+
+            if (cache && cache.lists && cache.lists.length > 0) {
+                console.log('[Modal] Cache hit!', cache.lists.length, 'lists from cache');
+                this.hierarchy.allLists = cache.lists;
+                this.hierarchy.spaces = cache.spaces || [];
+                this.hierarchy.members = cache.members || [];
+                this.teamId = cache.teamId;
+
+                // Check if cache is stale (older than 5 minutes) and refresh in background
+                const cacheAge = Date.now() - (cache.timestamp || 0);
+                if (cacheAge > 5 * 60 * 1000) {
+                    console.log('[Modal] Cache stale, refreshing in background...');
+                    chrome.runtime.sendMessage({ action: 'preloadFullHierarchy' });
+                }
+                return;
+            }
+
+            console.log('[Modal] Cache miss, loading from API...');
+
+            // No cache, load teams and members from API
             const teams = await chrome.runtime.sendMessage({ action: 'getHierarchy' }) as TeamsResponse;
-            console.log('[Modal] Teams response:', teams);
 
             if (!teams || !teams.teams || teams.teams.length === 0) {
                 console.error('[Modal] No teams found in response');
@@ -723,84 +767,84 @@ class TaskModal {
 
             const team = teams.teams[0];
             this.teamId = team.id;
-            console.log('[Modal] Team ID:', team.id, 'Team members:', team.members?.length || 0);
-
             this.hierarchy.members = team.members || [];
 
             const spacesResult = await chrome.runtime.sendMessage({ action: 'getSpaces', teamId: team.id }) as SpacesResponse;
-            console.log('[Modal] Spaces response:', spacesResult);
 
-            if (!spacesResult || !spacesResult.spaces) {
-                console.error('[Modal] No spaces found in response');
-                return;
+            if (spacesResult && spacesResult.spaces) {
+                this.hierarchy.spaces = spacesResult.spaces;
             }
 
-            this.hierarchy.spaces = spacesResult.spaces;
-            console.log('[Modal] Found', spacesResult.spaces.length, 'spaces');
-            await this.loadAllLists();
+            // On first load, wait for preload to complete so lists are available
+            console.log('[Modal] First load - waiting for hierarchy preload...');
+            await chrome.runtime.sendMessage({ action: 'preloadFullHierarchy' });
+
+            // Reload cache after preload completes
+            const newCache = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
+            if (newCache && newCache.lists) {
+                console.log('[Modal] Preload complete!', newCache.lists.length, 'lists loaded');
+                this.hierarchy.allLists = newCache.lists;
+            }
+
         } catch (error) {
             console.error('[Modal] Failed to load hierarchy:', error);
         }
     }
 
-    async loadAllLists(): Promise<void> {
-        const allLists: ListItem[] = [];
-        console.log('[Modal] Loading lists for', this.hierarchy.spaces.length, 'spaces...');
+    async loadSpaceLists(space: Space): Promise<ListItem[]> {
+        const spaceColor = space.color || '#7B68EE';
+        const spaceAvatar = space.avatar ? space.avatar.url : null;
+        const lists: ListItem[] = [];
 
-        for (const space of this.hierarchy.spaces) {
-            const spaceColor = space.color || '#7B68EE';
-            const spaceAvatar = space.avatar ? space.avatar.url : null;
+        try {
+            // Load direct lists in space
+            const listsResult = await chrome.runtime.sendMessage({
+                action: 'getLists', spaceId: space.id, folderId: null
+            }) as ListsResponse;
 
-            try {
-                console.log('[Modal] Loading lists for space:', space.name, space.id);
-                const listsResult = await chrome.runtime.sendMessage({
-                    action: 'getLists', spaceId: space.id, folderId: null
-                }) as ListsResponse;
-                console.log('[Modal] Space', space.name, 'lists:', listsResult);
-
-                if (listsResult && listsResult.lists) {
-                    listsResult.lists.forEach(list => {
-                        allLists.push({
-                            id: list.id,
-                            name: list.name,
-                            path: `${space.name} > ${list.name}`,
-                            spaceName: space.name,
-                            spaceColor: spaceColor,
-                            spaceAvatar: spaceAvatar
-                        });
+            if (listsResult && listsResult.lists) {
+                listsResult.lists.forEach(list => {
+                    lists.push({
+                        id: list.id,
+                        name: list.name,
+                        path: `${space.name} > ${list.name}`,
+                        spaceName: space.name,
+                        spaceColor: spaceColor,
+                        spaceAvatar: spaceAvatar
                     });
-                }
+                });
+            }
 
-                const foldersResult = await chrome.runtime.sendMessage({
-                    action: 'getFolders', spaceId: space.id
-                }) as FoldersResponse;
+            // Load folders and their lists
+            const foldersResult = await chrome.runtime.sendMessage({
+                action: 'getFolders', spaceId: space.id
+            }) as FoldersResponse;
 
-                if (foldersResult && foldersResult.folders) {
-                    for (const folder of foldersResult.folders) {
-                        const folderLists = await chrome.runtime.sendMessage({
-                            action: 'getLists', folderId: folder.id
-                        }) as ListsResponse;
-                        if (folderLists && folderLists.lists) {
-                            folderLists.lists.forEach(list => {
-                                allLists.push({
-                                    id: list.id,
-                                    name: list.name,
-                                    path: `${space.name} > ${folder.name} > ${list.name}`,
-                                    spaceName: space.name,
-                                    folderName: folder.name,
-                                    spaceColor: spaceColor,
-                                    spaceAvatar: spaceAvatar
-                                });
+            if (foldersResult && foldersResult.folders) {
+                for (const folder of foldersResult.folders) {
+                    const folderLists = await chrome.runtime.sendMessage({
+                        action: 'getLists', folderId: folder.id
+                    }) as ListsResponse;
+                    if (folderLists && folderLists.lists) {
+                        folderLists.lists.forEach(list => {
+                            lists.push({
+                                id: list.id,
+                                name: list.name,
+                                path: `${space.name} > ${folder.name} > ${list.name}`,
+                                spaceName: space.name,
+                                folderName: folder.name,
+                                spaceColor: spaceColor,
+                                spaceAvatar: spaceAvatar
                             });
-                        }
+                        });
                     }
                 }
-            } catch (e) {
-                console.error('Error loading lists:', e);
             }
+        } catch (e) {
+            console.error('[Modal] Error loading lists for space:', space.name, e);
         }
 
-        this.hierarchy.allLists = allLists;
+        return lists;
     }
 
     async loadDefaultList(): Promise<void> {
@@ -810,26 +854,13 @@ class TaskModal {
 
             if (storage.defaultListConfig && storage.defaultListConfig.listId) {
                 const config = storage.defaultListConfig;
-                const savedList = this.hierarchy.allLists.find(l => l.id === config.listId);
-
-                if (savedList) {
-                    console.log('[Modal] Pre-selecting saved list:', savedList.name);
-                    this.selectLocation(savedList.id, savedList.path);
-                } else if (storage.defaultList) {
-                    // Fallback: try to find by ID only
-                    const listById = this.hierarchy.allLists.find(l => l.id === storage.defaultList);
-                    if (listById) {
-                        console.log('[Modal] Pre-selecting list by ID:', listById.name);
-                        this.selectLocation(listById.id, listById.path);
-                    }
-                }
+                // Use stored path directly since allLists is not pre-loaded
+                console.log('[Modal] Pre-selecting saved list:', config.listName || config.listId);
+                this.selectLocation(config.listId, config.path || config.listName || config.listId);
             } else if (storage.defaultList) {
-                // Old format - just the list ID
-                const listById = this.hierarchy.allLists.find(l => l.id === storage.defaultList);
-                if (listById) {
-                    console.log('[Modal] Pre-selecting list (legacy format):', listById.name);
-                    this.selectLocation(listById.id, listById.path);
-                }
+                // Old format - just the list ID, use it directly
+                console.log('[Modal] Pre-selecting list by ID (legacy):', storage.defaultList);
+                this.selectLocation(storage.defaultList, storage.defaultList);
             }
         } catch (error) {
             console.error('[Modal] Error loading default list:', error);
@@ -840,17 +871,29 @@ class TaskModal {
         const dropdown = this.modal!.querySelector('.cu-location-dropdown') as HTMLElement;
         const resultsContainer = this.modal!.querySelector('.cu-location-results') as HTMLElement;
 
-        if (!query) {
+        if (!query || query.length < 2) {
             dropdown.classList.add('hidden');
             return;
         }
 
+        // Instant search in cached allLists
         const lowerQuery = query.toLowerCase();
         const filtered = this.hierarchy.allLists.filter(list =>
             list.name.toLowerCase().includes(lowerQuery) ||
             list.path.toLowerCase().includes(lowerQuery)
         );
 
+        // If no cache loaded yet, show message
+        if (this.hierarchy.allLists.length === 0) {
+            resultsContainer.innerHTML = '<p class="cu-hint">Loading lists... please wait</p>';
+            dropdown.classList.remove('hidden');
+            return;
+        }
+
+        this.renderSearchResults(filtered, query, dropdown, resultsContainer);
+    }
+
+    renderSearchResults(filtered: ListItem[], query: string, dropdown: HTMLElement, resultsContainer: HTMLElement): void {
         if (filtered.length > 0) {
             resultsContainer.innerHTML = filtered.slice(0, 15).map(list => {
                 const avatar = list.spaceAvatar
@@ -876,7 +919,7 @@ class TaskModal {
 
             dropdown.classList.remove('hidden');
         } else {
-            resultsContainer.innerHTML = '<p class="cu-hint">No lists found</p>';
+            resultsContainer.innerHTML = '<p class="cu-hint">No lists found. Try another search term.</p>';
             dropdown.classList.remove('hidden');
         }
     }
@@ -1119,11 +1162,13 @@ class TaskModal {
 
             if (timeEstimate) taskData.time_estimate = timeEstimate;
 
+            const attachWithFiles = (this.modal!.querySelector('#cu-attach-files') as HTMLInputElement).checked;
             const response = await chrome.runtime.sendMessage({
                 action: 'createTaskFull',
                 listId: this.selectedListId,
                 taskData: taskData,
                 emailData: (this.modal!.querySelector('#cu-attach-email') as HTMLInputElement).checked ? this.emailData : null,
+                attachWithFiles: attachWithFiles,
                 timeTracked: timeTracked,
                 teamId: this.teamId
             }) as TaskResult;
@@ -1284,6 +1329,16 @@ class TaskModal {
                 tasks = response.tasks;
             }
 
+            // Filter results locally - only keep tasks that actually contain the search words
+            const searchWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+            if (searchWords.length > 0 && !taskId) {
+                tasks = tasks.filter(task => {
+                    const taskNameLower = task.name.toLowerCase();
+                    // Task must contain at least one of the search words
+                    return searchWords.some(word => taskNameLower.includes(word));
+                });
+            }
+
             if (exactMatch) {
                 tasks = tasks.filter(t => t.id !== exactMatch!.id);
                 tasks.unshift(exactMatch);
@@ -1291,8 +1346,16 @@ class TaskModal {
 
             const lowerQuery = (taskId || query).toLowerCase();
             tasks.sort((a, b) => {
+                // Exact ID match first
                 if (a.id.toLowerCase() === lowerQuery) return -1;
                 if (b.id.toLowerCase() === lowerQuery) return 1;
+
+                // Then tasks containing more search words
+                const aMatches = searchWords.filter(w => a.name.toLowerCase().includes(w)).length;
+                const bMatches = searchWords.filter(w => b.name.toLowerCase().includes(w)).length;
+                if (aMatches !== bMatches) return bMatches - aMatches;
+
+                // Then ID matches
                 if (a.id.toLowerCase().includes(lowerQuery) && !b.id.toLowerCase().includes(lowerQuery)) return -1;
                 if (b.id.toLowerCase().includes(lowerQuery) && !a.id.toLowerCase().includes(lowerQuery)) return 1;
                 return 0;

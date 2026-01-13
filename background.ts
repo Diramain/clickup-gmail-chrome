@@ -34,6 +34,8 @@ interface StorageKeys {
     EMAIL_TASKS: string;
     TEAMS: string;
     USER: string;
+    HIERARCHY_CACHE: string;
+    EMAIL_TASKS_SYNC: string;
 }
 
 interface OAuthConfig {
@@ -65,6 +67,7 @@ interface CreateTaskFullMessage {
     listId: string;
     taskData: CreateTaskPayload;
     emailData?: EmailData;
+    attachWithFiles?: boolean;
     timeTracked?: number;
     teamId?: string;
 }
@@ -85,7 +88,9 @@ const STORAGE_KEYS: StorageKeys = {
     DEFAULT_LIST: 'defaultList',
     EMAIL_TASKS: 'emailTaskMappings',
     TEAMS: 'cachedTeams',
-    USER: 'cachedUser'
+    USER: 'cachedUser',
+    HIERARCHY_CACHE: 'hierarchyCache',
+    EMAIL_TASKS_SYNC: 'emailTasksSync'
 };
 
 const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
@@ -185,6 +190,18 @@ async function handleMessage(
         case 'testTokenRefresh':
             return await testTokenRefresh();
 
+        case 'preloadFullHierarchy':
+            return await preloadFullHierarchy();
+
+        case 'getHierarchyCache':
+            return await getHierarchyCache();
+
+        case 'syncEmailTasks':
+            return await syncEmailTasks(message.days || data?.days || 30);
+
+        case 'getEmailTasksSyncStatus':
+            return await getEmailTasksSyncStatus();
+
         default:
             console.log('[ClickUp] Unknown action:', action);
             return { error: 'Unknown action' };
@@ -264,6 +281,9 @@ async function startOAuthFlow(): Promise<{ success: boolean; user?: ClickUpUserR
             clickupAPI = new ClickUpAPIWrapper(tokenData.access_token);
             const user = await clickupAPI.getUser();
             await chrome.storage.local.set({ [STORAGE_KEYS.USER]: user });
+
+            // Pre-load hierarchy in background (don't await)
+            preloadFullHierarchy().catch(e => console.error('[ClickUp] Background preload failed:', e));
 
             return { success: true, user };
         }
@@ -450,6 +470,277 @@ async function searchTasks(query: string): Promise<ClickUpTasksResponse> {
 }
 
 // ============================================================================
+// Hierarchy Cache Functions
+// ============================================================================
+
+interface CachedListItem {
+    id: string;
+    name: string;
+    path: string;
+    spaceName: string;
+    folderName?: string;
+    spaceColor: string;
+    spaceAvatar: string | null;
+}
+
+interface HierarchyCacheData {
+    lists: CachedListItem[];
+    spaces: Array<{ id: string; name: string; color?: string; avatar?: { url: string } | null }>;
+    members: any[];
+    teamId: string;
+    timestamp: number;
+}
+
+async function preloadFullHierarchy(): Promise<{ success: boolean; listCount: number }> {
+    console.log('[ClickUp] Starting hierarchy preload...');
+
+    try {
+        await ensureAPI();
+
+        // Get teams
+        const teamsResult = await clickupAPI!.getTeams();
+        if (!teamsResult.teams || teamsResult.teams.length === 0) {
+            return { success: false, listCount: 0 };
+        }
+
+        const team = teamsResult.teams[0];
+        const teamId = team.id;
+        const members = team.members || [];
+
+        // Get spaces
+        const spacesResult = await clickupAPI!.getSpaces(teamId);
+        const spaces = spacesResult.spaces || [];
+
+        console.log('[ClickUp] Preloading lists for', spaces.length, 'spaces...');
+
+        const allLists: CachedListItem[] = [];
+
+        for (const space of spaces) {
+            const spaceColor = (space as any).color || '#7B68EE';
+            const spaceAvatar = (space as any).avatar?.url || null;
+
+            try {
+                // Get direct lists in space
+                const listsResult = await clickupAPI!.getListsInSpace(space.id);
+                if (listsResult.lists) {
+                    for (const list of listsResult.lists) {
+                        allLists.push({
+                            id: list.id,
+                            name: list.name,
+                            path: `${space.name} > ${list.name}`,
+                            spaceName: space.name,
+                            spaceColor,
+                            spaceAvatar
+                        });
+                    }
+                }
+
+                // Get folders and their lists
+                const foldersResult = await clickupAPI!.getFolders(space.id);
+                if (foldersResult.folders) {
+                    for (const folder of foldersResult.folders) {
+                        const folderLists = await clickupAPI!.getListsInFolder(folder.id);
+                        if (folderLists.lists) {
+                            for (const list of folderLists.lists) {
+                                allLists.push({
+                                    id: list.id,
+                                    name: list.name,
+                                    path: `${space.name} > ${folder.name} > ${list.name}`,
+                                    spaceName: space.name,
+                                    folderName: folder.name,
+                                    spaceColor,
+                                    spaceAvatar
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (err: unknown) {
+                console.error('[ClickUp] Error loading space lists:', space.name, err);
+            }
+        }
+
+        // Store in cache
+        const cacheData: HierarchyCacheData = {
+            lists: allLists,
+            spaces: spaces.map(s => ({
+                id: s.id,
+                name: s.name,
+                color: (s as any).color,
+                avatar: (s as any).avatar
+            })),
+            members,
+            teamId,
+            timestamp: Date.now()
+        };
+
+        await chrome.storage.local.set({ [STORAGE_KEYS.HIERARCHY_CACHE]: cacheData });
+        console.log('[ClickUp] Hierarchy preload complete:', allLists.length, 'lists cached');
+
+        return { success: true, listCount: allLists.length };
+    } catch (error: unknown) {
+        console.error('[ClickUp] Hierarchy preload failed:', error);
+        return { success: false, listCount: 0 };
+    }
+}
+
+async function getHierarchyCache(): Promise<HierarchyCacheData | null> {
+    const data = await chrome.storage.local.get(STORAGE_KEYS.HIERARCHY_CACHE);
+    return data[STORAGE_KEYS.HIERARCHY_CACHE] || null;
+}
+
+// ============================================================================
+// Email Tasks Sync Functions
+// ============================================================================
+
+interface EmailTasksSyncData {
+    lastSync: number;
+    foundCount: number;
+    days: number;
+}
+
+async function syncEmailTasks(days: number): Promise<{ success: boolean; foundCount: number }> {
+    console.log('[ClickUp] Starting email tasks sync for last', days, 'days...');
+
+    try {
+        await ensureAPI();
+
+        if (!cachedTeams) {
+            cachedTeams = await clickupAPI!.getTeams();
+        }
+        const teamId = cachedTeams.teams[0]?.id;
+        if (!teamId) return { success: false, foundCount: 0 };
+
+        // Calculate date range
+        const dateFrom = Date.now() - (days * 24 * 60 * 60 * 1000);
+        console.log('[ClickUp] Searching tasks updated since:', new Date(dateFrom).toISOString());
+
+        // Fetch tasks updated after dateFrom
+        const tasks = await clickupAPI!.getRecentTasks(teamId, dateFrom);
+        console.log('[ClickUp] Fetched', tasks.length, 'recent tasks');
+
+        // Get existing mappings
+        const storageData = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASKS);
+        const mappings = (storageData[STORAGE_KEYS.EMAIL_TASKS] || {}) as Record<string, EmailTaskMapping[]>;
+
+        let foundCount = 0;
+
+        // Parse thread IDs from task descriptions/comments
+        for (const task of tasks) {
+            // First check task description for thread ID
+            let threadIdMatch = extractThreadId(task);
+
+            // If not found in description, check comments
+            if (!threadIdMatch) {
+                try {
+                    const comments = await clickupAPI!.getTaskComments(task.id);
+                    for (const comment of comments) {
+                        const match = extractThreadIdFromText(comment.comment_text || '');
+                        if (match) {
+                            threadIdMatch = match;
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    console.log('[ClickUp] Error fetching comments for task:', task.id);
+                }
+            }
+
+            if (threadIdMatch) {
+                // Add to mappings if not already there
+                if (!mappings[threadIdMatch]) {
+                    mappings[threadIdMatch] = [];
+                }
+
+                const exists = mappings[threadIdMatch].find(t => t.id === task.id);
+                if (!exists) {
+                    mappings[threadIdMatch].push({
+                        id: task.id,
+                        name: task.name,
+                        url: task.url,
+                        status: task.status?.status || 'unknown',
+                        createdAt: Date.now()
+                    });
+                    foundCount++;
+                    console.log('[ClickUp] Found linked task:', task.id, '-> thread:', threadIdMatch);
+                }
+            }
+        }
+
+        // Save updated mappings
+        await chrome.storage.local.set({ [STORAGE_KEYS.EMAIL_TASKS]: mappings });
+
+        // Save sync status
+        const syncData: EmailTasksSyncData = {
+            lastSync: Date.now(),
+            foundCount,
+            days
+        };
+        await chrome.storage.local.set({ [STORAGE_KEYS.EMAIL_TASKS_SYNC]: syncData });
+
+        console.log('[ClickUp] Email tasks sync complete. Found', foundCount, 'new links');
+        return { success: true, foundCount };
+
+    } catch (error) {
+        console.error('[ClickUp] Email tasks sync failed:', error);
+        return { success: false, foundCount: 0 };
+    }
+}
+
+function extractThreadId(task: any): string | null {
+    // Pattern: Thread ID: xxxxxxxxxxxx or threadId=xxxxxxxxxxxx
+    const patterns = [
+        /_Thread ID: ([a-f0-9]+)_/i,
+        /Thread ID: ([a-f0-9]+)/i,
+        /threadId=([a-f0-9]+)/i,
+        /inbox\/([a-f0-9]+)/i
+    ];
+
+    // Check task name
+    for (const pattern of patterns) {
+        const match = task.name?.match(pattern);
+        if (match) return match[1];
+    }
+
+    // Check description
+    for (const pattern of patterns) {
+        const match = task.description?.match(pattern);
+        if (match) return match[1];
+    }
+
+    // Check text_content
+    for (const pattern of patterns) {
+        const match = task.text_content?.match(pattern);
+        if (match) return match[1];
+    }
+
+    return null;
+}
+
+function extractThreadIdFromText(text: string): string | null {
+    if (!text) return null;
+
+    const patterns = [
+        /_Thread ID: ([a-f0-9]+)_/i,
+        /Thread ID: ([a-f0-9]+)/i,
+        /threadId=([a-f0-9]+)/i,
+        /inbox\/([a-f0-9]+)/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return match[1];
+    }
+
+    return null;
+}
+
+async function getEmailTasksSyncStatus(): Promise<EmailTasksSyncData | null> {
+    const data = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASKS_SYNC);
+    return data[STORAGE_KEYS.EMAIL_TASKS_SYNC] || null;
+}
+
+// ============================================================================
 // Task Creation Functions
 // ============================================================================
 
@@ -467,7 +758,7 @@ async function createTaskFromEmail(emailData: EmailData): Promise<ClickUpTask> {
 
     const taskData: CreateTaskPayload = {
         name: emailData.subject || 'Email Task',
-        description: `📧 **Email from:** ${emailData.from}\n\n`
+        description: `📧 **Email from:** ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})\n\n_Thread ID: ${emailData.threadId}_`
     };
 
     const task = await clickupAPI!.createTask(defaultList, taskData);
@@ -529,6 +820,13 @@ async function createTaskFull(message: CreateTaskFullMessage): Promise<ClickUpTa
         throw new Error('No list selected');
     }
 
+    // Append Thread ID to description for efficient sync
+    if (emailData?.threadId) {
+        const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
+        const threadIdFooter = `\n\n---\n🔗 [Ver email original en Gmail](${gmailUrl})\n_Thread ID: ${emailData.threadId}_`;
+        taskData.description = (taskData.description || '') + threadIdFooter;
+    }
+
     const task = await clickupAPI!.createTask(listId, taskData);
 
     if (emailData?.threadId) {
@@ -545,6 +843,19 @@ async function createTaskFull(message: CreateTaskFullMessage): Promise<ClickUpTa
                 await clickupAPI!.uploadAttachment(task.id, emailData.html, emailData.subject || 'Email', emailData);
             } catch (e) {
                 console.error('[ClickUp] Failed to upload attachment:', e);
+            }
+        }
+
+        // Upload email file attachments if enabled
+        if (message.attachWithFiles && emailData.attachments && emailData.attachments.length > 0) {
+            console.log('[ClickUp] Uploading', emailData.attachments.length, 'email attachments...');
+            for (const attachment of emailData.attachments) {
+                try {
+                    await clickupAPI!.uploadFileFromUrl(task.id, attachment.url, attachment.filename, attachment.mimeType);
+                    console.log('[ClickUp] Uploaded attachment:', attachment.filename);
+                } catch (e) {
+                    console.error('[ClickUp] Failed to upload file attachment:', attachment.filename, e);
+                }
             }
         }
 
@@ -773,6 +1084,21 @@ class ClickUpAPIWrapper {
         return this.request(`/team/${teamId}/task?query=${encodeURIComponent(query)}`);
     }
 
+    async getRecentTasks(teamId: string, dateFrom: number): Promise<any[]> {
+        // Fetch tasks updated after dateFrom
+        // ClickUp API uses milliseconds timestamp
+        const result = await this.request(
+            `/team/${teamId}/task?include_closed=true&date_updated_gt=${dateFrom}&page=0`
+        );
+        console.log('[ClickUp] getRecentTasks API response:', JSON.stringify(result).substring(0, 500));
+        return result.tasks || [];
+    }
+
+    async getTaskComments(taskId: string): Promise<any[]> {
+        const result = await this.request(`/task/${taskId}/comment`);
+        return result.comments || [];
+    }
+
     async uploadAttachment(
         taskId: string,
         html: string,
@@ -796,6 +1122,42 @@ class ClickUpAPIWrapper {
             });
             formData.append('email', emailLinkData);
         }
+
+        const response = await fetch(`${CLICKUP_API_BASE}/task/${taskId}/attachment`, {
+            method: 'POST',
+            headers: { 'Authorization': this.token },
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Upload failed: ${response.status}`);
+        }
+
+        return response.json();
+    }
+
+    async uploadFileFromUrl(
+        taskId: string,
+        fileUrl: string,
+        filename: string,
+        mimeType: string
+    ): Promise<any> {
+        console.log('[ClickUp] Downloading file:', filename, 'from:', fileUrl.substring(0, 100));
+
+        // Download the file from the URL
+        const fileResponse = await fetch(fileUrl, {
+            credentials: 'include' // Include cookies for Gmail auth
+        });
+
+        if (!fileResponse.ok) {
+            throw new Error(`Failed to download file: ${fileResponse.status}`);
+        }
+
+        const fileBlob = await fileResponse.blob();
+
+        // Upload to ClickUp
+        const formData = new FormData();
+        formData.append('attachment', fileBlob, filename);
 
         const response = await fetch(`${CLICKUP_API_BASE}/task/${taskId}/attachment`, {
             method: 'POST',

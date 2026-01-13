@@ -118,6 +118,31 @@
                 <button id="clearDefaultList" class="btn btn-link btn-small hidden">🗑️ Clear default list</button>
             </div>
 
+            <div class="card sync-card">
+                <h3>📦 List Cache</h3>
+                <p class="help-text" id="syncStatus">Pre-load lists for faster task creation</p>
+                <button id="syncLists" class="btn btn-primary">
+                    <span class="btn-text">🔄 Sync Lists</span>
+                    <span class="spinner hidden"></span>
+                </button>
+            </div>
+
+            <div class="card sync-card">
+                <h3>📧 Email Tasks</h3>
+                <p class="help-text" id="emailSyncStatus">Sync tasks linked to emails</p>
+                <div class="sync-options">
+                    <select id="emailSyncDays" class="select-inline">
+                        <option value="30">Last 30 days</option>
+                        <option value="60">Last 60 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                    <button id="syncEmailTasks" class="btn btn-primary btn-small">
+                        <span class="btn-text">🔄 Sync</span>
+                        <span class="spinner hidden"></span>
+                    </button>
+                </div>
+            </div>
+
             <!-- Dev Tools -->
             <div class="card dev-tools">
                 <h3>🔧 Dev Tools</h3>
