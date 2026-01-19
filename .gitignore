@@ -29,8 +29,8 @@ Thumbs.db
 .env
 .env.local
 
-# Lock files (regenerated on install)
-package-lock.json
+# Lock files - keep for CI reproducibility
+# package-lock.json
 
 # Coverage
 coverage/
