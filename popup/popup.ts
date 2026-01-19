@@ -1,7 +1,12 @@
 /**
  * ClickUp Gmail Chrome - Popup Script
- * TypeScript version
+ * TypeScript version with Tab Modules
  */
+
+// Tab Modules
+import { tasksTab } from './tabs/tasks.tab';
+import { trackingTab } from './tabs/tracking.tab';
+import { configTab } from './tabs/config.tab';
 
 // ============================================================================
 // Types
@@ -48,6 +53,37 @@ interface TestResult {
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ============================================================================
+// Tab Navigation
+// ============================================================================
+
+function initTabNavigation(): void {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = (btn as HTMLElement).dataset.tab;
+            if (!tabId) return;
+
+            // Update button states
+            tabButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Update tab content
+            tabContents.forEach(content => {
+                if ((content as HTMLElement).id === `tab-${tabId}`) {
+                    content.classList.remove('hidden');
+                    content.classList.add('active');
+                } else {
+                    content.classList.add('hidden');
+                    content.classList.remove('active');
+                }
+            });
+        });
+    });
+}
 
 async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
@@ -217,11 +253,667 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         }
     }
 
-    // Load teams
+    // Initialize tab navigation
+    initTabNavigation();
+
+    // DBA-H1 & DM-H1: Initialize data management buttons
+    initDataManagement();
+
+    // ========== TASKS TAB HANDLERS ==========
+
+    // Task Search
+    const taskSearch = document.getElementById('taskSearch') as HTMLInputElement;
+    const searchResults = document.getElementById('searchResults') as HTMLElement;
+    let searchTimeout: ReturnType<typeof setTimeout>;
+
+    taskSearch?.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const query = taskSearch.value.trim();
+
+        if (query.length < 2) {
+            searchResults.innerHTML = '';
+            return;
+        }
+
+        searchResults.innerHTML = '<p class="hint">Searching...</p>';
+        searchTimeout = setTimeout(async () => {
+            try {
+                const result = await sendMessage<{ tasks: any[] }>({
+                    action: 'searchTasks',
+                    data: { query }
+                });
+
+                if (result?.tasks?.length > 0) {
+                    searchResults.innerHTML = result.tasks.slice(0, 5).map(task => `
+                        <div class="search-result-item" data-url="${task.url}">
+                            <span class="task-name">${task.name}</span>
+                            <span class="task-id">${task.id}</span>
+                        </div>
+                    `).join('');
+
+                    searchResults.querySelectorAll('.search-result').forEach(el => {
+                        el.addEventListener('click', () => {
+                            window.open((el as HTMLElement).dataset.url, '_blank');
+                        });
+                    });
+                } else {
+                    searchResults.innerHTML = '<p class="hint">No tasks found</p>';
+                }
+            } catch (e) {
+                searchResults.innerHTML = '<p class="hint">Search error</p>';
+            }
+        }, 300);
+    });
+
+    // Quick Create Button
+    const quickCreateBtn = document.getElementById('quickCreateTask');
+    const quickCreateForm = document.getElementById('quickCreateForm');
+    const cancelQuickCreate = document.getElementById('cancelQuickCreate');
+
+    quickCreateBtn?.addEventListener('click', () => {
+        quickCreateForm?.classList.toggle('hidden');
+    });
+
+    cancelQuickCreate?.addEventListener('click', () => {
+        quickCreateForm?.classList.add('hidden');
+    });
+
+    // List Search
+    const listSearch = document.getElementById('listSearch') as HTMLInputElement;
+    const listSearchResults = document.getElementById('listSearchResults') as HTMLElement;
+    let listSearchTimeout: ReturnType<typeof setTimeout>;
+    let selectedListId: string | null = null;
+
+    listSearch?.addEventListener('input', () => {
+        clearTimeout(listSearchTimeout);
+        const query = listSearch.value.trim().toLowerCase();
+
+        if (query.length < 1) {
+            listSearchResults.innerHTML = '';
+            return;
+        }
+
+        listSearchResults.innerHTML = '<p class="hint">Searching...</p>';
+        listSearchTimeout = setTimeout(async () => {
+            try {
+                // Get cached lists from storage
+                const storage = await chrome.storage.local.get(['hierarchyCache']);
+                const lists = storage.hierarchyCache?.lists || [];
+
+                const filtered = lists.filter((list: any) =>
+                    list.name.toLowerCase().includes(query) ||
+                    (list.path && list.path.toLowerCase().includes(query))
+                ).slice(0, 10);
+
+                if (filtered.length > 0) {
+                    listSearchResults.innerHTML = filtered.map((list: any) => `
+                        <div class="search-result-item" data-id="${list.id}" data-name="${list.name}">
+                            <span class="task-name">${list.name}</span>
+                            <span class="task-id" style="font-size: 10px; color: #888;">${list.path || list.spaceName}</span>
+                        </div>
+                    `).join('');
+
+                    listSearchResults.querySelectorAll('.search-result-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            const listEl = el as HTMLElement;
+                            selectedListId = listEl.dataset.id!;
+                            listSearch.value = listEl.dataset.name!;
+                            listSearchResults.innerHTML = '';
+
+                            // Enable create button if name is also present
+                            const nameInput = document.getElementById('newTaskName') as HTMLInputElement;
+                            const createBtn = document.getElementById('createTask') as HTMLButtonElement;
+                            if (nameInput.value.trim()) {
+                                createBtn.disabled = false;
+                            }
+                        });
+                    });
+                } else {
+                    listSearchResults.innerHTML = '<p class="hint">No lists found</p>';
+                }
+            } catch (e) {
+                console.error('List search error:', e);
+                listSearchResults.innerHTML = '<p class="hint">Search error</p>';
+            }
+        }, 300);
+    });
+
+    // Auto-refresh search when hierarchy is loaded in background
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes.hierarchyCache) {
+            console.log('[Popup] Hierarchy updated, refreshing search...');
+            // If user has typed something, re-trigger search
+            if (listSearch && listSearch.value.trim().length >= 1) {
+                listSearch.dispatchEvent(new Event('input'));
+            }
+        }
+    });
+
+    // Create Task Handler
+    const createTaskBtn = document.getElementById('createTask') as HTMLButtonElement;
+    createTaskBtn?.addEventListener('click', async () => {
+        const nameInput = document.getElementById('newTaskName') as HTMLInputElement;
+        const descInput = document.getElementById('newTaskDescription') as HTMLTextAreaElement;
+
+        if (!selectedListId) {
+            alert('Please select a destination list');
+            return;
+        }
+
+        createTaskBtn.disabled = true;
+        createTaskBtn.textContent = 'Creating...';
+
+        try {
+            await sendMessage({
+                action: 'createTaskSimple',
+                data: {
+                    listId: selectedListId,
+                    name: nameInput.value,
+                    description: descInput.value
+                }
+            });
+
+            // Success feedback
+            createTaskBtn.textContent = '✅ Created!';
+            setTimeout(() => {
+                quickCreateForm?.classList.add('hidden');
+                nameInput.value = '';
+                descInput.value = '';
+                listSearch.value = '';
+                selectedListId = null;
+                createTaskBtn.textContent = 'Create Task';
+            }, 1000);
+
+        } catch (e: any) {
+            alert('Error creating task: ' + e.message);
+            createTaskBtn.disabled = false;
+            createTaskBtn.textContent = 'Create Task';
+        }
+    });
+
+    // Enable/disable create button based on input
+    const newTaskName = document.getElementById('newTaskName') as HTMLInputElement;
+    newTaskName?.addEventListener('input', () => {
+        if (newTaskName.value.trim()) {
+            createTaskBtn.disabled = false;
+        } else {
+            createTaskBtn.disabled = true;
+        }
+    });
+
+    // Full Form Button - open modal (sends message to content script OR opens standalone)
+    const openModalBtn = document.getElementById('openTaskModal');
+    openModalBtn?.addEventListener('click', async () => {
+        // 1. Try to open modal in active Gmail tab
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+            // Function to open standalone modal
+            const openStandalone = () => {
+                chrome.windows.create({
+                    url: 'task-modal.html',
+                    type: 'popup',
+                    width: 600,
+                    height: 700
+                });
+            };
+
+            if (tabs[0]?.id && tabs[0].url?.includes('mail.google.com')) {
+                chrome.tabs.sendMessage(tabs[0].id, { action: 'openTaskModal' }, (response) => {
+                    if (chrome.runtime.lastError || !response) {
+                        console.log('Failed to open in Gmail, opening standalone window');
+                        openStandalone();
+                    } else {
+                        setTimeout(() => window.close(), 100);
+                    }
+                });
+            } else {
+                openStandalone();
+            }
+        } catch (e) {
+            console.error('Error opening modal:', e);
+            // Fallback
+            chrome.windows.create({
+                url: 'task-modal.html',
+                type: 'popup',
+                width: 600,
+                height: 700
+            });
+        }
+    });
+
+    // ========== TRACKING TAB HANDLERS ==========
+
+    // Track Task Search
+    const trackSearch = document.getElementById('trackTaskSearch') as HTMLInputElement;
+    const trackResults = document.getElementById('trackSearchResults') as HTMLElement;
+    const startTimerBtn = document.getElementById('startTimerBtn') as HTMLButtonElement;
+    let selectedTrackTask: { id: string; name: string } | null = null;
+    let trackSearchTimeout: ReturnType<typeof setTimeout>;
+
+    trackSearch?.addEventListener('input', () => {
+        clearTimeout(trackSearchTimeout);
+        const query = trackSearch.value.trim();
+
+        if (query.length < 2) {
+            trackResults.innerHTML = '';
+            return;
+        }
+
+        trackResults.innerHTML = '<p class="hint">Searching...</p>';
+        trackSearchTimeout = setTimeout(async () => {
+            try {
+                const result = await sendMessage<{ tasks: any[] }>({
+                    action: 'searchTasks',
+                    data: { query }
+                });
+
+                if (result?.tasks?.length > 0) {
+                    trackResults.innerHTML = result.tasks.slice(0, 5).map(task => `
+                        <div class="search-result-item" data-id="${task.id}" data-name="${task.name}">
+                            <span class="task-name">${task.name}</span>
+                        </div>
+                    `).join('');
+
+                    trackResults.querySelectorAll('.search-result-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            const taskEl = el as HTMLElement;
+                            selectedTrackTask = {
+                                id: taskEl.dataset.id!,
+                                name: taskEl.dataset.name!
+                            };
+                            trackSearch.value = selectedTrackTask.name;
+                            trackResults.innerHTML = '';
+                            startTimerBtn.disabled = false;
+                        });
+                    });
+                } else {
+                    trackResults.innerHTML = '<p class="hint">No tasks found</p>';
+                }
+            } catch (e) {
+                trackResults.innerHTML = '<p class="hint">Search error</p>';
+            }
+        }, 300);
+    });
+
+    // Start Timer Button
+    startTimerBtn?.addEventListener('click', async () => {
+        if (!selectedTrackTask) return;
+
+        try {
+            const teamId = await getTeamId();
+            if (!teamId) {
+                alert('No workspace selected. Please check Config.');
+                return;
+            }
+
+            startTimerBtn.disabled = true;
+            startTimerBtn.textContent = '⏳ Starting...';
+
+            await sendMessage({
+                action: 'startTimer',
+                data: {
+                    taskId: selectedTrackTask.id,
+                    teamId
+                }
+            });
+
+            startTimerBtn.textContent = '✅ Started!';
+            setTimeout(() => {
+                startTimerBtn.textContent = '▶️ Start Timer';
+                selectedTrackTask = null;
+                trackSearch.value = '';
+            }, 2000);
+        } catch (e) {
+            startTimerBtn.textContent = '❌ Error';
+            startTimerBtn.disabled = false;
+        } finally {
+            // Refresh timer display to show running timer
+            await loadRunningTimer();
+        }
+    });
+
+    // Stop Timer Button
+    const stopTimerBtn = document.getElementById('stopTimer');
+    stopTimerBtn?.addEventListener('click', async () => {
+        try {
+            const teamId = await getTeamId();
+            if (teamId) {
+                await sendMessage({ action: 'stopTimer', data: { teamId } });
+                await loadRunningTimer();
+            }
+        } catch (e) {
+            console.error('Stop timer error:', e);
+        }
+    });
+
+    // ========== AUTO-TRACKING TOGGLES ==========
+    const autoStartToggle = document.getElementById('autoStartToggle') as HTMLInputElement;
+    const autoStopToggle = document.getElementById('autoStopToggle') as HTMLInputElement;
+
+    // Load saved settings
+    chrome.storage.local.get(['autoStartTimer', 'autoStopTimer'], (result) => {
+        if (autoStartToggle) autoStartToggle.checked = result.autoStartTimer || false;
+        if (autoStopToggle) autoStopToggle.checked = result.autoStopTimer || false;
+    });
+
+    autoStartToggle?.addEventListener('change', () => {
+        chrome.storage.local.set({ autoStartTimer: autoStartToggle.checked });
+    });
+
+    autoStopToggle?.addEventListener('change', () => {
+        chrome.storage.local.set({ autoStopTimer: autoStopToggle.checked });
+    });
+
+    // ========== MANUAL TIME ENTRY ==========
+    const manualSearch = document.getElementById('manualTaskSearch') as HTMLInputElement;
+    const manualResults = document.getElementById('manualSearchResults') as HTMLElement;
+    const durationInput = document.getElementById('durationInput') as HTMLInputElement;
+    const addManualTimeBtn = document.getElementById('addManualTime') as HTMLButtonElement;
+    let selectedManualTask: { id: string; name: string } | null = null;
+    let manualSearchTimeout: ReturnType<typeof setTimeout>;
+
+    manualSearch?.addEventListener('input', () => {
+        clearTimeout(manualSearchTimeout);
+        const query = manualSearch.value.trim();
+
+        if (query.length < 2) {
+            manualResults.innerHTML = '';
+            return;
+        }
+
+        manualResults.innerHTML = '<p class="hint">Searching...</p>';
+        manualSearchTimeout = setTimeout(async () => {
+            try {
+                const result = await sendMessage<{ tasks: any[] }>({
+                    action: 'searchTasks',
+                    data: { query }
+                });
+
+                if (result?.tasks?.length > 0) {
+                    manualResults.innerHTML = result.tasks.slice(0, 5).map(task => `
+                        <div class="search-result-item" data-id="${task.id}" data-name="${task.name}">
+                            <span class="task-name">${task.name}</span>
+                        </div>
+                    `).join('');
+
+                    manualResults.querySelectorAll('.search-result-item').forEach(el => {
+                        el.addEventListener('click', () => {
+                            const taskEl = el as HTMLElement;
+                            selectedManualTask = {
+                                id: taskEl.dataset.id!,
+                                name: taskEl.dataset.name!
+                            };
+                            manualSearch.value = selectedManualTask.name;
+                            manualResults.innerHTML = '';
+                            checkManualEntryEnabled();
+                        });
+                    });
+                } else {
+                    manualResults.innerHTML = '<p class="hint">No tasks found</p>';
+                }
+            } catch (e) {
+                manualResults.innerHTML = '<p class="hint">Search error</p>';
+            }
+        }, 300);
+    });
+
+    durationInput?.addEventListener('input', () => checkManualEntryEnabled());
+
+    function checkManualEntryEnabled() {
+        if (addManualTimeBtn) {
+            addManualTimeBtn.disabled = !(selectedManualTask && durationInput?.value.trim());
+        }
+    }
+
+    addManualTimeBtn?.addEventListener('click', async () => {
+        if (!selectedManualTask || !durationInput?.value.trim()) return;
+
+        const duration = parseDuration(durationInput.value);
+        if (duration <= 0) {
+            alert('Invalid duration format. Use: 1h, 30m, 1h30m, or 1:30');
+            return;
+        }
+
+        try {
+            const teamId = await getTeamId();
+            if (!teamId) throw new Error('No team ID');
+
+            addManualTimeBtn.disabled = true;
+            addManualTimeBtn.textContent = '⏳ Adding...';
+
+            await sendMessage({
+                action: 'addTimeEntry',
+                data: {
+                    taskId: selectedManualTask.id,
+                    duration,
+                    teamId
+                }
+            });
+
+            addManualTimeBtn.textContent = '✅ Added!';
+            setTimeout(() => {
+                addManualTimeBtn.textContent = 'Add Time Entry';
+                selectedManualTask = null;
+                manualSearch.value = '';
+                durationInput.value = '';
+                loadTimeHistory();
+            }, 2000);
+        } catch (e) {
+            addManualTimeBtn.textContent = '❌ Error';
+            addManualTimeBtn.disabled = false;
+        }
+    });
+
+
+    // ========== RECENT ENTRIES ==========
+    async function loadTimeHistory() {
+        const container = document.getElementById('timeHistory');
+        if (!container) return;
+
+        try {
+            const teamId = await getTeamId();
+
+            if (!teamId) {
+                const storage = await chrome.storage.local.get(null); // Get everything for debug
+                console.warn('[Popup] No teamId found. Full storage:', storage);
+                // Force JSON stringify for user copy-paste
+                const storageStr = JSON.stringify(storage, null, 2);
+                container.innerHTML = `<p class="hint">Select a workspace in Config first.<br><small style="opacity:0.7">Debug: ${storageStr.slice(0, 100)}...</small></p>`;
+                console.log('[Popup] FULL STORAGE JSON:', storageStr);
+                return;
+            }
+
+            // BUG FIX: Request entries from last 7 days to get fresh data
+            const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+            const result = await sendMessage<any[]>({
+                action: 'getTimeEntries',
+                data: { teamId, start_date: sevenDaysAgo }
+            });
+
+            if (result?.length > 0) {
+                container.innerHTML = result.slice(0, 10).map(entry => `
+                    <div class="time-entry-item">
+                        <span class="entry-task">${entry.task?.name || 'Unknown Task'}</span>
+                        <span class="entry-duration">${formatDuration(entry.duration)}</span>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = '<p class="hint">No recent entries</p>';
+            }
+        } catch (e) {
+            console.error('[Popup] Error loading history:', e);
+            container.innerHTML = '<p class="hint">Could not load entries</p>';
+        }
+    }
+
+    function parseDuration(input: string): number {
+        const trimmed = input.trim().toLowerCase();
+        let totalMs = 0;
+
+        const hourMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*h/);
+        const minMatch = trimmed.match(/(\d+)\s*m/);
+        const colonMatch = trimmed.match(/^(\d+):(\d+)$/);
+
+        if (colonMatch) {
+            totalMs = (parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2])) * 60 * 1000;
+        } else {
+            if (hourMatch) totalMs += parseFloat(hourMatch[1]) * 60 * 60 * 1000;
+            if (minMatch) totalMs += parseInt(minMatch[1]) * 60 * 1000;
+        }
+
+        return totalMs;
+    }
+
+    function formatDuration(ms: number): string {
+        const hours = Math.floor(ms / (1000 * 60 * 60));
+        const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+    }
+
+    // Load time history on init - MOVED below loadTeams()
+    // loadTimeHistory();
+
+    // ========== LOAD RUNNING TIMER ==========
+    async function loadRunningTimer() {
+        console.log('[Timer] loadRunningTimer called at', new Date().toISOString());
+        // console.trace('[Timer] Caller Trace');
+
+        const runningTimerEl = document.getElementById('runningTimer');
+        const noTimerEl = document.getElementById('noTimer');
+        const timerTaskName = document.getElementById('timerTaskName');
+        const timerDisplay = document.getElementById('timerDisplay');
+
+        console.log('[Timer] Checking elements...', { runningTimerEl: !!runningTimerEl, noTimerEl: !!noTimerEl });
+
+        if (!runningTimerEl || !noTimerEl) return;
+
+        try {
+            const teamId = await getTeamId();
+
+            if (!teamId) {
+                console.log('[Timer] No teamId available (loadRunningTimer)');
+                return;
+            }
+
+            console.log('[Timer] Fetching running timer for team:', teamId);
+
+            // API returns TimeEntry or null directly
+            const timer = await sendMessage<any>({
+                action: 'getRunningTimer',
+                data: { teamId }
+            });
+
+            console.log('[Timer] API result:', JSON.stringify(timer));
+
+            // Check for timer with start timestamp (could be 'start' or 'at' field)
+            const startTime = timer?.start || timer?.at;
+            if (timer && startTime) {
+                noTimerEl.classList.add('hidden');
+                runningTimerEl.classList.remove('hidden');
+
+                if (timerTaskName) {
+                    timerTaskName.textContent = timer.task?.name || 'Running...';
+                }
+
+                // Start updating display - startTime is a timestamp string
+                updateTimerDisplay(parseInt(startTime));
+            } else {
+                runningTimerEl.classList.add('hidden');
+                noTimerEl.classList.remove('hidden');
+            }
+        } catch (e) {
+            console.error('[Timer] Error loading running timer:', e);
+        }
+    }
+
+    let timerInterval: ReturnType<typeof setInterval>;
+    function updateTimerDisplay(startTime: number) {
+        const timerDisplay = document.getElementById('timerDisplay');
+        if (!timerDisplay) return;
+
+        if (timerInterval) clearInterval(timerInterval);
+
+        const update = () => {
+            const elapsed = Date.now() - startTime;
+            const hours = Math.floor(elapsed / (1000 * 60 * 60));
+            const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((elapsed % (1000 * 60)) / 1000);
+
+            timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        };
+
+        update();
+        timerInterval = setInterval(update, 1000);
+    }
+
+    // Load teams FIRST to ensure teamId is available
+    console.log('[Popup] Calling loadTeams... at', new Date().toISOString());
     await loadTeams();
+    console.log('[Popup] loadTeams finished at', new Date().toISOString());
+
+    // THEN load timer and history
+    loadRunningTimer();
+    loadTimeHistory();
 
     // Load cache status (last sync time)
     await loadCacheStatus();
+
+    // Custom Field Config
+    const customFieldNameInput = document.getElementById('customFieldName') as HTMLInputElement;
+    const saveCustomFieldBtn = document.getElementById('saveCustomFieldConfig') as HTMLButtonElement;
+    const customFieldToggle = document.getElementById('useCustomFieldToggle') as HTMLInputElement;
+
+    // Load saved settings
+    chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId'], (data) => {
+        // 1. Load Field Name
+        if (data.threadIdField) {
+            customFieldNameInput.value = data.threadIdField;
+        } else {
+            customFieldNameInput.value = 'Gmail Thread ID';
+        }
+
+        // 2. Load Toggle State (Default: true)
+        const useField = data.useCustomFieldForThreadId !== false; // Default true if undefined
+        customFieldToggle.checked = useField;
+
+        // Update UI State
+        customFieldNameInput.disabled = !useField;
+        saveCustomFieldBtn.disabled = !useField;
+    });
+
+    // Toggle Handler
+    customFieldToggle.addEventListener('change', () => {
+        const isChecked = customFieldToggle.checked;
+        chrome.storage.local.set({ useCustomFieldForThreadId: isChecked }, () => {
+            // Show saved confirmation
+            const toggleLabel = customFieldToggle.closest('.toggle-row')?.querySelector('.toggle-label');
+            if (toggleLabel) {
+                const originalText = toggleLabel.textContent || '';
+                toggleLabel.innerHTML = `${originalText} <span style="color: #00c853; font-weight: bold;">✓ Saved</span>`;
+                setTimeout(() => {
+                    toggleLabel.textContent = originalText;
+                }, 2000);
+            }
+        });
+
+        // Update UI State
+        customFieldNameInput.disabled = !isChecked;
+        saveCustomFieldBtn.disabled = !isChecked;
+    });
+
+    saveCustomFieldBtn.addEventListener('click', () => {
+        const name = customFieldNameInput.value.trim();
+        if (name) {
+            chrome.storage.local.set({ threadIdField: name }, () => {
+                saveCustomFieldBtn.textContent = 'Saved ✓';
+                setTimeout(() => {
+                    saveCustomFieldBtn.textContent = 'Save Field Name';
+                }, 2000);
+            });
+        }
+    });
 
     // Sign out handler
     document.getElementById('signOut')!.addEventListener('click', async () => {
@@ -340,19 +1032,23 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     });
 }
 
+
 // ============================================================================
 // Team Loading
 // ============================================================================
 
 async function loadTeams(): Promise<void> {
     const teamSelect = document.getElementById('teamSelect') as HTMLSelectElement;
-    const spaceSelect = document.getElementById('spaceSelect') as HTMLSelectElement;
-    const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
 
     try {
         console.log('[Popup] Loading teams...');
         const teams = await sendMessage<{ teams: ClickUpTeam[] }>({ action: 'getTeams' });
         console.log('[Popup] Teams loaded:', teams);
+
+        // Cache teams to storage to ensure getTeamId can find them later
+        if (teams && teams.teams && teams.teams.length > 0) {
+            await chrome.storage.local.set({ cachedTeams: teams });
+        }
 
         if (!teams || !teams.teams || teams.teams.length === 0) {
             console.error('[Popup] No teams found');
@@ -367,68 +1063,40 @@ async function loadTeams(): Promise<void> {
             teamSelect.appendChild(option);
         });
 
-        // Check for saved default list and restore chain
-        const savedConfig = await chrome.storage.local.get(['defaultList', 'defaultListConfig']);
-        console.log('[Popup] Saved config:', savedConfig);
+        // Preferred Workspace Handling
+        const { teamId: savedTeamId } = await sendMessage<{ teamId: string }>({ action: 'getPreferredTeam' });
 
-        const clearBtn = document.getElementById('clearDefaultList') as HTMLButtonElement;
+        let initialTeamId = savedTeamId;
 
-        if (savedConfig.defaultListConfig) {
-            const config = savedConfig.defaultListConfig;
-            if (config.teamId) {
-                teamSelect.value = config.teamId;
-                await loadSpaces(config.teamId, config.spaceId, config.listId);
-                clearBtn.classList.remove('hidden');
-            }
+        // Auto-select if only one team exists and no preference saved (or preference matches)
+        if (teams.teams.length === 1 && !initialTeamId) {
+            initialTeamId = teams.teams[0].id;
+            console.log('[Popup] Single workspace detected, auto-selecting:', initialTeamId);
+            await sendMessage({ action: 'savePreferredTeam', data: { teamId: initialTeamId } });
         }
 
-        // Clear default list handler
-        clearBtn.addEventListener('click', async () => {
-            await chrome.storage.local.remove(['defaultList', 'defaultListConfig']);
-            teamSelect.value = '';
-            spaceSelect.classList.add('hidden');
-            spaceSelect.innerHTML = '<option value="">Select Space...</option>';
-            listSelect.classList.add('hidden');
-            listSelect.innerHTML = '<option value="">Select List...</option>';
-            clearBtn.classList.add('hidden');
-            showClearedIndicator();
-        });
+        if (initialTeamId) {
+            teamSelect.value = initialTeamId;
+        }
 
+        // Trigger preload if team is selected (from invalid state or fresh load)
+        if (teamSelect.value) {
+            sendMessage({ action: 'preloadFullHierarchy', data: { teamId: teamSelect.value } }).catch(console.error);
+        }
+
+        // Listener for changes
         teamSelect.addEventListener('change', async () => {
             const teamId = teamSelect.value;
             if (!teamId) return;
-            await loadSpaces(teamId);
-        });
 
-        spaceSelect.addEventListener('change', async () => {
-            const spaceId = spaceSelect.value;
-            if (!spaceId) return;
-            await loadLists(spaceId);
-        });
+            // Save preference
+            await sendMessage({ action: 'savePreferredTeam', data: { teamId } });
 
-        listSelect.addEventListener('change', async () => {
-            const listId = listSelect.value;
-            const listName = listSelect.options[listSelect.selectedIndex]?.text || '';
-            if (!listId) return;
+            showSavedIndicator(); // Reusing existing indicator logic (assumed global or create it)
 
-            // Save default list
-            await chrome.storage.local.set({
-                defaultList: listId,
-                defaultListConfig: {
-                    teamId: teamSelect.value,
-                    spaceId: spaceSelect.value,
-                    listId: listId,
-                    listName: listName
-                }
-            });
-
-            await sendMessage({ action: 'setDefaultList', data: { listId } });
-
-            listSelect.style.borderColor = '#00c853';
-            showSavedIndicator();
-            setTimeout(() => {
-                listSelect.style.borderColor = '';
-            }, 2000);
+            // Trigger Sync
+            console.log('[Popup] Workspace changed, preloading hierarchy...');
+            sendMessage({ action: 'preloadFullHierarchy', data: { teamId } }).catch(console.error);
         });
 
     } catch (error) {
@@ -503,30 +1171,45 @@ function showSavedIndicator(): void {
     const indicator = document.createElement('div');
     indicator.className = 'saved-indicator';
     indicator.textContent = '✓ Saved';
-    indicator.style.cssText = 'color:#00c853;font-size:12px;margin-top:5px;text-align:center;';
+    indicator.style.cssText = 'color:#00c853;font-size:12px;margin-top:5px;text-align:center;font-weight:bold;display:block;';
 
     const existing = document.querySelector('.saved-indicator');
     if (existing) existing.remove();
 
-    document.getElementById('listSelect')?.parentElement?.appendChild(indicator);
-    setTimeout(() => indicator.remove(), 3000);
-
-    // Show clear button
-    document.getElementById('clearDefaultList')?.classList.remove('hidden');
-}
-
-function showClearedIndicator(): void {
-    const indicator = document.createElement('div');
-    indicator.className = 'saved-indicator';
-    indicator.textContent = '🗑️ Cleared';
-    indicator.style.cssText = 'color:#ff9800;font-size:12px;margin-top:5px;text-align:center;';
-
-    const existing = document.querySelector('.saved-indicator');
-    if (existing) existing.remove();
-
-    document.getElementById('teamSelect')?.parentElement?.appendChild(indicator);
+    // Append to the active section or card
+    const teamSelect = document.getElementById('teamSelect');
+    teamSelect?.parentElement?.appendChild(indicator);
     setTimeout(() => indicator.remove(), 3000);
 }
+
+// ============================================================================
+// Global Helpers
+// ============================================================================
+
+async function getTeamId(): Promise<string | null> {
+    try {
+        // 1. Check Preferred Team in Storage
+        const store = await chrome.storage.local.get(['preferredTeamId', 'cachedTeams']);
+        if (store.preferredTeamId) return store.preferredTeamId;
+
+        // 2. Fallback to cached teams (single)
+        if (store.cachedTeams?.teams?.length > 0) {
+            return store.cachedTeams.teams[0].id;
+        }
+
+        // 3. Fallback: Check Active DOM Element (if applicable)
+        const teamSelect = document.getElementById('teamSelect') as HTMLSelectElement;
+        if (teamSelect && teamSelect.value) {
+            return teamSelect.value;
+        }
+
+        return null;
+    } catch (e) {
+        console.error('[Popup] Error getting teamId:', e);
+        return null;
+    }
+}
+
 
 // ============================================================================
 // Cache Status
@@ -602,6 +1285,81 @@ async function loadEmailTasksSyncStatus(): Promise<void> {
         }
     } catch (e) {
         status.textContent = 'Sync tasks linked to emails';
+    }
+}
+
+// ============================================================================
+// DBA-H1 & DM-H1: Data Management Functions
+// ============================================================================
+
+function initDataManagement(): void {
+    const exportBtn = document.getElementById('exportData');
+    const clearBtn = document.getElementById('clearData');
+    const dataStatus = document.getElementById('dataStatus');
+
+    if (exportBtn) {
+        exportBtn.addEventListener('click', async () => {
+            try {
+                // Get all stored data
+                const data = await chrome.storage.local.get(null);
+
+                // Filter out sensitive data
+                const exportData = {
+                    emailTaskMappings: data.emailTaskMappings || {},
+                    hierarchyCache: data.hierarchyCache || {},
+                    preferredTeamId: data.preferredTeamId,
+                    exportDate: new Date().toISOString(),
+                    version: '1.0'
+                };
+
+                // Create download
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `clickup-gmail-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                if (dataStatus) {
+                    dataStatus.textContent = '✅ Data exported successfully';
+                    dataStatus.style.color = '#00c853';
+                }
+            } catch (e) {
+                if (dataStatus) {
+                    dataStatus.textContent = '❌ Export failed: ' + (e instanceof Error ? e.message : String(e));
+                    dataStatus.style.color = '#ff5252';
+                }
+            }
+        });
+    }
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+            const confirmed = confirm('⚠️ This will delete all email-task mappings and cached data.\n\nYour OAuth credentials will NOT be deleted.\n\nContinue?');
+
+            if (confirmed) {
+                try {
+                    // Only remove non-auth data
+                    await chrome.storage.local.remove([
+                        'emailTaskMappings',
+                        'hierarchyCache',
+                        'cachedTeams',
+                        'cachedUser'
+                    ]);
+
+                    if (dataStatus) {
+                        dataStatus.textContent = '✅ Data cleared successfully';
+                        dataStatus.style.color = '#00c853';
+                    }
+                } catch (e) {
+                    if (dataStatus) {
+                        dataStatus.textContent = '❌ Clear failed: ' + (e instanceof Error ? e.message : String(e));
+                        dataStatus.style.color = '#ff5252';
+                    }
+                }
+            }
+        });
     }
 }
 

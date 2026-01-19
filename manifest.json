@@ -1,16 +1,19 @@
 {
     "manifest_version": 3,
     "name": "ClickUp Gmail Tracker",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Create ClickUp tasks directly from Gmail emails",
     "author": "Diramain",
     "permissions": [
         "storage",
-        "identity"
+        "identity",
+        "contextMenus",
+        "tabs"
     ],
     "host_permissions": [
         "https://api.clickup.com/*",
-        "https://mail.google.com/*"
+        "https://mail.google.com/*",
+        "https://*.clickup.com/*"
     ],
     "background": {
         "service_worker": "background.js",
@@ -24,7 +27,6 @@
             "js": [
                 "src/logger.js",
                 "src/gmail-adapter.js",
-                "src/modal.js",
                 "src/gmail-native.js"
             ],
             "css": [
@@ -32,6 +34,15 @@
                 "styles/modal.css"
             ],
             "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "https://*.clickup.com/*"
+            ],
+            "js": [
+                "src/clickup-tracker.js"
+            ],
+            "run_at": "document_start"
         }
     ],
     "action": {
@@ -52,7 +63,6 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "pageWorld.js",
                 "icons/*"
             ],
             "matches": [

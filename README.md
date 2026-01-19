@@ -20,6 +20,14 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails.
 - **Success Popup** - Quick link to view created task
 - **Task Search** - Find tasks by ID, URL, or name
 
+### Time Tracking
+- **Timer Controls** - Start/stop timer from popup
+- **Manual Entry** - Log time with ClickUp format (1h, 30m, 1:30)
+- **Recent Entries** - View 7-day time history
+- **Auto-Start** - Automatically start timer when opening a task on ClickUp.com
+- **Auto-Stop** - Automatically stop timer when leaving task view
+- **Toggle Settings** - Enable/disable auto-tracking per preference
+
 ### Performance
 - **List Cache** - Pre-load all spaces/folders/lists for instant modal loading
 - **Stale-While-Revalidate** - Use cached data while refreshing in background
@@ -75,13 +83,14 @@ clickup-gmail-chrome/
 ├── manifest.json          # Chrome MV3 manifest
 ├── background.ts          # Service worker (ClickUp API)
 ├── src/
+│   ├── clickup-tracker.ts # Auto time tracking on ClickUp.com
 │   ├── gmail-native.ts    # Gmail DOM integration
 │   ├── gmail-adapter.ts   # DOM abstraction layer
 │   ├── modal.ts           # Task creation modal
 │   ├── logger.ts          # Structured logging
 │   └── types/             # TypeScript definitions
 ├── popup/
-│   ├── popup.html
+│   ├── popup.html         # 3-tab UI (Tasks, Tracking, Config)
 │   ├── popup.ts
 │   └── popup.css
 ├── styles/

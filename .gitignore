@@ -6,6 +6,7 @@ dist/
 
 # Compiled TypeScript (generated from .ts files)
 background.js
+task-modal-entry.js
 popup/popup.js
 src/*.js
 

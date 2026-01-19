@@ -148,6 +148,20 @@ export interface ClickUpTasksResponse {
     tasks: ClickUpTask[];
 }
 
+export interface ClickUpCustomField {
+    id: string;
+    name: string;
+    type: string;
+    type_config: any;
+    date_created: string;
+    hide_from_guests: boolean;
+    required: boolean;
+}
+
+export interface ClickUpCustomFieldsResponse {
+    fields: ClickUpCustomField[];
+}
+
 // ============================================================================
 // Create Task Types
 // ============================================================================
@@ -256,11 +270,7 @@ export interface StorageData {
         clientSecret: string;
         redirectUrl: string;
     };
-    defaultList?: {
-        teamId: string;
-        spaceId: string;
-        listId: string;
-    };
+    preferredTeamId?: string; // Replaces defaultList
     emailTaskMappings?: Record<string, EmailTaskMapping[]>;
     cachedTeams?: ClickUpTeamsResponse;
     cachedUser?: ClickUpUserResponse;
@@ -286,23 +296,81 @@ export type MessageAction =
     | 'createTask'
     | 'createTaskFull'
     | 'createTaskFromEmail'
+    | 'createTaskSimple'
     | 'attachToTask'
     | 'validateTask'
     | 'findLinkedTasks'
     | 'searchTasks'
     | 'testTokenRefresh'
     | 'saveOAuthConfig'
-    | 'saveDefaultList'
-    | 'setDefaultList'
-    | 'getDefaultList'
+    | 'savePreferredTeam'
+    | 'getPreferredTeam'
     | 'getTaskById'
     | 'preloadFullHierarchy'
     | 'getHierarchyCache'
     | 'syncEmailTasks'
-    | 'getEmailTasksSyncStatus';
+    | 'getEmailTasksSyncStatus'
+    // Time Tracking Actions
+    | 'startTimer'
+    | 'stopTimer'
+    | 'getRunningTimer'
+    | 'createTimeEntry'
+    | 'addTimeEntry'
+    | 'getTimeEntries'
+    | 'updateTimerBadge';
 
 export interface ExtensionMessage {
     action: MessageAction;
     data?: any;
     [key: string]: any;
 }
+
+// ============================================================================
+// Shared Types (used by popup.ts, background.ts, modal.ts)
+// ============================================================================
+
+/** Time tracking entry from ClickUp API */
+export interface TimeEntry {
+    id: string;
+    task?: { id: string; name: string } | null;
+    wid?: string;
+    user?: { id: number; username: string } | ClickUpUser;
+    start: number | string;
+    end?: number | string;
+    duration: number | string;
+    description?: string;
+    running?: boolean;
+}
+
+/** Cached list item for quick search */
+export interface CachedListItem {
+    id: string;
+    name: string;
+    path: string;
+    spaceName?: string;
+    folderName?: string;
+    spaceColor?: string;
+    spaceAvatar?: string | null;
+}
+
+/** Extension status returned by getStatus */
+export interface ExtensionStatus {
+    authenticated: boolean;
+    configured: boolean;
+    user?: ClickUpUserResponse | ClickUpUser;
+}
+
+/** Test result for token refresh test */
+export interface TestResult {
+    success: boolean;
+    message?: string;
+    error?: string;
+}
+
+/** Task mapping for email-to-task linking */
+export interface TaskMapping {
+    id: string;
+    name: string;
+    url: string;
+}
+

@@ -3,6 +3,9 @@
  * With WYSIWYG editor and space avatars
  */
 
+// Modal Components (for future use - gradual migration)
+import { LocationSearch, AssigneeSelector } from './modal/components';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -116,7 +119,7 @@ interface TasksResponse {
 // TaskModal Class
 // ============================================================================
 
-class TaskModal {
+export class TaskModal {
     private modal: HTMLDivElement | null = null;
     private emailData: EmailData | null = null;
     private hierarchy: Hierarchy = {
@@ -639,6 +642,17 @@ class TaskModal {
         temp.querySelectorAll('script, style, img, svg, canvas, video, audio, iframe')
             .forEach(el => el.remove());
 
+        // BUG FIX: Convert <br> to newlines FIRST
+        temp.querySelectorAll('br').forEach(br => {
+            br.replaceWith('\n');
+        });
+
+        // Convert block elements to have newlines
+        temp.querySelectorAll('div, p').forEach(el => {
+            const textNode = document.createTextNode('\n');
+            el.parentNode?.insertBefore(textNode, el.nextSibling);
+        });
+
         temp.querySelectorAll('pre').forEach(pre => {
             const code = pre.querySelector('code');
             const text = code ? code.textContent : pre.textContent;
@@ -713,19 +727,13 @@ class TaskModal {
 
         let text = temp.textContent || temp.innerText || '';
 
+        // BUG FIX: Preserve line breaks, only normalize excessive whitespace
         text = text
             .replace(/\r\n/g, '\n')
             .replace(/\t/g, ' ')
-            .replace(/ +/g, ' ')
-            .replace(/\n +/g, '\n')
-            .replace(/ +\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
+            .replace(/\n{3,}/g, '\n\n')  // Max 2 consecutive newlines
             .split('\n')
-            .map(line => line.trim())
-            .filter((line, i, arr) => {
-                if (line) return true;
-                return i > 0 && arr[i - 1] && i < arr.length - 1 && arr[i + 1];
-            })
+            .map(line => line.trimEnd())  // Only trim end, preserve leading spaces
             .join('\n')
             .trim();
 
@@ -1038,7 +1046,7 @@ class TaskModal {
                 return `
           <div class="cu-assignee-option" data-id="${user.id}">
             ${avatar}
-            <span class="cu-assignee-name">${user.username || user.email}</span>
+            <span class="cu-assignee-name">${this.escapeHtml(user.username || user.email || 'User')}</span>
           </div>
         `;
             }).join('');
@@ -1077,7 +1085,7 @@ class TaskModal {
         const tag = document.createElement('span');
         tag.className = 'cu-assignee-tag';
         tag.dataset.id = id;
-        tag.innerHTML = `${avatar} ${user?.username || user?.email || 'User'} <button type="button">x</button>`;
+        tag.innerHTML = `${avatar} ${this.escapeHtml(user?.username || user?.email || 'User')} <button type="button">x</button>`;
         tag.querySelector('button')!.addEventListener('click', () => tag.remove());
         container.appendChild(tag);
 

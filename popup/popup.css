@@ -397,3 +397,470 @@ select option {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.4);
 }
+
+/* ============================================================================
+   Tab Navigation
+   ============================================================================ */
+
+.tab-nav {
+    display: flex;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 16px;
+}
+
+.tab-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, #49CCF9 0%, #8930FD 50%, #FF02F0 100%);
+    color: white;
+}
+
+.tab-icon {
+    font-size: 18px;
+}
+
+.tab-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Tab Content */
+.tab-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.tab-content.hidden {
+    display: none;
+}
+
+/* ============================================================================
+   Timer Display
+   ============================================================================ */
+
+.timer-card {
+    text-align: center;
+    padding: 24px 16px;
+}
+
+.timer-display {
+    font-size: 42px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    background: linear-gradient(135deg, #49CCF9, #8930FD);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 8px 0;
+    letter-spacing: 2px;
+}
+
+.timer-display.dim {
+    opacity: 0.3;
+    background: none;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.timer-task-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.timer-controls {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.running-timer {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
+}
+
+.no-timer .hint {
+    margin-top: 8px;
+}
+
+/* ============================================================================
+   Search Results
+   ============================================================================ */
+
+.search-results {
+    max-height: 150px;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.search-result-item {
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.search-result-item:hover {
+    background: rgba(137, 48, 253, 0.15);
+    border-color: rgba(137, 48, 253, 0.3);
+}
+
+.search-result-item.selected {
+    background: rgba(137, 48, 253, 0.25);
+    border-color: #8930FD;
+}
+
+.search-result-item .task-name {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.search-result-item .task-id {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 2px;
+}
+
+.search-loading {
+    text-align: center;
+    padding: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+
+/* ============================================================================
+   Duration Input
+   ============================================================================ */
+
+.duration-input label {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 6px;
+}
+
+.duration-fields {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.duration-fields input {
+    width: 50px;
+    text-align: center;
+    padding: 8px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.duration-fields span {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: bold;
+}
+
+/* ============================================================================
+   Time History
+   ============================================================================ */
+
+.time-history {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.time-entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.time-entry:last-child {
+    border-bottom: none;
+}
+
+.time-entry-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.time-entry-task {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.time-entry-date {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.time-entry-duration {
+    font-size: 13px;
+    font-weight: 600;
+    color: #49CCF9;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    margin-left: 12px;
+}
+
+.time-group-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    padding: 8px 0 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 4px;
+}
+
+.time-entry-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.time-entry-item:last-child {
+    border-bottom: none;
+}
+
+.time-entry-item .entry-task {
+    flex: 1;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 8px;
+}
+
+.time-entry-item .entry-duration {
+    font-size: 12px;
+    font-weight: 600;
+    color: #49CCF9;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* ============================================================================
+   Textarea
+   ============================================================================ */
+
+textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 60px;
+    transition: all 0.2s ease;
+}
+
+textarea:focus {
+    outline: none;
+    border-color: #8930FD;
+    box-shadow: 0 0 0 2px rgba(137, 48, 253, 0.2);
+}
+
+textarea::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* ============================================================================
+   Additional Utilities
+   ============================================================================ */
+
+.mt-8 {
+    margin-top: 8px;
+}
+
+.mt-12 {
+    margin-top: 12px;
+}
+
+.mb-8 {
+    margin-bottom: 8px;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.text-success {
+    color: #22c55e;
+}
+
+.text-error {
+    color: #ef4444;
+}
+
+/* ============================================================================
+   Toggle Switch (ON/OFF)
+   ============================================================================ */
+
+.toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.toggle-row:last-child {
+    border-bottom: none;
+}
+
+.toggle-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 26px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 50%;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked+.toggle-slider {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+}
+
+.toggle-switch input:checked+.toggle-slider:before {
+    transform: translateX(22px);
+    background-color: #fff;
+}
+
+.toggle-switch input:focus+.toggle-slider {
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
+}
+
+/* Hover effect */
+.toggle-switch:hover .toggle-slider:before {
+    transform: scale(1.05);
+}
+
+.toggle-switch:hover input:checked+.toggle-slider:before {
+    transform: translateX(22px) scale(1.05);
+}
+
+/* ============================================================================
+   Button Row
+   ============================================================================ */
+
+.btn-row {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+}
+
+.create-task-buttons {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.create-task-buttons .btn {
+    flex: 1;
+}
+
+/* ============================================================================
+   Form Group Label with Hint
+   ============================================================================ */
+
+.form-group label {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 6px;
+}
+
+.form-group label .hint {
+    font-weight: normal;
+    font-style: italic;
+}

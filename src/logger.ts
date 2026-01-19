@@ -17,6 +17,7 @@ interface LogStyles {
 
 interface ILogger {
     DEBUG: boolean;
+    PRODUCTION: boolean;  // SEC-M3: Suppress logs in production
     PREFIX: string;
     STYLES: LogStyles;
     debug(message: string, data?: unknown): void;
@@ -33,6 +34,13 @@ const Logger: ILogger = {
      * Can be toggled via: Logger.DEBUG = true
      */
     DEBUG: false,
+
+    /**
+     * SEC-M3: Production mode - suppress info/debug logs
+     * Set to true for Chrome Web Store builds
+     * Toggle via: Logger.PRODUCTION = true
+     */
+    PRODUCTION: false,
 
     /**
      * Prefix for all log messages
@@ -71,9 +79,11 @@ const Logger: ILogger = {
     },
 
     /**
-     * Info log
+     * Info log (suppressed in PRODUCTION mode)
      */
     info(message: string, data: unknown = null): void {
+        if (this.PRODUCTION) return;  // SEC-M3: Skip in production
+
         const prefix = `${this.PREFIX}`;
         if (data !== null) {
             console.log(`%c${prefix} ${message}`, this.STYLES.info, data);

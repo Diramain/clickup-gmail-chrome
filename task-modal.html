@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Create ClickUp Task</title>
+    <link rel="stylesheet" href="styles/modal.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        /* Overrides to make modal fill the window */
+        .cu-modal-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #fff;
+            z-index: 10000;
+        }
+
+        .cu-modal-window {
+            position: relative !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            transform: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            max-width: none !important;
+            max-height: none !important;
+        }
+
+        .cu-resize-handle {
+            display: none !important;
+        }
+
+        .cu-modal-close {
+            display: none !important;
+        }
+
+        /* Can close via window controls */
+    </style>
+</head>
+
+<body>
+    <script src="task-modal-entry.js"></script>
+</body>
+
+</html>

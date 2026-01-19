@@ -31,14 +31,13 @@ const tsEntryPoints = [
     { in: 'src/gmail-adapter.ts', out: 'src/gmail-adapter' },
     { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
     { in: 'src/modal.ts', out: 'src/modal' },
+    { in: 'src/clickup-tracker.ts', out: 'src/clickup-tracker' },
 ];
 
 /**
  * JavaScript files to bundle (legacy, will be removed after full migration)
  */
-const jsEntryPoints = [
-    { in: 'src/content.js', out: 'dist/content' },
-];
+const jsEntryPoints = [];
 
 const commonBuildOptions = {
     bundle: false,
@@ -73,15 +72,42 @@ async function buildTypeScript() {
     console.log('📦 Building TypeScript files...');
 
     try {
+        // Files that need bundling (have module imports)
+        const bundledEntryPoints = [
+            { in: 'background.ts', out: 'background' },
+            { in: 'popup/popup.ts', out: 'popup/popup' },
+            { in: 'src/modal.ts', out: 'src/modal' },
+            { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
+            { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
+        ];
+
+        // Build bundled files
         await esbuild.build({
             ...commonBuildOptions,
-            entryPoints: tsEntryPoints,
+            entryPoints: bundledEntryPoints,
             outdir: '.',
             outExtension: { '.js': '.js' },
             loader: { '.ts': 'ts' },
-            // Don't bundle - let content scripts load separately
+            bundle: true,
+            format: 'iife',
+        });
+        console.log('  ✅ Bundled files: background.ts, popup.ts, modal.ts');
+
+        // Build other files without bundling
+        const otherEntryPoints = tsEntryPoints.filter(e =>
+            !bundledEntryPoints.some(b => b.in === e.in)
+        );
+        await esbuild.build({
+            ...commonBuildOptions,
+            entryPoints: otherEntryPoints,
+            outdir: '.',
+            outExtension: { '.js': '.js' },
+            loader: { '.ts': 'ts' },
             bundle: false,
         });
+        console.log('  ✅ Other TypeScript files compiled');
+
+
         console.log('✅ TypeScript build completed');
         return true;
     } catch (error) {

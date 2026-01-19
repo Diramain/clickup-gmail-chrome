@@ -7,13 +7,11 @@
 
 import type { ILogger } from './logger';
 import type { IGmailAdapter } from './gmail-adapter';
+import { TaskModal } from './modal';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
 declare const GmailAdapter: IGmailAdapter;
-declare const TaskModal: new () => {
-    show(emailData: EmailData): void;
-};
 
 // ============================================================================
 // Types
@@ -60,6 +58,19 @@ interface TaskCreatedEvent extends CustomEvent<{ task: TaskMapping; threadId: st
 
 Logger.info('Gmail content script loading...');
 
+// Listen for messages from popup immediately
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'openTaskModal') {
+        Logger.info(' Received openTaskModal command from popup');
+        const threadId = getThreadId();
+        if (threadId) {
+            openTaskModal(threadId);
+        } else {
+            Logger.warn(' Could not determine thread ID for modal');
+        }
+    }
+});
+
 const processedMessages = new WeakSet<Element>();
 let linkedTasks: Record<string, TaskMapping[]> = {};
 let hasValidatedTasks = false;
@@ -88,6 +99,8 @@ function initialize(): void {
         const { task, threadId } = e.detail;
         updateLinkedTasksDisplay(threadId, task);
     }) as EventListener);
+
+
 }
 
 // ============================================================================

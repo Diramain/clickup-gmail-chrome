@@ -34,7 +34,7 @@
             <p>Loading...</p>
         </div>
 
-        <!-- Login Required -->
+        <!-- Login Required (same as before) -->
         <div id="login-required" class="section hidden">
             <div class="card">
                 <h2>OAuth Configuration</h2>
@@ -93,64 +93,236 @@
             </button>
         </div>
 
-        <!-- Logged In -->
+        <!-- Logged In - Tabbed Interface -->
         <div id="logged-in" class="section hidden">
-            <div class="user-info">
-                <img id="userAvatar" src="" alt="Avatar" class="avatar">
-                <div class="user-details">
-                    <span id="userName" class="user-name">User Name</span>
-                    <span id="userEmail" class="user-email">email@example.com</span>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>Default List</h3>
-                <p class="help-text">Tasks will be created in this list:</p>
-                <select id="teamSelect" class="select">
-                    <option value="">Select Workspace...</option>
-                </select>
-                <select id="spaceSelect" class="select hidden">
-                    <option value="">Select Space...</option>
-                </select>
-                <select id="listSelect" class="select hidden">
-                    <option value="">Select List...</option>
-                </select>
-                <button id="clearDefaultList" class="btn btn-link btn-small hidden">🗑️ Clear default list</button>
-            </div>
-
-            <div class="card sync-card">
-                <h3>📦 List Cache</h3>
-                <p class="help-text" id="syncStatus">Pre-load lists for faster task creation</p>
-                <button id="syncLists" class="btn btn-primary">
-                    <span class="btn-text">🔄 Sync Lists</span>
-                    <span class="spinner hidden"></span>
+            <!-- Tab Navigation - Tracking is default (first active) -->
+            <nav class="tab-nav">
+                <button class="tab-btn" data-tab="tasks">
+                    <span class="tab-icon">📋</span>
+                    <span class="tab-label">Tasks</span>
                 </button>
-            </div>
+                <button class="tab-btn active" data-tab="tracking">
+                    <span class="tab-icon">⏱️</span>
+                    <span class="tab-label">Tracking</span>
+                </button>
+                <button class="tab-btn" data-tab="config">
+                    <span class="tab-icon">⚙️</span>
+                    <span class="tab-label">Config</span>
+                </button>
+            </nav>
 
-            <div class="card sync-card">
-                <h3>📧 Email Tasks</h3>
-                <p class="help-text" id="emailSyncStatus">Sync tasks linked to emails</p>
-                <div class="sync-options">
-                    <select id="emailSyncDays" class="select-inline">
-                        <option value="30">Last 30 days</option>
-                        <option value="60">Last 60 days</option>
-                        <option value="90">Last 90 days</option>
+            <!-- ========================================== -->
+            <!-- TAB A: Tasks -->
+            <!-- ========================================== -->
+            <section id="tab-tasks" class="tab-content hidden">
+                <!-- Search Task -->
+                <div class="card">
+                    <h3>🔍 Search Task</h3>
+                    <input type="text" id="taskSearch" placeholder="Search by title or task ID...">
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+
+                <!-- Create Task - Two buttons -->
+                <div class="card">
+                    <h3>➕ Create Task</h3>
+                    <div class="create-task-buttons">
+                        <button id="quickCreateTask" class="btn btn-primary">
+                            ⚡ Quick Create
+                        </button>
+                        <button id="openTaskModal" class="btn btn-secondary">
+                            📝 Full Form
+                        </button>
+                    </div>
+                    <p class="hint text-center mt-8">Quick: inline form / Full: popup like Gmail</p>
+                </div>
+
+                <!-- Quick Create Form (toggleable) -->
+                <div id="quickCreateForm" class="card hidden">
+                    <h3>⚡ Quick Create</h3>
+                    <div class="form-group">
+                        <input type="text" id="newTaskName" placeholder="Task name...">
+                    </div>
+                    <div class="form-group">
+                        <textarea id="newTaskDescription" placeholder="Description (optional)..." rows="2"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="listSearch" placeholder="Search destination list...">
+                        <div id="listSearchResults" class="search-results"></div>
+                    </div>
+                    <div class="btn-row">
+                        <button id="cancelQuickCreate" class="btn btn-link">Cancel</button>
+                        <button id="createTask" class="btn btn-primary" disabled>Create Task</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================================== -->
+            <!-- TAB B: Time Tracking (DEFAULT) -->
+            <!-- ========================================== -->
+            <section id="tab-tracking" class="tab-content active">
+                <!-- Running Timer -->
+                <div class="card timer-card">
+                    <div id="runningTimer" class="running-timer hidden">
+                        <p class="timer-task-name" id="timerTaskName">Task Name</p>
+                        <p class="timer-display" id="timerDisplay">00:00:00</p>
+                        <div class="timer-controls">
+                            <button id="stopTimer" class="btn btn-danger">⏹️ Stop</button>
+                        </div>
+                    </div>
+                    <div id="noTimer" class="no-timer">
+                        <p class="timer-display dim">00:00:00</p>
+                        <p class="hint">No timer running</p>
+                    </div>
+                </div>
+
+                <!-- Auto Tracking Toggles -->
+                <div class="card">
+                    <h3>🤖 Auto Tracking</h3>
+                    <p class="hint mb-8">Settings saved for future ClickUp.com integration</p>
+                    <div class="toggle-row">
+                        <span class="toggle-label">Auto-start when opening task</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoStartToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-label">Auto-stop when closing task</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoStopToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Start Timer on Task -->
+                <div class="card">
+                    <h3>▶️ Start Timer</h3>
+                    <input type="text" id="trackTaskSearch" placeholder="Search task to track...">
+                    <div id="trackSearchResults" class="search-results"></div>
+                    <button id="startTimerBtn" class="btn btn-primary" disabled>▶️ Start Timer</button>
+                </div>
+
+                <!-- Manual Time Entry -->
+                <div class="card">
+                    <h3>✍️ Manual Entry</h3>
+                    <div class="form-group">
+                        <input type="text" id="manualTaskSearch" placeholder="Search task...">
+                        <div id="manualSearchResults" class="search-results"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Duration <span class="hint">(e.g. 1h, 30m, 1:30, 1h30m)</span></label>
+                        <input type="text" id="durationInput" placeholder="e.g. 1h 30m or 1:30">
+                    </div>
+                    <button id="addManualTime" class="btn btn-secondary" disabled>Add Time Entry</button>
+                </div>
+
+                <!-- Time History -->
+                <div class="card">
+                    <h3>📊 Recent Entries</h3>
+                    <div id="timeHistory" class="time-history">
+                        <p class="hint">Loading entries...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ========================================== -->
+            <!-- TAB C: Configuration -->
+            <!-- ========================================== -->
+            <section id="tab-config" class="tab-content hidden">
+                <!-- User Info -->
+                <div class="user-info">
+                    <img id="userAvatar" src="" alt="Avatar" class="avatar">
+                    <div class="user-details">
+                        <span id="userName" class="user-name">User Name</span>
+                        <span id="userEmail" class="user-email">email@example.com</span>
+                    </div>
+                </div>
+
+                <!-- Preferred Workspace -->
+                <div class="card">
+                    <h3>🏢 Preferred Workspace</h3>
+                    <p class="help-text">Select your preferred workspace for default actions:</p>
+                    <select id="teamSelect" class="select">
+                        <option value="">Select Workspace...</option>
                     </select>
-                    <button id="syncEmailTasks" class="btn btn-primary btn-small">
-                        <span class="btn-text">🔄 Sync</span>
+                </div>
+                <!-- Custom Field Settings -->
+                <div class="card">
+                    <h3>🏷️ Custom Field</h3>
+                    <div class="toggle-row mb-4">
+                        <span class="toggle-label">Use Custom Field Storage</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="useCustomFieldToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="help-text">Name of the Text Custom Field to store Email Thread IDs:</p>
+                    <div class="form-group">
+                        <input type="text" id="customFieldName" placeholder="Default: Gmail Thread ID">
+                    </div>
+                    <button id="saveCustomFieldConfig" class="btn btn-secondary btn-small">Save Field Name</button>
+                    <p class="hint mt-4">If disabled, Thread ID will be saved in the task description.</p>
+                </div>
+
+                <!-- Sync Cards -->
+                <div class="card sync-card">
+                    <h3>📦 List Cache</h3>
+                    <p class="help-text" id="syncStatus">Pre-load lists for faster task creation</p>
+                    <button id="syncLists" class="btn btn-primary">
+                        <span class="btn-text">🔄 Sync Lists</span>
                         <span class="spinner hidden"></span>
                     </button>
                 </div>
-            </div>
 
-            <!-- Dev Tools -->
-            <div class="card dev-tools">
-                <h3>🔧 Dev Tools</h3>
-                <button id="testTokenRefresh" class="btn btn-warning">🧪 Test Token Refresh</button>
-                <p class="hint" id="testResult"></p>
-            </div>
+                <div class="card sync-card">
+                    <h3>📧 Email Tasks</h3>
+                    <p class="help-text" id="emailSyncStatus">Sync tasks linked to emails</p>
+                    <div class="sync-options">
+                        <select id="emailSyncDays" class="select-inline">
+                            <option value="30">Last 30 days</option>
+                            <option value="60">Last 60 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                        <button id="syncEmailTasks" class="btn btn-primary btn-small">
+                            <span class="btn-text">🔄 Sync</span>
+                            <span class="spinner hidden"></span>
+                        </button>
+                    </div>
+                </div>
 
-            <button id="signOut" class="btn btn-danger">Sign Out</button>
+                <!-- Feedback -->
+                <div class="card">
+                    <h3>💬 Feedback</h3>
+                    <div class="form-group">
+                        <textarea id="feedbackText" placeholder="Your feedback or suggestions..." rows="3"></textarea>
+                    </div>
+                    <button id="sendFeedback" class="btn btn-secondary">Send Feedback</button>
+                    <a href="https://github.com/diramain/clickup-gmail-chrome" target="_blank" class="btn btn-link">
+                        ⭐ View on GitHub
+                    </a>
+                </div>
+
+                <!-- Dev Tools -->
+                <div class="card dev-tools">
+                    <h3>🔧 Dev Tools</h3>
+                    <button id="testTokenRefresh" class="btn btn-warning">🧪 Test Token Refresh</button>
+                    <p class="hint" id="testResult"></p>
+                </div>
+
+                <!-- DBA-H1 & DM-H1: Data Management -->
+                <div class="card">
+                    <h3>💾 Data Management</h3>
+                    <p class="help-text">Export your email-task mappings or clear stored data</p>
+                    <div class="btn-row mt-8">
+                        <button id="exportData" class="btn btn-secondary btn-small">📥 Export Data</button>
+                        <button id="clearData" class="btn btn-danger btn-small">🗑️ Clear Data</button>
+                    </div>
+                    <p class="hint mt-8" id="dataStatus"></p>
+                </div>
+
+                <button id="signOut" class="btn btn-danger">Sign Out</button>
+            </section>
         </div>
 
         <footer class="popup-footer">
