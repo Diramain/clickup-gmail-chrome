@@ -20,4 +20,17 @@ jobs:
           wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
           path: TECHNICAL_DOCS.md
           wiki-file-name: Technical-Documentation.md
-          commit-message: "docs: update Technical Documentation from source"
+
+      - name: Sync User Guide to Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: USER_GUIDE.md
+          wiki-file-name: User-Guide.md
+          
+      - name: Sync Security Policy to Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: SECURITY.md
+          wiki-file-name: Security.md
