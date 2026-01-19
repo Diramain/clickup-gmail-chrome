@@ -272,14 +272,22 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await getTeams();
 
         case 'getHierarchy':
-            // NEW: Check cache first, if missing or invalid, fetch fresh
-            const hTeamId = message.teamId || (data ? data.teamId : undefined);
+            // Resolve teamId: arg > preferred > first cached
+            let hTeamId = message.teamId || (data ? data.teamId : undefined);
+            if (!hTeamId) {
+                const store = await chrome.storage.local.get([STORAGE_KEYS.PREFERRED_TEAM, STORAGE_KEYS.CACHED_TEAMS]);
+                hTeamId = store[STORAGE_KEYS.PREFERRED_TEAM] || store[STORAGE_KEYS.CACHED_TEAMS]?.teams?.[0]?.id;
+            }
+            if (!hTeamId) {
+                return { spaces: [] }; // No team available
+            }
+
+            // Check cache first
             const cached = await getCachedHierarchy(hTeamId);
             if (cached) {
                 return cached;
             }
-            // Fallback to fetching parts if needed (or just return empty and let UI load)
-            // Ideally we preload. For now, let's fetch spaces as minimal start
+            // Fallback: fetch spaces on-demand (no full preload)
             return { spaces: await getSpaces(hTeamId) };
 
         case 'getHierarchyCache':
@@ -288,10 +296,15 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return fullCache[STORAGE_KEYS.CACHED_HIERARCHY] || {};
 
         case 'preloadFullHierarchy':
-            // Trigger background fetch of everything
+            // Trigger full hierarchy fetch and wait for result
             const pTeamId = message.teamId || (data ? data.teamId : undefined);
-            preloadHierarchy(pTeamId).catch(console.error);
-            return { success: true, message: 'Preloading started' };
+            try {
+                const listCount = await preloadHierarchy(pTeamId);
+                return { success: true, listCount: listCount || 0 };
+            } catch (e) {
+                console.error('[ClickUp] Preload failed:', e);
+                return { success: false, listCount: 0 };
+            }
 
         case 'getUser':
             return await getUser();
@@ -312,8 +325,13 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await clickupAPI!.getListMembers(message.listId || (data ? data.listId : undefined));
 
         case 'getEmailTasksSyncStatus':
-            // Return simplified status for now
-            return { synced: true };
+            // Return persisted sync status
+            const emailSyncData = await chrome.storage.local.get(['lastEmailSync', 'lastEmailSyncCount']);
+            return {
+                synced: !!emailSyncData.lastEmailSync,
+                lastSync: emailSyncData.lastEmailSync,
+                foundCount: emailSyncData.lastEmailSyncCount || 0
+            };
 
         case 'createTask': // Action used by Gmail Button (Default List)
             return await createTaskFromEmail(message.emailData || data);
@@ -359,10 +377,13 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             throw new Error('Invalid sync parameters');
 
         case 'searchTasks':
-            return await searchTasks(data.query, data.teamId);
+            const sQuery = message.query || (data ? data.query : undefined);
+            const sTeamId = message.teamId || (data ? data.teamId : undefined);
+            return await searchTasks(sQuery, sTeamId);
 
         case 'getTaskById':
-            return await getTaskById(data.taskId);
+            const gTaskId = message.taskId || (data ? data.taskId : undefined);
+            return await getTaskById(gTaskId);
 
         // Time Tracking
         case 'startTimer':
@@ -473,7 +494,7 @@ async function getFolderlessLists(spaceId: string) {
 // Hierarchy Caching Logic (Preload)
 // ============================================================================
 
-async function preloadHierarchy(teamId?: string) {
+async function preloadHierarchy(teamId?: string): Promise<number> {
     await ensureAPI();
 
     // Resolve Team ID: Arg > Preferred > First Cached
@@ -488,7 +509,7 @@ async function preloadHierarchy(teamId?: string) {
 
     if (!teamId) {
         console.error('[ClickUp] Cannot preload hierarchy: No team selected');
-        return;
+        return 0;
     }
 
     console.log('[ClickUp] Starting hierarchy preload for team:', teamId);
@@ -496,9 +517,16 @@ async function preloadHierarchy(teamId?: string) {
     try {
         const hierarchy: any = { spaces: [] };
         const spacesRes = await clickupAPI!.getSpaces(teamId);
+        let totalListCount = 0;
+        const totalSpaces = spacesRes.spaces.length;
 
-        for (const space of spacesRes.spaces) {
+        console.log(`[ClickUp] Found ${totalSpaces} spaces to sync...`);
+
+        for (let i = 0; i < spacesRes.spaces.length; i++) {
+            const space = spacesRes.spaces[i];
             const spaceData: any = { ...space, folders: [], lists: [] };
+
+            console.log(`[ClickUp] Syncing space ${i + 1}/${totalSpaces}: "${space.name}"`);
 
             // Parallelize fetching folders and folderless lists
             const [foldersRes, listsRes] = await Promise.all([
@@ -507,6 +535,7 @@ async function preloadHierarchy(teamId?: string) {
             ]);
 
             spaceData.lists = listsRes.lists;
+            totalListCount += listsRes.lists.length;
 
             // Fetch lists for each folder
             // To avoid rate limits, we might want to batch this or do it sequentially if needed
@@ -516,7 +545,16 @@ async function preloadHierarchy(teamId?: string) {
                 return { ...folder, lists: fLists.lists };
             });
 
-            spaceData.folders = await Promise.all(folderPromises);
+            const foldersWithLists = await Promise.all(folderPromises);
+            spaceData.folders = foldersWithLists;
+
+            // Count lists inside folders
+            for (const folder of foldersWithLists) {
+                totalListCount += folder.lists.length;
+            }
+
+            console.log(`[ClickUp]   ├─ ${listsRes.lists.length} folderless lists, ${foldersRes.folders.length} folders (${totalListCount} total lists so far)`);
+
             hierarchy.spaces.push(spaceData);
         }
 
@@ -530,10 +568,13 @@ async function preloadHierarchy(teamId?: string) {
         };
 
         await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_HIERARCHY]: cache });
-        console.log('[ClickUp] Hierarchy preload complete');
+        console.log('[ClickUp] Hierarchy preload complete. Total lists:', totalListCount);
+
+        return totalListCount;
 
     } catch (e) {
         console.error('[ClickUp] Hierarchy preload failed:', e);
+        return 0;
     }
 }
 
@@ -650,10 +691,11 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
     if (!teamId) throw new Error('No team found');
 
     const dateFrom = Date.now() - (days * 24 * 60 * 60 * 1000);
-    console.log(`[ClickUp] Syncing tasks modified since ${new Date(dateFrom).toISOString()}...`);
+    console.log(`[ClickUp] Email Sync: Fetching tasks modified since ${new Date(dateFrom).toISOString()}...`);
 
     const tasks = await clickupAPI!.getRecentTasks(teamId, dateFrom);
-    console.log(`[ClickUp] Found ${tasks.length} recent tasks. Scanning for thread IDs...`);
+    const totalTasks = tasks.length;
+    console.log(`[ClickUp] Email Sync: Found ${totalTasks} recent tasks. Scanning for thread IDs...`);
 
     // Get configured Custom Field Name
     const settings = await chrome.storage.local.get(['threadIdField']);
@@ -663,10 +705,18 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
     const currentMappings = mappings[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {};
     let foundCount = 0;
 
-    for (const task of tasks) {
+    for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
         const threadId = extractThreadId(task, customFieldName);
+
+        // Log progress every 25 tasks or when finding a link
+        if ((i + 1) % 25 === 0 || i === totalTasks - 1) {
+            console.log(`[ClickUp] Email Sync: Scanned ${i + 1}/${totalTasks} tasks (${foundCount} links found)`);
+        }
+
         if (threadId) {
             foundCount++;
+            console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId.substring(0, 12)}...`);
 
             // Add to mapping
             const entry = {
@@ -684,10 +734,13 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
         }
     }
 
+    console.log(`[ClickUp] Email Sync: Complete. Found ${foundCount} email-linked tasks.`);
+
     await chrome.storage.local.set({
         [STORAGE_KEYS.EMAIL_TASK_MAPPINGS]: currentMappings,
-        // Save sync timestamp for UI
-        'lastEmailSync': Date.now()
+        // Save sync status for UI persistence
+        'lastEmailSync': Date.now(),
+        'lastEmailSyncCount': foundCount
     });
 
     return { success: true, foundCount };

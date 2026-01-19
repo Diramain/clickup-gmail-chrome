@@ -744,20 +744,74 @@ export class TaskModal {
         try {
             console.log('[Modal] Loading hierarchy (cache-first mode)...');
 
-            // Try to load from cache first (instant)
+            // Get preferred team ID first
+            const prefTeam = await chrome.storage.local.get(['preferredTeam', 'cachedTeams']);
+            let teamId = prefTeam.preferredTeam || prefTeam.cachedTeams?.teams?.[0]?.id;
+
+            if (!teamId) {
+                // Fallback: fetch teams
+                const teamsRes = await chrome.runtime.sendMessage({ action: 'getTeams' });
+                if (teamsRes?.teams?.[0]) {
+                    teamId = teamsRes.teams[0].id;
+                }
+            }
+
+            if (!teamId) {
+                console.error('[Modal] No team ID available');
+                return;
+            }
+
+            this.teamId = teamId;
+
+            // Try to load from cache first (structure: { [teamId]: { data: { spaces }, timestamp } })
             const cache = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
+            const teamCache = cache?.[teamId];
 
-            if (cache && cache.lists && cache.lists.length > 0) {
-                console.log('[Modal] Cache hit!', cache.lists.length, 'lists from cache');
-                this.hierarchy.allLists = cache.lists;
-                this.hierarchy.spaces = cache.spaces || [];
-                this.hierarchy.members = cache.members || [];
-                this.teamId = cache.teamId;
+            if (teamCache?.data?.spaces?.length > 0) {
+                console.log('[Modal] Cache hit! Extracting lists from', teamCache.data.spaces.length, 'spaces');
 
-                // Check if cache is stale (older than 5 minutes) and refresh in background
-                const cacheAge = Date.now() - (cache.timestamp || 0);
-                if (cacheAge > 5 * 60 * 1000) {
-                    console.log('[Modal] Cache stale, refreshing in background...');
+                // Extract flat list of all lists from hierarchy
+                const allLists: ListItem[] = [];
+                for (const space of teamCache.data.spaces) {
+                    const spaceColor = space.color || '#7B68EE';
+                    const spaceAvatar = space.avatar?.url || null;
+
+                    // Folderless lists
+                    for (const list of (space.lists || [])) {
+                        allLists.push({
+                            id: list.id,
+                            name: list.name,
+                            path: `${space.name} > ${list.name}`,
+                            spaceName: space.name,
+                            spaceColor,
+                            spaceAvatar
+                        });
+                    }
+
+                    // Lists inside folders
+                    for (const folder of (space.folders || [])) {
+                        for (const list of (folder.lists || [])) {
+                            allLists.push({
+                                id: list.id,
+                                name: list.name,
+                                path: `${space.name} > ${folder.name} > ${list.name}`,
+                                spaceName: space.name,
+                                folderName: folder.name,
+                                spaceColor,
+                                spaceAvatar
+                            });
+                        }
+                    }
+                }
+
+                this.hierarchy.allLists = allLists;
+                this.hierarchy.spaces = teamCache.data.spaces;
+                console.log('[Modal] Loaded', allLists.length, 'lists from cache');
+
+                // Check if cache is stale (older than 24 hours) and refresh in background
+                const cacheAge = Date.now() - (teamCache.timestamp || 0);
+                if (cacheAge > 24 * 60 * 60 * 1000) {
+                    console.log('[Modal] Cache stale (>24h), refreshing in background...');
                     chrome.runtime.sendMessage({ action: 'preloadFullHierarchy' });
                 }
                 return;
@@ -765,33 +819,12 @@ export class TaskModal {
 
             console.log('[Modal] Cache miss, loading from API...');
 
-            // No cache, load teams and members from API
-            const teams = await chrome.runtime.sendMessage({ action: 'getHierarchy' }) as TeamsResponse;
+            // No cache - fetch spaces on demand
+            const spacesResult = await chrome.runtime.sendMessage({ action: 'getSpaces', teamId });
 
-            if (!teams || !teams.teams || teams.teams.length === 0) {
-                console.error('[Modal] No teams found in response');
-                return;
-            }
-
-            const team = teams.teams[0];
-            this.teamId = team.id;
-            this.hierarchy.members = team.members || [];
-
-            const spacesResult = await chrome.runtime.sendMessage({ action: 'getSpaces', teamId: team.id }) as SpacesResponse;
-
-            if (spacesResult && spacesResult.spaces) {
+            if (spacesResult?.spaces) {
                 this.hierarchy.spaces = spacesResult.spaces;
-            }
-
-            // On first load, wait for preload to complete so lists are available
-            console.log('[Modal] First load - waiting for hierarchy preload...');
-            await chrome.runtime.sendMessage({ action: 'preloadFullHierarchy' });
-
-            // Reload cache after preload completes
-            const newCache = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
-            if (newCache && newCache.lists) {
-                console.log('[Modal] Preload complete!', newCache.lists.length, 'lists loaded');
-                this.hierarchy.allLists = newCache.lists;
+                console.log('[Modal] Loaded', spacesResult.spaces.length, 'spaces. Lists will load on demand.');
             }
 
         } catch (error) {
@@ -884,13 +917,6 @@ export class TaskModal {
             return;
         }
 
-        // Instant search in cached allLists
-        const lowerQuery = query.toLowerCase();
-        const filtered = this.hierarchy.allLists.filter(list =>
-            list.name.toLowerCase().includes(lowerQuery) ||
-            list.path.toLowerCase().includes(lowerQuery)
-        );
-
         // If no cache loaded yet, show message
         if (this.hierarchy.allLists.length === 0) {
             resultsContainer.innerHTML = '<p class="cu-hint">Loading lists... please wait</p>';
@@ -898,7 +924,36 @@ export class TaskModal {
             return;
         }
 
-        this.renderSearchResults(filtered, query, dropdown, resultsContainer);
+        // Word-based fuzzy search: all query words must match (in any order)
+        const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+
+        const scoredResults = this.hierarchy.allLists
+            .map(list => {
+                const searchText = (list.name + ' ' + list.path).toLowerCase();
+                // Check if all query words are present
+                const allWordsMatch = queryWords.every(word => searchText.includes(word));
+                if (!allWordsMatch) return null;
+
+                // Score: higher = better match
+                let score = 0;
+                // Exact name match gets highest score
+                if (list.name.toLowerCase() === query.toLowerCase()) score += 100;
+                // Name contains query as substring
+                if (list.name.toLowerCase().includes(query.toLowerCase())) score += 50;
+                // Each word found in name (not just path) gets points
+                queryWords.forEach(word => {
+                    if (list.name.toLowerCase().includes(word)) score += 10;
+                });
+                // Shorter paths rank higher (more specific)
+                score -= list.path.length / 20;
+
+                return { list, score };
+            })
+            .filter((r): r is { list: ListItem; score: number } => r !== null)
+            .sort((a, b) => b.score - a.score)
+            .map(r => r.list);
+
+        this.renderSearchResults(scoredResults, query, dropdown, resultsContainer);
     }
 
     renderSearchResults(filtered: ListItem[], query: string, dropdown: HTMLElement, resultsContainer: HTMLElement): void {

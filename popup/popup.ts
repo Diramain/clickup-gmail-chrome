@@ -1079,10 +1079,8 @@ async function loadTeams(): Promise<void> {
             teamSelect.value = initialTeamId;
         }
 
-        // Trigger preload if team is selected (from invalid state or fresh load)
-        if (teamSelect.value) {
-            sendMessage({ action: 'preloadFullHierarchy', data: { teamId: teamSelect.value } }).catch(console.error);
-        }
+        // NOTE: No auto-preload. User must click "Sync Lists" to preload cache.
+        // Searching works on-demand if cache is empty.
 
         // Listener for changes
         teamSelect.addEventListener('change', async () => {
@@ -1094,9 +1092,7 @@ async function loadTeams(): Promise<void> {
 
             showSavedIndicator(); // Reusing existing indicator logic (assumed global or create it)
 
-            // Trigger Sync
-            console.log('[Popup] Workspace changed, preloading hierarchy...');
-            sendMessage({ action: 'preloadFullHierarchy', data: { teamId } }).catch(console.error);
+            // NOTE: No auto-preload on workspace change. User can click "Sync Lists" if needed.
         });
 
     } catch (error) {
@@ -1219,12 +1215,21 @@ async function loadCacheStatus(): Promise<void> {
     const status = document.getElementById('syncStatus') as HTMLElement;
 
     try {
-        const cache = await sendMessage<{ timestamp?: number; lists?: any[] } | null>({
+        const teamId = await getTeamId();
+        if (!teamId) {
+            status.textContent = '⚠️ Select workspace first';
+            status.style.color = '#ff9800';
+            return;
+        }
+
+        // Cache structure is: { [teamId]: { data: { spaces: [...] }, timestamp: number } }
+        const cache = await sendMessage<Record<string, { data?: { spaces?: any[] }; timestamp?: number }>>({
             action: 'getHierarchyCache'
         });
 
-        if (cache && cache.timestamp) {
-            const elapsed = Date.now() - cache.timestamp;
+        const teamCache = cache?.[teamId];
+        if (teamCache && teamCache.timestamp) {
+            const elapsed = Date.now() - teamCache.timestamp;
             const minutes = Math.floor(elapsed / 60000);
             const hours = Math.floor(minutes / 60);
 
@@ -1240,7 +1245,17 @@ async function loadCacheStatus(): Promise<void> {
                 timeAgo = 'just now';
             }
 
-            const listCount = cache.lists?.length || 0;
+            // Count lists from hierarchy: spaces → folders → lists + folderless lists
+            let listCount = 0;
+            if (teamCache.data?.spaces) {
+                for (const space of teamCache.data.spaces) {
+                    listCount += space.lists?.length || 0;
+                    for (const folder of (space.folders || [])) {
+                        listCount += folder.lists?.length || 0;
+                    }
+                }
+            }
+
             status.textContent = `✅ ${listCount} lists synced ${timeAgo}`;
             status.style.color = '#00c853';
         } else {
