@@ -1,7 +1,7 @@
 # ClickUp Gmail Chrome Extension
 ## User Guide
 
-**Version:** 1.1.0  
+**Version:** 1.1.2  
 **Last Updated:** January 2026
 
 ---

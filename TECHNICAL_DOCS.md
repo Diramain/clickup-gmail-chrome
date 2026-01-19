@@ -1431,6 +1431,7 @@ export const CONSTANTS = {
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.2 | Jan 2026 | Improvements: Fuzzy list search, smart search scoring, extended cache TTL. Fixes: List sync status, hierarchy resolver, task search params. |
 | 1.1.0 | Jan 2026 | Bug fixes: Rich text line breaks, time tracking on task creation, thread ID in description, auto-start via URL, recent entries refresh. Added toggle saved feedback. |
 | 1.0.0 | Jan 2026 | Initial release |
 
