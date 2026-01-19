@@ -8,20 +8,19 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails with time 
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
 ![Tests](https://img.shields.io/badge/Tests-104%20passing-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-1.1.2-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🆕 What's New in v1.1.0
+## 🆕 What's New in v1.1.2
 
-- ✅ **Fixed:** Rich text line breaks now preserved in task descriptions
-- ✅ **Fixed:** Time tracking works when creating tasks from modal
-- ✅ **Fixed:** Thread ID saves to description when custom field is disabled
-- ✅ **Fixed:** Auto-start timer works with direct task URLs
-- ✅ **Fixed:** Recent entries now shows last 7 days
-- 📚 **Added:** Comprehensive technical documentation
-- 🔐 **Security:** All OAuth tokens encrypted with AES-256-GCM
+- ✅ **Fixed:** List cache re-sync issues and status display
+- ✅ **Fixed:** Task search parameter handling
+- 🔍 **Improved:** "Fuzzy" list search (e.g. "talleres soporte" -> "Soporte | Talleres")
+- 🚀 **Performance:** Extended cache stale time to 24h
+- 📚 **Docs:** Expanded Email Attachment flow documentation
+
 
 ---
 
