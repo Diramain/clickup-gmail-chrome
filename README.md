@@ -2,12 +2,28 @@
 
 > 🤖 **Built with AI**: This extension was developed by **Leandro Iramain** with the assistance of AI (Anthropic Claude / Antigravity).
 
-A Chrome extension to create ClickUp tasks directly from Gmail emails.
+A Chrome extension to create ClickUp tasks directly from Gmail emails with time tracking, auto-sync, and encrypted storage.
 
 ![Chrome](https://img.shields.io/badge/Chrome-MV3-green.svg)
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
-![Tests](https://img.shields.io/badge/Tests-67%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/Tests-104%20passing-brightgreen.svg)
+![Version](https://img.shields.io/badge/Version-1.1.0-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+---
+
+## 🆕 What's New in v1.1.0
+
+- ✅ **Fixed:** Rich text line breaks now preserved in task descriptions
+- ✅ **Fixed:** Time tracking works when creating tasks from modal
+- ✅ **Fixed:** Thread ID saves to description when custom field is disabled
+- ✅ **Fixed:** Auto-start timer works with direct task URLs
+- ✅ **Fixed:** Recent entries now shows last 7 days
+- 📚 **Added:** Comprehensive technical documentation
+- 🔐 **Security:** All OAuth tokens encrypted with AES-256-GCM
+
+---
 
 ## ✨ Features
 
@@ -37,16 +53,60 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails.
 - **Thread ID Tracking** - Email links stored in task description for efficient sync
 - **Email Attachments** - Attach email files directly to ClickUp tasks
 
+---
+
+## 🔐 Security
+
+This extension implements enterprise-grade security:
+
+| Feature | Description |
+|---------|-------------|
+| **AES-256-GCM Encryption** | All OAuth tokens encrypted at rest |
+| **Secure Token Storage** | Uses Web Crypto API |
+| **Production Logger** | Debug logs suppressed in production |
+| **Minimal Permissions** | Only requests necessary permissions |
+| **No External Tracking** | Zero telemetry or analytics |
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+---
+
 ## 🛠️ Tech Stack
 
 - **TypeScript** - 100% typed codebase
 - **Manifest V3** - Modern Chrome extension format
 - **esbuild** - Fast bundling
-- **Jest** - 67 unit tests
+- **Jest** - 104 unit tests
+- **GitHub Actions** - CI/CD pipeline
+
+---
+
+## 📖 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [User Guide](USER_GUIDE.md) | Installation and feature usage |
+| [Technical Docs](TECHNICAL_DOCS.md) | Architecture, security, and API details |
+| [Changelog](CHANGELOG.md) | Version history and changes |
+| [Contributing](CONTRIBUTING.md) | How to contribute |
+| [Security](SECURITY.md) | Security policy |
+| [Wiki](https://github.com/Diramain/clickup-gmail-chrome/wiki) | Online documentation |
+
+---
 
 ## 📦 Installation
 
-### Development
+### From Release (Recommended)
+
+1. Download the latest release from [Releases](https://github.com/Diramain/clickup-gmail-chrome/releases)
+2. Extract the ZIP file
+3. Go to `chrome://extensions`
+4. Enable "Developer mode"
+5. Click "Load unpacked"
+6. Select the extracted folder
+
+### From Source
+
 ```bash
 # Clone the repo
 git clone https://github.com/Diramain/clickup-gmail-chrome.git
@@ -68,25 +128,30 @@ npm test
 # 4. Select this folder
 ```
 
+---
+
 ## ⚙️ Configuration
 
-1. Create a ClickUp OAuth App at https://app.clickup.com/settings/integrations
+1. **Create ClickUp OAuth App** at https://app.clickup.com/settings/integrations
 2. Click the extension icon
-3. Enter Client ID and Client Secret
-4. Sign in with ClickUp
-5. Select your default list (optional)
+3. Enter **Client ID** and **Client Secret**
+4. Click **Sign in with ClickUp**
+5. Select your preferred workspace (optional)
 
-## 📁 Structure
+---
+
+## 📁 Project Structure
 
 ```
 clickup-gmail-chrome/
 ├── manifest.json          # Chrome MV3 manifest
 ├── background.ts          # Service worker (ClickUp API)
 ├── src/
+│   ├── services/          # API, Auth, Crypto, Storage, Timer
 │   ├── clickup-tracker.ts # Auto time tracking on ClickUp.com
 │   ├── gmail-native.ts    # Gmail DOM integration
 │   ├── gmail-adapter.ts   # DOM abstraction layer
-│   ├── modal.ts           # Task creation modal
+│   ├── modal.ts           # Task creation modal (59KB)
 │   ├── logger.ts          # Structured logging
 │   └── types/             # TypeScript definitions
 ├── popup/
@@ -94,14 +159,12 @@ clickup-gmail-chrome/
 │   ├── popup.ts
 │   └── popup.css
 ├── styles/
-│   ├── gmail-native.css
 │   └── modal.css
-├── tests/
-│   ├── background.test.js
-│   ├── gmail-adapter.test.js
-│   └── modal.test.js
-└── build.js               # esbuild config
+├── tests/                 # 7 test suites, 104 tests
+└── .github/workflows/     # CI/CD pipeline
 ```
+
+---
 
 ## 🔧 Architecture
 
@@ -120,16 +183,18 @@ clickup-gmail-chrome/
 │                   background.ts (Service Worker)            │
 ├─────────────────────────────────────────────────────────────┤
 │  ClickUpAPIWrapper                                          │
-│  - OAuth flow                                               │
+│  - OAuth flow (encrypted tokens)                            │
 │  - API retry (exponential backoff)                          │
-│  - Token management                                          │
-│  - Task CRUD                                                │
+│  - Token refresh on 401                                     │
+│  - Task CRUD, Time Tracking                                 │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                   ClickUp API v2                            │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## 🧪 Testing
 
@@ -139,17 +204,28 @@ npm test
 
 # Run tests in watch mode
 npm test -- --watch
+
+# Run with coverage
+npm test -- --coverage
 ```
+
+**Test Suites:** 7 | **Tests:** 104 | **Coverage:** Core functions
+
+---
 
 ## 📄 License
 
-MIT License - Free and Open Source
+[MIT License](LICENSE) - Free and Open Source
+
+---
 
 ## 🙏 Credits
 
 - **Leandro Iramain** ([@diramain](https://github.com/Diramain)) - Project Manager
 - **Anthropic Claude / Antigravity** - AI Pair Programming
 - **ClickUp API** - Task management platform
+
+---
 
 ## 📢 Disclaimer
 
@@ -163,4 +239,6 @@ MIT License - Free and Open Source
 
 ---
 
-Built with ❤️ and AI by a PM who dared to code
+<p align="center">
+  Built with ❤️ and AI by a PM who dared to code
+</p>
