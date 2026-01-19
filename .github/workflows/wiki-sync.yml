@@ -1,0 +1,23 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'TECHNICAL_DOCS.md'
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Sync Technical Docs to Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: TECHNICAL_DOCS.md
+          wiki-file-name: Technical-Documentation.md
+          commit-message: "docs: update Technical Documentation from source"
