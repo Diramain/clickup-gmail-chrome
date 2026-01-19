@@ -168,8 +168,8 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
     switch (action) {
         case 'authenticate':
             try {
-                const storageData = await chrome.storage.local.get(STORAGE_KEYS.OAUTH_CONFIG);
-                const config = storageData[STORAGE_KEYS.OAUTH_CONFIG];
+                // SEC-C1: Use encrypted OAuth config retrieval
+                const config = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
 
                 if (!config || !config.clientId || !config.clientSecret) {
                     throw new Error('Missing OAuth configuration');
@@ -232,8 +232,8 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 // Force a refresh attempt if possible, or just log config
                 // In a real scenario, we might invalidate the current token to force refresh on next call
                 // For now, we'll just check if we have the config
-                const stored = await chrome.storage.local.get(STORAGE_KEYS.OAUTH_CONFIG);
-                if (!stored[STORAGE_KEYS.OAUTH_CONFIG]) {
+                const storedConfig = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+                if (!storedConfig) {
                     return { success: false, error: 'No OAuth config found' };
                 }
                 return { success: true, message: 'OAuth config present' };
