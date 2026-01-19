@@ -1,9 +1,9 @@
 # ClickUp Gmail Chrome Extension
-## Technical Documentation v1.1
+## Technical Documentation v1.1.2
 
 **Author:** Leandro Iramain  
 **Date:** January 2026  
-**Version:** 1.1.0
+**Version:** 1.1.2
 
 ---
 
@@ -818,6 +818,152 @@ chrome.runtime.sendMessage({
     timeTracked: timeTracked,  // Duration in ms
     teamId: this.teamId
 });
+```
+
+### Fuzzy List Search
+
+The location picker uses a word-based fuzzy search algorithm that allows searching with words in any order.
+
+#### Algorithm
+
+```typescript
+searchLists(query: string): void {
+    // Split query into words
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+    
+    const scoredResults = this.hierarchy.allLists
+        .map(list => {
+            const searchText = (list.name + ' ' + list.path).toLowerCase();
+            
+            // All query words must be present
+            const allWordsMatch = queryWords.every(word => searchText.includes(word));
+            if (!allWordsMatch) return null;
+            
+            // Calculate relevance score
+            let score = 0;
+            if (list.name.toLowerCase() === query.toLowerCase()) score += 100;  // Exact match
+            if (list.name.toLowerCase().includes(query.toLowerCase())) score += 50;  // Substring
+            queryWords.forEach(word => {
+                if (list.name.toLowerCase().includes(word)) score += 10;  // Word in name
+            });
+            score -= list.path.length / 20;  // Prefer shorter paths
+            
+            return { list, score };
+        })
+        .filter(r => r !== null)
+        .sort((a, b) => b.score - a.score);
+}
+```
+
+#### Examples
+
+| Query | Matches | Explanation |
+|-------|---------|-------------|
+| `"soporte talleres"` | "Soporte \| Talleres" ✅ | Both words found |
+| `"talleres soporte"` | "Soporte \| Talleres" ✅ | Order doesn't matter |
+| `"dev marketing"` | "Marketing > Desarrollo" ✅ | Words found in path |
+| `"abc xyz"` | No results | "xyz" not found anywhere |
+
+---
+
+## Email Attachment Mechanism
+
+### How Emails are Attached to Tasks
+
+When creating a task from Gmail, the extension attaches the email content in two ways:
+
+1. **Gmail Link in Description** - Clickable link to open the email
+2. **HTML File Attachment** - Full email content as an attachment
+
+### 1. Gmail Link Format
+
+The extension generates a direct Gmail link using the thread ID:
+
+```typescript
+const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
+```
+
+This link is added to the task description:
+
+```markdown
+**📧 Email vinculado:** [Ver en Gmail](https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde)
+```
+
+### 2. Task Description with Email
+
+When "Attach email content" is enabled:
+
+```typescript
+const description = `
+## Email Data
+**From:** ${emailData.from}
+**Subject:** ${emailData.subject}
+**Date:** ${new Date().toLocaleString()}
+
+---
+
+${emailData.body}
+
+---
+**📧 Email vinculado:** [Ver en Gmail](${gmailLink})
+`;
+```
+
+### 3. HTML File Attachment
+
+If "Attach email files" is enabled, the full email HTML is uploaded:
+
+```typescript
+// Create HTML file with email content
+const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head><title>${emailData.subject}</title></head>
+<body>
+    <h2>${emailData.subject}</h2>
+    <p><strong>From:</strong> ${emailData.from}</p>
+    <hr>
+    ${emailData.bodyHtml}
+</body>
+</html>
+`;
+
+// Upload via ClickUp API
+await clickupAPI.uploadAttachment(taskId, htmlContent, `email_${Date.now()}.html`);
+```
+
+### API Endpoints Used
+
+| Step | Endpoint | Method | Description |
+|------|----------|--------|-------------|
+| Create Task | `/list/{id}/task` | POST | Creates task with description |
+| Add Comment | `/task/{id}/comment` | POST | Adds Gmail link as comment |
+| Upload File | `/task/{id}/attachment` | POST | Uploads HTML email file |
+| Set Thread ID | `/task/{id}/field/{fieldId}` | POST | Saves thread ID to custom field |
+
+### Thread ID Storage
+
+The Gmail thread ID is stored for bi-directional linking:
+
+```typescript
+// Option 1: Custom Field (recommended)
+await clickupAPI.setCustomField(taskId, fieldId, threadId);
+
+// Option 2: Task Comment
+await clickupAPI.addComment(taskId, `Gmail Thread ID: ${threadId}`);
+```
+
+### Opening Gmail from ClickUp
+
+When a user clicks the Gmail link in ClickUp, the URL format ensures:
+
+1. **Direct navigation** to the specific email thread
+2. **Works with multiple Gmail accounts** (u/0, u/1, etc.)
+3. **Opens in inbox view** with the thread selected
+
+```
+Format: https://mail.google.com/mail/u/{account}/#inbox/{threadId}
+Example: https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde
 ```
 
 ---
