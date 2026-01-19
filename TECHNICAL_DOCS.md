@@ -868,102 +868,300 @@ searchLists(query: string): void {
 
 ## Email Attachment Mechanism
 
-### How Emails are Attached to Tasks
+This section explains the complete flow of how emails from Gmail are attached to ClickUp tasks.
 
-When creating a task from Gmail, the extension attaches the email content in two ways:
+### Overview Flow
 
-1. **Gmail Link in Description** - Clickable link to open the email
-2. **HTML File Attachment** - Full email content as an attachment
-
-### 1. Gmail Link Format
-
-The extension generates a direct Gmail link using the thread ID:
-
-```typescript
-const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
+```mermaid
+sequenceDiagram
+    participant User
+    participant Gmail
+    participant ContentScript as Gmail Content Script
+    participant Modal as Task Modal
+    participant Background as Background Worker
+    participant ClickUp as ClickUp API
+    
+    User->>Gmail: Opens email
+    Gmail->>ContentScript: DOM loaded
+    ContentScript->>ContentScript: Extract email data
+    User->>ContentScript: Click "Add to ClickUp"
+    ContentScript->>Modal: Open with emailData
+    User->>Modal: Fill task details
+    User->>Modal: Click "Create Task"
+    Modal->>Background: createTaskFull message
+    Background->>ClickUp: POST /list/{id}/task
+    ClickUp->>Background: Task created (taskId)
+    Background->>ClickUp: POST /task/{id}/comment (Gmail link)
+    Background->>ClickUp: POST /task/{id}/attachment (HTML file)
+    Background->>ClickUp: POST /task/{id}/field/{fieldId} (Thread ID)
+    Background->>Modal: Success response
+    Modal->>User: Show success popup
 ```
 
-This link is added to the task description:
+### Step 1: Email Data Extraction
 
-```markdown
-**📧 Email vinculado:** [Ver en Gmail](https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde)
-```
+**File:** `src/gmail-native.ts` → `GmailAdapter` class
 
-### 2. Task Description with Email
-
-When "Attach email content" is enabled:
+When the user views an email, the content script extracts:
 
 ```typescript
-const description = `
-## Email Data
-**From:** ${emailData.from}
-**Subject:** ${emailData.subject}
-**Date:** ${new Date().toLocaleString()}
+interface EmailData {
+    threadId: string;      // Gmail thread identifier (e.g., "19bc8ca9ffe18fde")
+    subject: string;       // Email subject line
+    from: string;          // Sender name and email
+    body: string;          // Plain text body
+    bodyHtml: string;      // Full HTML content
+    date: string;          // Email date
+}
 
----
-
-${emailData.body}
-
----
-**📧 Email vinculado:** [Ver en Gmail](${gmailLink})
-`;
+// Extraction from Gmail DOM
+const emailData: EmailData = {
+    threadId: getThreadIdFromUrl(),  // From URL hash: #inbox/19bc8ca9ffe18fde
+    subject: document.querySelector('[data-thread-perm-id] h2')?.textContent,
+    from: document.querySelector('[email]')?.getAttribute('email'),
+    body: document.querySelector('.a3s.aiL')?.textContent,
+    bodyHtml: document.querySelector('.a3s.aiL')?.innerHTML,
+    date: document.querySelector('[data-legacy-thread-id] td:nth-child(3)')?.textContent
+};
 ```
 
-### 3. HTML File Attachment
+### Step 2: Modal Opens with Email Context
 
-If "Attach email files" is enabled, the full email HTML is uploaded:
+**File:** `src/modal.ts`
+
+When clicking "Add to ClickUp", the modal receives the email data:
 
 ```typescript
-// Create HTML file with email content
-const htmlContent = `
-<!DOCTYPE html>
+// Content script dispatches event
+window.dispatchEvent(new CustomEvent('cu-open-modal', {
+    detail: { emailData: emailData }
+}));
+
+// Modal captures and stores
+class ClickUpModal {
+    emailData: EmailData | null = null;
+    
+    open(emailData: EmailData): void {
+        this.emailData = emailData;
+        // Pre-fill task name with email subject
+        this.modal.querySelector('#cu-task-name').value = emailData.subject;
+    }
+}
+```
+
+### Step 3: User Submits Task
+
+**File:** `src/modal.ts` → `submit()` method
+
+The modal sends all data to the background worker:
+
+```typescript
+async submit(): Promise<void> {
+    const response = await chrome.runtime.sendMessage({
+        action: 'createTaskFull',
+        listId: this.selectedListId,
+        taskData: {
+            name: taskName,
+            markdown_description: description,
+            assignees: assigneeIds,
+            priority: priority,
+            start_date: startDate,
+            due_date: dueDate,
+            time_estimate: timeEstimate
+        },
+        emailData: this.emailData,           // Full email object
+        attachWithFiles: attachFilesEnabled, // User checkbox
+        timeTracked: manualTimeEntry,
+        teamId: this.teamId
+    });
+}
+```
+
+### Step 4: Background Creates Task
+
+**File:** `background.ts` → `createTaskFull` handler
+
+The background worker orchestrates multiple API calls:
+
+```typescript
+case 'createTaskFull':
+    const { listId, taskData, emailData, attachWithFiles, timeTracked, teamId } = message;
+    
+    // Step 4a: Build description with Gmail link
+    const gmailLink = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
+    
+    let description = taskData.markdown_description || '';
+    if (emailData) {
+        description += `\n\n---\n## 📧 Email Data\n`;
+        description += `**From:** ${emailData.from}\n`;
+        description += `**Subject:** ${emailData.subject}\n`;
+        description += `**Date:** ${emailData.date}\n\n`;
+        description += `---\n\n${emailData.body}\n\n`;
+        description += `---\n**📧 Email vinculado:** [Ver en Gmail](${gmailLink})`;
+    }
+    
+    // Step 4b: Create the task
+    const task = await clickupAPI.createTask(listId, {
+        ...taskData,
+        markdown_description: description
+    });
+    
+    // Continue with attachments...
+```
+
+### Step 5: Add Gmail Link as Comment
+
+**File:** `background.ts`
+
+A comment is added for easy access to the original email:
+
+```typescript
+// Add Gmail link as a comment for visibility
+await clickupAPI.addComment(task.id, 
+    `📧 **Email vinculado:** [Abrir en Gmail](${gmailLink})\n\n` +
+    `Thread ID: \`${emailData.threadId}\``
+);
+```
+
+**API Call:**
+```
+POST https://api.clickup.com/api/v2/task/{taskId}/comment
+Content-Type: application/json
+
+{
+    "comment_text": "📧 **Email vinculado:** [Abrir en Gmail](https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde)\n\nThread ID: `19bc8ca9ffe18fde`"
+}
+```
+
+### Step 6: Upload HTML File Attachment
+
+**File:** `background.ts` + `src/services/api.service.ts`
+
+If "Attach email files" is enabled, the full HTML is uploaded:
+
+```typescript
+if (attachWithFiles && emailData.bodyHtml) {
+    // Build complete HTML document
+    const htmlContent = `<!DOCTYPE html>
 <html>
-<head><title>${emailData.subject}</title></head>
+<head>
+    <meta charset="UTF-8">
+    <title>${emailData.subject}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .header { background: #f5f5f5; padding: 15px; margin-bottom: 20px; }
+        .content { line-height: 1.6; }
+    </style>
+</head>
 <body>
-    <h2>${emailData.subject}</h2>
-    <p><strong>From:</strong> ${emailData.from}</p>
-    <hr>
-    ${emailData.bodyHtml}
+    <div class="header">
+        <h2>${emailData.subject}</h2>
+        <p><strong>From:</strong> ${emailData.from}</p>
+        <p><strong>Date:</strong> ${emailData.date}</p>
+    </div>
+    <div class="content">
+        ${emailData.bodyHtml}
+    </div>
 </body>
-</html>
-`;
+</html>`;
 
-// Upload via ClickUp API
-await clickupAPI.uploadAttachment(taskId, htmlContent, `email_${Date.now()}.html`);
+    // Upload as attachment
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const formData = new FormData();
+    formData.append('attachment', blob, `email_${Date.now()}.html`);
+    
+    await clickupAPI.uploadAttachment(task.id, formData);
+}
 ```
 
-### API Endpoints Used
+**API Call:**
+```
+POST https://api.clickup.com/api/v2/task/{taskId}/attachment
+Content-Type: multipart/form-data
 
-| Step | Endpoint | Method | Description |
-|------|----------|--------|-------------|
-| Create Task | `/list/{id}/task` | POST | Creates task with description |
-| Add Comment | `/task/{id}/comment` | POST | Adds Gmail link as comment |
-| Upload File | `/task/{id}/attachment` | POST | Uploads HTML email file |
-| Set Thread ID | `/task/{id}/field/{fieldId}` | POST | Saves thread ID to custom field |
+--boundary
+Content-Disposition: form-data; name="attachment"; filename="email_1768858241525.html"
+Content-Type: text/html
 
-### Thread ID Storage
+<!DOCTYPE html>...
+--boundary--
+```
 
-The Gmail thread ID is stored for bi-directional linking:
+### Step 7: Store Thread ID for Bi-directional Linking
+
+**File:** `background.ts`
+
+The thread ID is stored to enable finding tasks from Gmail:
 
 ```typescript
-// Option 1: Custom Field (recommended)
-await clickupAPI.setCustomField(taskId, fieldId, threadId);
+// Option A: Custom Field (if configured)
+if (useCustomFieldForThreadId && threadIdFieldId) {
+    await clickupAPI.setCustomField(task.id, threadIdFieldId, emailData.threadId);
+}
 
-// Option 2: Task Comment
-await clickupAPI.addComment(taskId, `Gmail Thread ID: ${threadId}`);
+// Option B: Always add to description (fallback)
+// The thread ID is embedded in the Gmail link URL itself
 ```
 
-### Opening Gmail from ClickUp
+**API Call (Custom Field):**
+```
+POST https://api.clickup.com/api/v2/task/{taskId}/field/{fieldId}
+Content-Type: application/json
 
-When a user clicks the Gmail link in ClickUp, the URL format ensures:
+{
+    "value": "19bc8ca9ffe18fde"
+}
+```
 
-1. **Direct navigation** to the specific email thread
-2. **Works with multiple Gmail accounts** (u/0, u/1, etc.)
-3. **Opens in inbox view** with the thread selected
+### Step 8: Save Local Mapping
+
+**File:** `background.ts`
+
+For instant lookup from Gmail inbox:
+
+```typescript
+// Save mapping: threadId → task info
+const mappings = await chrome.storage.local.get('emailTaskMappings') || {};
+mappings[emailData.threadId] = {
+    id: task.id,
+    name: task.name,
+    url: task.url,
+    status: task.status.status,
+    createdAt: Date.now()
+};
+await chrome.storage.local.set({ emailTaskMappings: mappings });
+```
+
+### Complete Data Path Summary
+
+| Stage | Location | Data Transformed |
+|-------|----------|------------------|
+| 1. Extract | Gmail DOM → `emailData` | Raw HTML/text to structured object |
+| 2. Modal | Content Script → Modal | Pass emailData to UI |
+| 3. Submit | Modal → Background | Bundle with task options |
+| 4. Create | Background → ClickUp | Task with embedded description |
+| 5. Comment | Background → ClickUp | Gmail link as comment |
+| 6. Attach | Background → ClickUp | HTML file upload |
+| 7. Field | Background → ClickUp | Thread ID to custom field |
+| 8. Cache | Background → Storage | Local mapping for inbox badges |
+
+### Gmail Link Format
+
+The Gmail link format ensures users can always return to the original email:
 
 ```
-Format: https://mail.google.com/mail/u/{account}/#inbox/{threadId}
-Example: https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde
+https://mail.google.com/mail/u/{account}/#inbox/{threadId}
+```
+
+| Component | Description | Example |
+|-----------|-------------|---------|
+| `u/{account}` | Gmail account index | `u/0` (primary), `u/1` (secondary) |
+| `#inbox/` | Navigation anchor | Opens inbox view |
+| `{threadId}` | 16-character hex ID | `19bc8ca9ffe18fde` |
+
+**Complete Example:**
+```
+https://mail.google.com/mail/u/0/#inbox/19bc8ca9ffe18fde
 ```
 
 ---
