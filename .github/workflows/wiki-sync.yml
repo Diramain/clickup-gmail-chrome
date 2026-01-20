@@ -14,23 +14,37 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Sync Technical Docs to Wiki
-        uses: Andrew-Chen-Wang/github-wiki-action@v4
+      - name: Sync Documents to Wiki
+        uses: spenserblack/actions-wiki@v0.1.0
         with:
-          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: TECHNICAL_DOCS.md
-          wiki-file-name: Technical-Documentation.md
-
-      - name: Sync User Guide to Wiki
-        uses: Andrew-Chen-Wang/github-wiki-action@v4
-        with:
-          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: USER_GUIDE.md
-          wiki-file-name: User-Guide.md
+          path: wiki_content
+          repository: Diramain/clickup-gmail-chrome.wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Sync Security Policy to Wiki
-        uses: Andrew-Chen-Wang/github-wiki-action@v4
-        with:
-          wiki-github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: SECURITY.md
-          wiki-file-name: Security.md
+      - name: Prepare Wiki Content
+        run: |
+          mkdir -p wiki_content
+          cp TECHNICAL_DOCS.md wiki_content/Technical-Documentation.md
+          cp USER_GUIDE.md wiki_content/User-Guide.md
+          [ -f SECURITY.md ] && cp SECURITY.md wiki_content/Security.md || true
+          [ -f CONTRIBUTING.md ] && cp CONTRIBUTING.md wiki_content/Contributing.md || true
+          
+          # Create Home.md if it doesn't exist
+          cat > wiki_content/Home.md << 'EOF'
+          # ClickUp Gmail Chrome Extension Wiki
+
+          Welcome! This wiki contains documentation for the ClickUp Gmail Chrome Extension.
+
+          ## 📚 Pages
+
+          - [[User Guide]] - Installation and feature usage
+          - [[Technical Documentation]] - Architecture, security, and API details
+          - [[Contributing]] - How to contribute
+          - [[Security]] - Security policy and reporting
+
+          ## 🔗 Quick Links
+
+          - [GitHub Repository](https://github.com/Diramain/clickup-gmail-chrome)
+          - [Releases](https://github.com/Diramain/clickup-gmail-chrome/releases)
+          - [Issues](https://github.com/Diramain/clickup-gmail-chrome/issues)
+          EOF
