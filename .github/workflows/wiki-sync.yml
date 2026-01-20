@@ -45,8 +45,6 @@ jobs:
           EOF
 
       - name: Sync Documents to Wiki
-        uses: spenserblack/actions-wiki@v0.1.0
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
-          wiki-directory: wiki_content
-          repository: Diramain/clickup-gmail-chrome.wiki
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: wiki_content
