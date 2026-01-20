@@ -138,7 +138,10 @@ initializeAPI();
 
 // Listen for messages from popup or content script
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
-    console.log('[ClickUp] Background received message:', message.action, message.data);
+    // Log meaningful data without sensitive info
+    const logData = { ...message };
+    if (logData.action === 'authenticate') delete logData.data; // Don't log tokens
+    console.log(`[ClickUp] Background received message: ${message.action}`, message.data || (Object.keys(message).length > 2 ? message : ''));
 
     handleMessage(message, sender)
         .then(response => {
@@ -357,12 +360,22 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
 
         case 'attachToTask':
-            return await attachEmailToTask(data);
+            // Modal sends taskId and emailData at message root, not in data
+            return await attachEmailToTask({
+                taskId: message.taskId || (data ? data.taskId : undefined),
+                emailData: message.emailData || (data ? data.emailData : undefined)
+            });
 
         case 'validateTask':
             // Verify if task exists and we have access
             const vTaskId = message.taskId || (data ? data.taskId : undefined);
             return await validateTask(vTaskId);
+
+        case 'validateTaskLink':
+            // Verify if task exists AND Thread ID is still linked
+            const vlTaskId = message.taskId || (data ? data.taskId : undefined);
+            const vlThreadId = message.threadId || (data ? data.threadId : undefined);
+            return await validateTaskLink(vlTaskId, vlThreadId);
 
         case 'findLinkedTasks':
             return await findLinkedTasks(data.threadId);
@@ -691,39 +704,68 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
     if (!teamId) throw new Error('No team found');
 
     const dateFrom = Date.now() - (days * 24 * 60 * 60 * 1000);
-    console.log(`[ClickUp] Email Sync: Fetching tasks modified since ${new Date(dateFrom).toISOString()}...`);
+    console.log(`[ClickUp] Email Sync: Fetching ALL tasks modified since ${new Date(dateFrom).toISOString()}...`);
 
-    const tasks = await clickupAPI!.getRecentTasks(teamId, dateFrom);
+    // Use paginated method to get ALL tasks, not just first 100
+    const tasks = await clickupAPI!.getAllTasksSince(teamId, dateFrom);
     const totalTasks = tasks.length;
-    console.log(`[ClickUp] Email Sync: Found ${totalTasks} recent tasks. Scanning for thread IDs...`);
+    console.log(`[ClickUp] Email Sync: Found ${totalTasks} total tasks. Scanning for Gmail Thread IDs...`);
 
-    // Get configured Custom Field Name
-    const settings = await chrome.storage.local.get(['threadIdField']);
+    // Get configured settings
+    const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
     const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+    const useCustomField = settings.useCustomFieldForThreadId !== false; // Default: true
+
+    console.log(`[ClickUp] Email Sync: Mode: ${useCustomField ? 'Custom Field' : 'Description'}, looking for "${customFieldName}"`);
 
     const mappings = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASK_MAPPINGS);
     const currentMappings = mappings[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {};
     let foundCount = 0;
 
+    // Patterns to find Thread ID in description/text_content
+    const threadIdPatterns = [
+        /\*\*Thread ID:\*\*\s*([a-f0-9]+)/i,  // **Thread ID:** xxx
+        /Thread ID:\s*([a-f0-9]+)/i,           // Thread ID: xxx
+        /threadId=([a-f0-9]+)/i,               // threadId=xxx
+        /inbox\/([a-f0-9]+)/i                  // Gmail URL pattern
+    ];
+
     for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
-        const threadId = extractThreadId(task, customFieldName);
+        let threadId: string | null = null;
 
-        // Log progress every 25 tasks or when finding a link
-        if ((i + 1) % 25 === 0 || i === totalTasks - 1) {
-            console.log(`[ClickUp] Email Sync: Scanned ${i + 1}/${totalTasks} tasks (${foundCount} links found)`);
+        if (useCustomField) {
+            // Toggle ON: Search in Custom Field
+            if (task.custom_fields && Array.isArray(task.custom_fields)) {
+                const threadIdField = task.custom_fields.find((field: any) =>
+                    field.name && field.name.toLowerCase() === customFieldName
+                );
+                if (threadIdField) {
+                    threadId = threadIdField.value || threadIdField.text_value || null;
+                }
+            }
+        } else {
+            // Toggle OFF: Search in Description/text_content
+            const searchText = (task.description || '') + ' ' + (task.text_content || '');
+            for (const pattern of threadIdPatterns) {
+                const match = searchText.match(pattern);
+                if (match) {
+                    threadId = match[1];
+                    break;
+                }
+            }
         }
 
-        if (threadId) {
+        if (threadId && typeof threadId === 'string' && threadId.length > 0) {
             foundCount++;
-            console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId.substring(0, 12)}...`);
+            console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId}`);
 
             // Add to mapping
             const entry = {
                 id: task.id,
                 name: task.name,
                 url: task.url,
-                status: task.status.status
+                status: task.status?.status || 'unknown'
             };
 
             const existing = currentMappings[threadId] || [];
@@ -732,9 +774,14 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
                 currentMappings[threadId] = existing;
             }
         }
+
+        // Log progress every 100 tasks
+        if ((i + 1) % 100 === 0) {
+            console.log(`[ClickUp] Email Sync: Scanned ${i + 1}/${totalTasks} tasks (${foundCount} links found)`);
+        }
     }
 
-    console.log(`[ClickUp] Email Sync: Complete. Found ${foundCount} email-linked tasks.`);
+    console.log(`[ClickUp] Email Sync: Complete. Scanned ${totalTasks} tasks, found ${foundCount} linked.`);
 
     await chrome.storage.local.set({
         [STORAGE_KEYS.EMAIL_TASK_MAPPINGS]: currentMappings,
@@ -833,6 +880,50 @@ async function validateTask(taskId: string) {
     }
 }
 
+/**
+ * Validate that a specific Thread ID is still linked to a task
+ * Checks either custom field or description based on toggle setting
+ */
+async function validateTaskLink(taskId: string, threadId: string): Promise<{ valid: boolean; linked: boolean; task?: any }> {
+    await ensureAPI();
+
+    try {
+        const task = await clickupAPI!.getTask(taskId);
+
+        // Get settings
+        const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
+        const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+        const useCustomField = settings.useCustomFieldForThreadId !== false;
+
+        let isLinked = false;
+
+        if (useCustomField) {
+            // Check custom field
+            if (task.custom_fields && Array.isArray(task.custom_fields)) {
+                const field = task.custom_fields.find((f: any) =>
+                    f.name && f.name.toLowerCase() === customFieldName
+                );
+                const fieldValue = field?.value || field?.text_value || '';
+                isLinked = fieldValue === threadId;
+            }
+        } else {
+            // Check description/text_content for Thread ID pattern
+            const searchText = (task.description || '') + ' ' + (task.text_content || '');
+            const patterns = [
+                new RegExp(`\\*\\*Thread ID:\\*\\*\\s*${threadId}`, 'i'),
+                new RegExp(`Thread ID:\\s*${threadId}`, 'i'),
+                new RegExp(`inbox/${threadId}`, 'i')
+            ];
+            isLinked = patterns.some(p => p.test(searchText));
+        }
+
+        console.log(`[ClickUp] validateTaskLink: Task ${taskId}, Thread ${threadId}, Linked: ${isLinked}`);
+        return { valid: true, linked: isLinked, task };
+    } catch (e) {
+        return { valid: false, linked: false };
+    }
+}
+
 async function createTaskSimple(data: { listId: string; name: string; description: string; assignees?: number[]; priority?: number }): Promise<ClickUpTask> {
     await ensureAPI();
 
@@ -868,19 +959,48 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     const { taskId, emailData } = data;
     const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
 
-    const commentText = `📧 **Email adjunto:** ${emailData.subject}\nFrom: ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})`;
+    // First get the task to know its list
+    const task = await clickupAPI!.getTask(taskId);
 
+    // Get configured Custom Field Name for Thread ID
+    const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
+    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+    const useCustomField = settings.useCustomFieldForThreadId !== false; // Default: true
+
+    // Save Thread ID based on toggle setting
+    if (useCustomField && emailData.threadId && task.list?.id) {
+        // Toggle ON: Save to Custom Field
+        try {
+            const customFields = await clickupAPI!.getAccessibleCustomFields(task.list.id);
+            const threadIdField = customFields.fields.find(f => f.name.trim().toLowerCase() === customFieldName);
+
+            if (threadIdField) {
+                await clickupAPI!.setCustomFieldValue(taskId, threadIdField.id, emailData.threadId);
+                console.log(`[ClickUp] Saved Thread ID to Custom Field "${customFieldName}" for attached task ${taskId}`);
+            } else {
+                console.warn(`[ClickUp] Custom Field "${customFieldName}" not found in list ${task.list.id}. Thread ID not saved to field.`);
+            }
+        } catch (e) {
+            console.error('[ClickUp] Failed to set Custom Field for attached task:', e);
+        }
+    } else if (!useCustomField && emailData.threadId) {
+        // Toggle OFF: Save to Description via Comment (can't edit task description directly via API easily)
+        // We'll add thread ID in a structured comment that can be searched
+        const threadIdComment = `📎 **Thread ID:** ${emailData.threadId}`;
+        await clickupAPI!.addComment(taskId, threadIdComment);
+        console.log(`[ClickUp] Saved Thread ID to comment for attached task ${taskId} (custom field disabled)`);
+    }
+
+    // Add comment with email link
+    const commentText = `📧 **Email adjunto:** ${emailData.subject}\nFrom: ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})`;
     await clickupAPI!.addComment(taskId, commentText);
 
+    // Attach email HTML
     if (emailData.html) {
         await clickupAPI!.uploadAttachment(taskId, emailData.html, emailData.subject, emailData);
     }
 
-    // We should also link the thread if possible
-    // But this function is usually for attaching to existing task
-    // We can try to set custom field here too if we want
-
-    const task = await clickupAPI!.getTask(taskId);
+    // Save to local mapping for quick lookup
     await saveEmailTaskMapping(emailData.threadId, task);
 
     return task;

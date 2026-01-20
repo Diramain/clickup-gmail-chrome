@@ -219,10 +219,45 @@ export class ClickUpAPIWrapper {
     }
 
     async getRecentTasks(teamId: string, dateFrom: number): Promise<ClickUpTask[]> {
+        // Note: Custom fields are included by default in task responses
         const result = await this.request(
             `/team/${teamId}/task?include_closed=true&date_updated_gt=${dateFrom}&page=0`
         );
         return result.tasks || [];
+    }
+
+    /**
+     * Get ALL tasks modified since a date, with pagination
+     * Iterates through all pages until no more results
+     */
+    async getAllTasksSince(teamId: string, dateFrom: number): Promise<ClickUpTask[]> {
+        const allTasks: ClickUpTask[] = [];
+        let page = 0;
+        let hasMore = true;
+
+        while (hasMore) {
+            const result = await this.request(
+                `/team/${teamId}/task?include_closed=true&date_updated_gt=${dateFrom}&page=${page}`
+            );
+
+            const tasks = result.tasks || [];
+            allTasks.push(...tasks);
+
+            // ClickUp returns max 100 per page, if less then we're done
+            if (tasks.length < 100) {
+                hasMore = false;
+            } else {
+                page++;
+            }
+
+            // Safety limit to prevent infinite loops
+            if (page > 50) {
+                console.warn('[API] getAllTasksSince: Reached page limit (50)');
+                hasMore = false;
+            }
+        }
+
+        return allTasks;
     }
 
     // ========================================================================

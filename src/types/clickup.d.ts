@@ -299,6 +299,7 @@ export type MessageAction =
     | 'createTaskSimple'
     | 'attachToTask'
     | 'validateTask'
+    | 'validateTaskLink'
     | 'findLinkedTasks'
     | 'searchTasks'
     | 'testTokenRefresh'

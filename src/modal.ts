@@ -1278,7 +1278,13 @@ export class TaskModal {
             }
 
         } catch (error: any) {
-            this.showToast(error.message, 'error');
+            // Check for extension context invalidation (happens when extension is reloaded)
+            if (error?.message?.includes('Extension context invalidated') ||
+                error?.message?.includes('Extension runtime error')) {
+                this.showToast('Extension reloaded. Please refresh Gmail.', 'error');
+            } else {
+                this.showToast(error.message || 'Failed to attach email', 'error');
+            }
         }
 
         btn.disabled = false;
@@ -1392,39 +1398,50 @@ export class TaskModal {
                 tasks = response.tasks;
             }
 
-            // Filter results locally - only keep tasks that actually contain the search words
-            const searchWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-            if (searchWords.length > 0 && !taskId) {
-                tasks = tasks.filter(task => {
-                    const taskNameLower = task.name.toLowerCase();
-                    // Task must contain at least one of the search words
-                    return searchWords.some(word => taskNameLower.includes(word));
+            // Sort results by relevance
+            if (tasks.length > 0) {
+                const queryLower = query.toLowerCase().trim();
+                const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
+
+                tasks.sort((a, b) => {
+                    const nameA = a.name.toLowerCase();
+                    const nameB = b.name.toLowerCase();
+
+                    // 1. Exact match (highest priority)
+                    const exactA = nameA === queryLower;
+                    const exactB = nameB === queryLower;
+                    if (exactA && !exactB) return -1;
+                    if (!exactA && exactB) return 1;
+
+                    // 2. Starts with query
+                    const startA = nameA.startsWith(queryLower);
+                    const startB = nameB.startsWith(queryLower);
+                    if (startA && !startB) return -1;
+                    if (!startA && startB) return 1;
+
+                    // 3. Contains all words
+                    const allWordsA = queryWords.every(w => nameA.includes(w));
+                    const allWordsB = queryWords.every(w => nameB.includes(w));
+                    if (allWordsA && !allWordsB) return -1;
+                    if (!allWordsA && allWordsB) return 1;
+
+                    // 4. Default by date updated (if available) or name length
+                    // Prefer shorter names if they match equally well (likely more precise)
+                    return nameA.length - nameB.length;
                 });
             }
 
+            // Always add exact match from ID lookup to the top if found
             if (exactMatch) {
+                // Remove it from list if it's there to avoid duplicates
                 tasks = tasks.filter(t => t.id !== exactMatch!.id);
                 tasks.unshift(exactMatch);
             }
 
-            const lowerQuery = (taskId || query).toLowerCase();
-            tasks.sort((a, b) => {
-                // Exact ID match first
-                if (a.id.toLowerCase() === lowerQuery) return -1;
-                if (b.id.toLowerCase() === lowerQuery) return 1;
 
-                // Then tasks containing more search words
-                const aMatches = searchWords.filter(w => a.name.toLowerCase().includes(w)).length;
-                const bMatches = searchWords.filter(w => b.name.toLowerCase().includes(w)).length;
-                if (aMatches !== bMatches) return bMatches - aMatches;
-
-                // Then ID matches
-                if (a.id.toLowerCase().includes(lowerQuery) && !b.id.toLowerCase().includes(lowerQuery)) return -1;
-                if (b.id.toLowerCase().includes(lowerQuery) && !a.id.toLowerCase().includes(lowerQuery)) return 1;
-                return 0;
-            });
 
             if (tasks.length > 0) {
+                const lowerQuery = (taskId || query).toLowerCase();
                 resultsContainer.innerHTML = tasks.slice(0, 10).map(task => {
                     const listName = typeof task.list === 'object' ? task.list?.name : task.list || 'Unknown';
                     const isExact = task.id.toLowerCase() === lowerQuery;
@@ -1453,9 +1470,15 @@ export class TaskModal {
             } else {
                 resultsContainer.innerHTML = '<div class="cu-search-empty">No tasks found</div>';
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('[Modal] Search error:', error);
-            resultsContainer.innerHTML = '<div class="cu-search-error">Search failed</div>';
+            // Check for extension context invalidation (happens when extension is reloaded)
+            if (error?.message?.includes('Extension context invalidated') ||
+                error?.message?.includes('Extension runtime error')) {
+                resultsContainer.innerHTML = '<div class="cu-search-error">Extension reloaded. Please refresh Gmail.</div>';
+            } else {
+                resultsContainer.innerHTML = '<div class="cu-search-error">Search failed</div>';
+            }
         }
     }
 
@@ -1465,8 +1488,18 @@ export class TaskModal {
             return urlMatch[1];
         }
 
-        if (/^[a-zA-Z0-9]{6,12}$/.test(input.trim())) {
-            return input.trim();
+        // Regex for ClickUp Task IDs: alfanumeric, often starts with numbers but not always.
+        // Avoid simple words by checking for mixed case or numbers + letters
+        const idRegex = /^[a-zA-Z0-9]{5,12}$/;
+        const trimmed = input.trim();
+
+        if (idRegex.test(trimmed)) {
+            // Extra check: if it's purely letters and < 6 chars, it's likely a word (e.g. "team", "task")
+            // ClickUp IDs usually have numbers or are longer if letters only (rare)
+            if (/^[a-zA-Z]+$/.test(trimmed) && trimmed.length < 8) {
+                return null;
+            }
+            return trimmed;
         }
 
         const hashMatch = input.match(/^#([a-zA-Z0-9]+)$/);

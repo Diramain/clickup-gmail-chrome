@@ -32,7 +32,9 @@ interface EmailData {
 }
 
 interface ValidationResponse {
-    exists: boolean;
+    valid: boolean;
+    linked?: boolean;
+    task?: any;
     error?: string;
 }
 
@@ -148,7 +150,8 @@ async function validateAndCleanTasks(allTasks: Record<string, TaskMapping[]>): P
                 const errorMsg = (response?.error || '').toLowerCase();
                 const isDeleted = errorMsg.includes('not found') || errorMsg.includes('deleted');
 
-                if (response && response.exists && !isDeleted) {
+                // Note: validateTask returns { valid: true/false, task }
+                if (response && response.valid && !isDeleted) {
                     validTasks.push(task);
                 } else {
                     hasChanges = true;
@@ -399,18 +402,21 @@ async function verifyThreadTasks(threadId: string, barElement: Element): Promise
         try {
             Logger.debug(' Verifying task:', task.id);
             const response = await chrome.runtime.sendMessage({
-                action: 'validateTask',
-                taskId: task.id
+                action: 'validateTaskLink',
+                taskId: task.id,
+                threadId: threadId
             }) as ValidationResponse;
             Logger.debug(` Validation response for ${task.id}:`, response);
 
             const errorMsg = (response?.error || '').toLowerCase();
             const isDeleted = errorMsg.includes('not found') || errorMsg.includes('deleted');
 
-            if (response && response.exists && !isDeleted) {
+            // Note: validateTaskLink returns { valid: true/false, linked: true/false, task }
+            // We only keep tasks that are valid (exist) AND linked (contain the Thread ID)
+            if (response && response.valid && response.linked && !isDeleted) {
                 validTasks.push(task);
             } else {
-                Logger.info(' Detected deleted/archived task:', task.id);
+                Logger.info(' Removed task (deleted or unlinked):', task.id);
                 changed = true;
             }
         } catch (e) {
