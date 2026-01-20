@@ -327,6 +327,9 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getMembers':
             return await clickupAPI!.getListMembers(message.listId || (data ? data.listId : undefined));
 
+        case 'getList':
+            return await clickupAPI!.getList(message.listId || (data ? data.listId : undefined));
+
         case 'getEmailTasksSyncStatus':
             // Return persisted sync status
             const emailSyncData = await chrome.storage.local.get(['lastEmailSync', 'lastEmailSyncCount']);

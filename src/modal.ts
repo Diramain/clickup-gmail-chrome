@@ -73,6 +73,7 @@ interface TaskData {
     markdown_description?: string;
     assignees?: number[];
     priority?: number;
+    status?: string;
     start_date?: number;
     due_date?: number;
     time_estimate?: number;
@@ -207,6 +208,14 @@ export class TaskModal {
                   <option value="4">🔵 Low</option>
                 </select>
               </div>
+              <div class="cu-form-group">
+                <label>Status</label>
+                <select id="cu-status" class="cu-input cu-select">
+                  <option value="">Select list first...</option>
+                </select>
+              </div>
+            </div>
+            <div class="cu-form-row">
               <div class="cu-form-group">
                 <label>Assignee</label>
                 <div class="cu-assignee-container">
@@ -1003,6 +1012,7 @@ export class TaskModal {
         const input = this.modal!.querySelector('#cu-location-input') as HTMLInputElement;
         const selectedDiv = this.modal!.querySelector('.cu-selected-location') as HTMLElement;
         const pathSpan = this.modal!.querySelector('.cu-location-path') as HTMLElement;
+        const statusSelect = this.modal!.querySelector('#cu-status') as HTMLSelectElement;
 
         input.classList.add('hidden');
         selectedDiv.classList.remove('hidden');
@@ -1010,20 +1020,41 @@ export class TaskModal {
 
         this.modal!.querySelector('.cu-location-dropdown')!.classList.add('hidden');
 
+        // Fetch list details (including statuses) and members in parallel
         try {
-            console.log('[Modal] Loading members for list:', listId);
-            const membersResult = await chrome.runtime.sendMessage({
-                action: 'getMembers',
-                data: { listId: listId }
-            }) as MembersResponse;
-            console.log('[Modal] Members result:', membersResult);
+            console.log('[Modal] Loading list details and members for:', listId);
 
+            const [listResult, membersResult] = await Promise.all([
+                chrome.runtime.sendMessage({
+                    action: 'getList',
+                    listId: listId
+                }),
+                chrome.runtime.sendMessage({
+                    action: 'getMembers',
+                    data: { listId: listId }
+                }) as Promise<MembersResponse>
+            ]);
+
+            // Populate statuses
+            if (listResult && listResult.statuses && listResult.statuses.length > 0) {
+                statusSelect.innerHTML = listResult.statuses.map((s: any) =>
+                    `<option value="${s.status}" style="color: ${s.color}">${s.status}</option>`
+                ).join('');
+                // Default to first status (usually "open" or "to do")
+                statusSelect.value = listResult.statuses[0].status;
+                console.log('[Modal] Loaded', listResult.statuses.length, 'statuses');
+            } else {
+                statusSelect.innerHTML = '<option value="">No statuses available</option>';
+            }
+
+            // Populate members
             if (membersResult && membersResult.members) {
                 this.hierarchy.members = membersResult.members;
                 console.log('[Modal] Loaded', membersResult.members.length, 'members');
             }
         } catch (e) {
-            console.error('[Modal] Failed to load members:', e);
+            console.error('[Modal] Failed to load list details:', e);
+            statusSelect.innerHTML = '<option value="">Error loading statuses</option>';
         }
     }
 
@@ -1221,6 +1252,12 @@ export class TaskModal {
             const priorityValue = (this.modal!.querySelector('#cu-priority') as HTMLSelectElement).value;
             if (priorityValue) {
                 taskData.priority = parseInt(priorityValue);
+            }
+
+            // Add status if selected
+            const statusValue = (this.modal!.querySelector('#cu-status') as HTMLSelectElement).value;
+            if (statusValue) {
+                taskData.status = statusValue;
             }
 
             if (timeEstimate) taskData.time_estimate = timeEstimate;

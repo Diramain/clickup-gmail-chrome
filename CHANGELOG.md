@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-01-20
+
+### Improved
+- **Task Search** - "Attach to Existing" search now prioritizes exact title matches and supports flexible multi-word queries
+- **Email Sync** - Now scans ALL tasks in date range via pagination (fixes 100 task limit)
+- **Validation** - Robust link verification on reload: validates Thread ID presence in Custom Field or Description. Automatically removes button if link is broken.
+
+### Added
+- **Status Selection** - Added "Status" dropdown in Create Task modal (dynamically populated from selected List)
+
+### Fixed
+- **Custom Field Logic** - "Attach to Existing" and Sync now correctly respect the "Use Custom Field" toggle
+- **Sync Detection** - Fixed detection of Thread IDs in custom fields during sync
+- **API Optimization** - Reduced invalid API calls by refining Task ID detection logic
+
 ## [1.1.2] - 2026-01-19
 
 ### Fixed

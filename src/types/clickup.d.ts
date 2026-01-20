@@ -83,6 +83,7 @@ export interface ClickUpList {
     archived: boolean;
     override_statuses: boolean;
     permission_level: string;
+    statuses?: ClickUpStatus[];
 }
 
 export interface ClickUpListsResponse {
@@ -293,6 +294,7 @@ export type MessageAction =
     | 'getLists'
     | 'getFolderlessLists'
     | 'getMembers'
+    | 'getList'
     | 'createTask'
     | 'createTaskFull'
     | 'createTaskFromEmail'

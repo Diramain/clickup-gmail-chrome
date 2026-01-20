@@ -9,6 +9,7 @@ import type {
     ClickUpSpacesResponse,
     ClickUpFoldersResponse,
     ClickUpListsResponse,
+    ClickUpList,
     ClickUpTask,
     ClickUpTasksResponse,
     CreateTaskPayload,
@@ -173,6 +174,10 @@ export class ClickUpAPIWrapper {
 
     async getListMembers(listId: string): Promise<any> {
         return this.request(`/list/${listId}/member`);
+    }
+
+    async getList(listId: string): Promise<ClickUpList> {
+        return this.request(`/list/${listId}`);
     }
 
     // Alias for background.ts compatibility

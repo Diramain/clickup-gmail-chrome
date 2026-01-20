@@ -1,7 +1,7 @@
 # ClickUp Gmail Chrome Extension
 ## User Guide
 
-**Version:** 1.1.2  
+**Version:** 1.1.3  
 **Last Updated:** January 2026
 
 ---
@@ -56,6 +56,7 @@ The modal includes:
 | **Task Name** | Pre-filled with email subject |
 | **Description** | Rich text editor with formatting |
 | **Location** | Workspace → Space → Folder → List |
+| **Status** | Select task status (dynamically loaded) |
 | **Assignees** | Select team members |
 | **Start Date** | When to begin the task |
 | **Due Date** | Deadline |

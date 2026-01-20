@@ -1,9 +1,9 @@
 # ClickUp Gmail Chrome Extension
-## Technical Documentation v1.1.2
+## Technical Documentation v1.1.3
 
 **Author:** Leandro Iramain  
 **Date:** January 2026  
-**Version:** 1.1.2
+**Version:** 1.1.3
 
 ---
 
@@ -133,6 +133,7 @@ Full-featured task creation modal with:
 - Assignee selection
 - Date pickers
 - Priority selection
+- Status selection with dynamic loading
 - File attachments
 
 ---
