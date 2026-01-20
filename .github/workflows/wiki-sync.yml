@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'TECHNICAL_DOCS.md'
+      - 'USER_GUIDE.md'
+      - '.github/workflows/wiki-sync.yml'
 
 jobs:
   sync-wiki:
@@ -14,13 +16,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Sync Documents to Wiki
-        uses: spenserblack/actions-wiki@v0.1.0
-        with:
-          path: wiki_content
-          repository: Diramain/clickup-gmail-chrome.wiki
-          token: ${{ secrets.GITHUB_TOKEN }}
-          
       - name: Prepare Wiki Content
         run: |
           mkdir -p wiki_content
@@ -48,3 +43,10 @@ jobs:
           - [Releases](https://github.com/Diramain/clickup-gmail-chrome/releases)
           - [Issues](https://github.com/Diramain/clickup-gmail-chrome/issues)
           EOF
+
+      - name: Sync Documents to Wiki
+        uses: spenserblack/actions-wiki@v0.1.0
+        with:
+          wiki-directory: wiki_content
+          repository: Diramain/clickup-gmail-chrome.wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
