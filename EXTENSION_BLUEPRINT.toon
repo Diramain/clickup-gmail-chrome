@@ -1,0 +1,575 @@
+// ============================================================================
+// ClickUp Gmail Chrome Extension - Technical Blueprint
+// Format: TOON (Token-Oriented Object Notation)
+// Purpose: Complete reference for building a new Chrome extension from scratch
+// Version: 1.1.4 | Date: 2026-01
+// ============================================================================
+
+meta:
+  name: ClickUp Gmail Chrome Extension
+  type: Manifest V3 Chrome Extension
+  author: Leandro Iramain
+  license: MIT
+  stack: TypeScript,esbuild,Chrome APIs,ClickUp API v2
+
+// ============================================================================
+// SECTION 1: PROJECT STRUCTURE
+// ============================================================================
+
+structure:
+  root[12]:
+    manifest.json,package.json,tsconfig.json,build.js
+    background.ts,task-modal.html
+    src/,popup/,styles/,icons/,tests/,.github/
+
+  src[6]:
+    gmail-native.ts,gmail-adapter.ts,clickup-tracker.ts
+    modal.ts,logger.ts,constants.ts
+    services/,types/
+
+  services[5]:
+    api.service.ts,auth.service.ts,crypto.service.ts
+    storage.service.ts,timer.service.ts
+
+  types[2]: clickup.d.ts,chrome.d.ts
+  popup[4]: popup.html,popup.css,popup.ts,tabs/
+  styles[2]: gmail-native.css,modal.css
+
+// ============================================================================
+// SECTION 2: DEPENDENCIES
+// ============================================================================
+
+dependencies:
+  dev:
+    @types/chrome: ^0.0.260
+    esbuild: ^0.19.0
+    typescript: ^5.9.3
+    jest: ^29.7.0
+    jest-environment-jsdom: ^29.7.0
+
+  runtime: none
+
+  note: Zero runtime dependencies - all vanilla TypeScript
+
+// ============================================================================
+// SECTION 3: MANIFEST V3 CONFIGURATION
+// ============================================================================
+
+manifest:
+  version: 3
+  permissions[4]: storage,identity,contextMenus,tabs
+  host_permissions[3]:
+    https://api.clickup.com/*
+    https://mail.google.com/*
+    https://*.clickup.com/*
+
+  background:
+    type: service_worker
+    file: background.js
+    module: true
+
+  content_scripts[2]:
+    gmail:
+      matches: https://mail.google.com/*
+      js[3]: src/logger.js,src/gmail-adapter.js,src/gmail-native.js
+      css[2]: styles/gmail-native.css,styles/modal.css
+      run_at: document_idle
+    clickup:
+      matches: https://*.clickup.com/*
+      js[1]: src/clickup-tracker.js
+      run_at: document_start
+
+  action:
+    popup: popup/popup.html
+    icons[4]: 16,32,48,128
+
+// ============================================================================
+// SECTION 4: ARCHITECTURE
+// ============================================================================
+
+architecture:
+  components[5]:
+    background: Central hub - OAuth, API, message routing, caching
+    gmail_content: Gmail DOM integration, email extraction, UI injection
+    clickup_content: Auto-timer on ClickUp.com task views
+    popup: Settings, search, timer controls (3 tabs)
+    modal: Full task creation form with rich text editor
+
+  data_flow:
+    content_script -> background: chrome.runtime.sendMessage
+    background -> api: fetch with retry logic
+    popup <-> background: chrome.runtime.sendMessage
+    modal <-> background: chrome.runtime.sendMessage
+
+  storage:
+    type: chrome.storage.local
+    encryption: AES-256-GCM for tokens
+
+// ============================================================================
+// SECTION 5: SECURITY IMPLEMENTATION
+// ============================================================================
+
+security:
+  encryption:
+    algorithm: AES-256-GCM
+    key_storage: chrome.storage.local (base64)
+    iv_size: 96 bits (random per encryption)
+
+  encrypted_keys[3]:
+    secure_accessToken: OAuth access token
+    secure_refreshToken: OAuth refresh token
+    secure_oauthConfig: Client ID + encrypted secret
+
+  functions:
+    generateEncryptionKey(): CryptoKey
+    getOrCreateEncryptionKey(): CryptoKey
+    encryptToken(token): {iv,ciphertext}
+    decryptToken(encrypted): string
+    saveSecureToken(key,token): void
+    getSecureToken(key): string
+
+  permissions_principle: Least privilege - no <all_urls>, no webRequest
+
+// ============================================================================
+// SECTION 6: CLICKUP API SERVICE
+// ============================================================================
+
+api:
+  base_url: https://api.clickup.com/api/v2
+  auth_type: Bearer token
+
+  class: ClickUpAPIWrapper
+  retry:
+    max_retries: 3
+    retry_codes[5]: 429,500,502,503,504
+    backoff: exponential
+
+  methods:
+    user:
+      getUser(): ClickUpUserResponse
+      getTeams(): ClickUpTeamsResponse
+
+    hierarchy:
+      getSpaces(teamId): ClickUpSpacesResponse
+      getFolders(spaceId): ClickUpFoldersResponse
+      getListsInFolder(folderId): ClickUpListsResponse
+      getListsInSpace(spaceId): ClickUpListsResponse
+      getFolderlessLists(spaceId): ClickUpListsResponse
+      getList(listId): ClickUpList
+      getListMembers(listId): members[]
+
+    tasks:
+      createTask(listId,payload): ClickUpTask
+      getTask(taskId): ClickUpTask
+      searchTasks(teamId,query): ClickUpTasksResponse
+      getTasks(listId): ClickUpTasksResponse
+      getRecentTasks(teamId,dateFrom): ClickUpTask[]
+      getAllTasksSince(teamId,dateFrom): ClickUpTask[]
+
+    custom_fields:
+      getAccessibleCustomFields(listId): ClickUpCustomFieldsResponse
+      setCustomFieldValue(taskId,fieldId,value): any
+
+    comments_attachments:
+      addComment(taskId,text): ClickUpComment
+      getTaskComments(taskId): ClickUpComment[]
+      uploadAttachment(taskId,formData): ClickUpAttachment
+
+    time_tracking:
+      startTimer(teamId,taskId): timer
+      stopTimer(teamId): timer
+      getRunningTimer(teamId): timer|null
+      createTimeEntry(teamId,taskId,duration,start?): entry
+      getTimeEntries(teamId,startDate?,endDate?): TimeEntry[]
+
+// ============================================================================
+// SECTION 7: API ENDPOINTS REFERENCE
+// ============================================================================
+
+endpoints[16]{method,path,description}:
+  GET,/user,Get authenticated user
+  GET,/team,Get user teams/workspaces
+  GET,/team/{id}/space,Get spaces in team
+  GET,/space/{id}/folder,Get folders in space
+  GET,/folder/{id}/list,Get lists in folder
+  GET,/space/{id}/list,Get folderless lists
+  POST,/list/{id}/task,Create task
+  GET,/task/{id},Get task details
+  GET,/team/{id}/task?query=,Search tasks
+  GET,/task/{id}/comment,Get task comments
+  POST,/task/{id}/comment,Add comment
+  POST,/task/{id}/attachment,Upload file
+  POST,/task/{id}/field/{fieldId},Set custom field
+  GET,/team/{id}/time_entries,Get time entries
+  POST,/team/{id}/time_entries/start,Start timer
+  POST,/team/{id}/time_entries/stop,Stop timer
+
+// ============================================================================
+// SECTION 8: OAUTH FLOW
+// ============================================================================
+
+oauth:
+  type: OAuth 2.0 Authorization Code
+  endpoints:
+    authorize: https://app.clickup.com/api?client_id={id}&redirect_uri={uri}
+    token: https://api.clickup.com/api/v2/oauth/token
+
+  flow:
+    1: User clicks Sign In in popup
+    2: Extension opens OAuth popup via chrome.identity
+    3: User authorizes on ClickUp
+    4: ClickUp redirects with authorization code
+    5: Extension exchanges code for access+refresh tokens
+    6: Tokens encrypted and stored
+    7: Popup refreshes to show authenticated state
+
+  token_refresh:
+    trigger: 401 response
+    method: POST /oauth/token with refresh_token
+    auto_retry: yes (request retried after refresh)
+
+// ============================================================================
+// SECTION 9: MESSAGE ACTIONS (chrome.runtime.sendMessage)
+// ============================================================================
+
+message_actions[25]:
+  auth[4]: authenticate,logout,checkAuth,getStatus
+  user[2]: getUser,getTeams
+  hierarchy[6]: getSpaces,getFolders,getLists,getFolderlessLists,getMembers,getList
+  tasks[7]: createTask,createTaskFull,createTaskFromEmail,attachToTask,validateTask,searchTasks,getTaskById
+  cache[3]: preloadFullHierarchy,getHierarchyCache,syncEmailTasks
+  timer[5]: startTimer,stopTimer,getRunningTimer,createTimeEntry,getTimeEntries
+  config[3]: saveOAuthConfig,savePreferredTeam,getPreferredTeam
+
+// ============================================================================
+// SECTION 10: TYPE DEFINITIONS
+// ============================================================================
+
+types:
+  user:
+    ClickUpUser: id,username,email,color,profilePicture,initials,role?
+    ClickUpMember: user:ClickUpUser
+    ClickUpTeam: id,name,color,avatar,members[]
+
+  hierarchy:
+    ClickUpSpace: id,name,private,statuses[],multiple_assignees,features
+    ClickUpFolder: id,name,orderindex,hidden,space,task_count,lists[]
+    ClickUpList: id,name,orderindex,status,priority,assignee,task_count,folder,space,statuses?
+
+  task:
+    ClickUpTask: id,custom_id,name,text_content,description,status,orderindex,date_created,date_updated,archived,creator,assignees[],tags[],priority,due_date,start_date,custom_fields[],url,list,folder,space
+    ClickUpStatus: id?,status,color,type,orderindex
+    ClickUpPriority: id,priority,color,orderindex
+    ClickUpCustomField: id,name,type,type_config,date_created,required
+
+  task_payload:
+    CreateTaskPayload: name,description?,markdown_description?,assignees[]?,tags[]?,status?,priority?,due_date?,start_date?,time_estimate?,custom_fields[]?
+
+  extension:
+    EmailData: threadId,subject,from,html,email?,userEmail?,attachments[]?
+    EmailTaskMapping: id,name,url,status?,createdAt?
+    TimeEntry: id,task?,wid?,user?,start,end?,duration,description?,running?
+    ExtensionMessage: action:MessageAction,data?,*
+
+// ============================================================================
+// SECTION 11: STORAGE SCHEMA
+// ============================================================================
+
+storage:
+  tokens:
+    secure_accessToken: EncryptedData
+    secure_refreshToken: EncryptedData
+    secure_oauthConfig: EncryptedData
+
+  user_data:
+    cachedUser: ClickUpUser
+    cachedTeams: {teams[],timestamp}
+    preferredTeamId: string
+
+  cache:
+    hierarchyCache: {spaces[],lists[]?,timestamp}
+    emailTaskMappings: Record<threadId,TaskMapping>
+
+  settings:
+    autoStartTimer: boolean
+    autoStopTimer: boolean
+    useCustomFieldForThreadId: boolean
+    threadIdField: string
+
+  limits:
+    MAX_EMAIL_TASK_MAPPINGS: 1000
+    MAX_CACHED_TASKS_AGE_DAYS: 90
+    MAX_HIERARCHY_CACHE_AGE_MS: 86400000
+
+// ============================================================================
+// SECTION 12: BUILD SYSTEM
+// ============================================================================
+
+build:
+  tool: esbuild
+  config:
+    format: iife
+    platform: browser
+    target: chrome100
+    sourcemap: inline (dev) | false (prod)
+    minify: false (dev) | true (prod)
+
+  bundled_files[5]:
+    background.ts -> background.js
+    popup/popup.ts -> popup/popup.js
+    src/modal.ts -> src/modal.js
+    src/gmail-native.ts -> src/gmail-native.js
+    src/task-modal-entry.ts -> task-modal-entry.js
+
+  unbundled_files[3]:
+    src/logger.ts -> src/logger.js
+    src/gmail-adapter.ts -> src/gmail-adapter.js
+    src/clickup-tracker.ts -> src/clickup-tracker.js
+
+  commands:
+    npm run build: tsc && node build.js
+    npm run watch: tsc -w & node build.js --watch
+    npm run typecheck: tsc --noEmit
+
+// ============================================================================
+// SECTION 13: TYPESCRIPT CONFIGURATION
+// ============================================================================
+
+typescript:
+  target: ES2020
+  module: ESNext
+  lib[3]: ES2020,DOM,DOM.Iterable
+  moduleResolution: bundler
+  strict: true
+  strictNullChecks: true
+  noImplicitAny: true
+  noImplicitReturns: true
+  types[1]: chrome
+
+  include[3]: src/**/*.ts,background.ts,popup/**/*.ts
+  exclude[3]: node_modules,dist,tests
+
+// ============================================================================
+// SECTION 14: EMAIL ATTACHMENT FLOW
+// ============================================================================
+
+email_attachment_flow:
+  step1_extract:
+    source: Gmail DOM
+    data: threadId,subject,from,body,bodyHtml,date
+    file: src/gmail-native.ts -> GmailAdapter class
+
+  step2_modal:
+    trigger: Click "Add to ClickUp" button
+    action: Open modal with emailData context
+    prefill: Task name = email subject
+
+  step3_submit:
+    message: createTaskFull
+    payload: listId,taskData,emailData,attachWithFiles,timeTracked,teamId
+
+  step4_create_task:
+    api: POST /list/{id}/task
+    description: Embed email body + Gmail link
+
+  step5_add_comment:
+    api: POST /task/{id}/comment
+    content: Gmail link + Thread ID
+
+  step6_upload_html:
+    condition: attachWithFiles === true
+    api: POST /task/{id}/attachment
+    file: Complete HTML document with original email
+
+  step7_store_threadid:
+    method_a: Custom field (comma-separated for multiple)
+    method_b: Description fallback
+    api: POST /task/{id}/field/{fieldId}
+    format: 19bc8ca9ffe18fde,19bd2f4a3c817abc
+
+  step8_cache:
+    storage: emailTaskMappings[threadId]
+    data: id,name,url,status,createdAt
+
+// ============================================================================
+// SECTION 15: GMAIL LINK FORMAT
+// ============================================================================
+
+gmail_link:
+  format: https://mail.google.com/mail/u/{account}/#inbox/{threadId}
+  account: 0 = primary, 1+ = secondary accounts
+  threadId: 16-char hex (e.g., 19bc8ca9ffe18fde)
+
+// ============================================================================
+// SECTION 16: CONTENT SCRIPT SELECTORS
+// ============================================================================
+
+gmail_selectors:
+  thread_id: URL hash #inbox/{threadId}
+  subject: [data-thread-perm-id] h2
+  sender: [email] attribute
+  body: .a3s.aiL
+  header_container: .adn.ads (for UI injection)
+
+clickup_selectors:
+  timer_not_running: .cu-time-tracker-timer-toggle__play-icon
+  timer_running: .cu-time-tracker-timer-toggle__stop-icon
+  timer_toggle: cu-time-tracker-timer-toggle-v3
+  task_url_pattern: /t/{taskId}
+
+// ============================================================================
+// SECTION 17: TESTING
+// ============================================================================
+
+testing:
+  framework: Jest
+  environment: jsdom
+  config: jest.config.js
+  location: tests/
+
+  test_files[4]:
+    background.test.js: Helper functions,storage
+    modal.test.js: Text parsing,HTML conversion
+    api.service.test.js: API wrapper
+    crypto.test.js: Encryption/decryption
+
+  commands:
+    npm test: Run all tests
+    npm test:watch: Watch mode
+    npm test:coverage: Coverage report
+
+// ============================================================================
+// SECTION 18: CI/CD
+// ============================================================================
+
+cicd:
+  platform: GitHub Actions
+  workflow: .github/workflows/ci.yml
+
+  steps[7]:
+    1: actions/checkout@v4
+    2: actions/setup-node@v4 (node 20)
+    3: npm ci
+    4: npm run typecheck
+    5: npm test
+    6: npm run build
+    7: actions/upload-artifact@v4
+
+  triggers[2]: push,pull_request
+
+// ============================================================================
+// SECTION 19: KEY CONSTANTS
+// ============================================================================
+
+constants:
+  api_base: https://api.clickup.com/api/v2
+  timeouts:
+    SEARCH_DEBOUNCE_MS: 300
+    TOAST_DURATION_MS: 3000
+  limits:
+    MAX_SEARCH_RESULTS: 50
+    MAX_LIST_RESULTS: 20
+    MAX_TIME_ENTRIES: 50
+  cache_ttl:
+    SEARCH_CACHE_MS: 300000
+    TASK_CACHE_MS: 1800000
+    HIERARCHY_CACHE_MS: 86400000
+
+// ============================================================================
+// SECTION 20: POPUP INTERFACE
+// ============================================================================
+
+popup:
+  tabs[3]:
+    tasks:
+      - Task search (by name or ID)
+      - Quick create form
+      - Full form (opens modal)
+    tracking:
+      - Running timer display
+      - Auto-tracking toggles
+      - Start timer on task
+      - Manual time entry
+      - Recent entries (7 days)
+    config:
+      - User info display
+      - Preferred workspace selector
+      - Custom field config
+      - List cache sync
+      - Email tasks sync
+      - Data export/clear
+      - Dev tools (token refresh test)
+
+// ============================================================================
+// SECTION 21: MODAL FEATURES
+// ============================================================================
+
+modal:
+  rich_text_editor:
+    formats[8]: bold,italic,strikethrough,code,link,bullet_list,numbered_list,quote
+    shortcuts: Ctrl+B (bold),Ctrl+I (italic)
+    output: Markdown
+
+  hierarchy_browser:
+    flow: Workspace -> Space -> Folder? -> List
+    search: Fuzzy word-based (any order)
+    scoring: Exact match +100, substring +50, word in name +10, shorter path preferred
+
+  fields:
+    - Task name (required)
+    - Description (rich text)
+    - Location (hierarchy picker)
+    - Assignees (multi-select)
+    - Priority (dropdown)
+    - Status (dynamic from list)
+    - Start date (date picker)
+    - Due date (date picker)
+    - Time estimate (duration input)
+    - Time tracked (manual entry)
+    - Attach email files (checkbox)
+
+// ============================================================================
+// SECTION 22: AUTO-TIMER (ClickUp Content Script)
+// ============================================================================
+
+auto_timer:
+  trigger: Navigating to /t/{taskId} URL on ClickUp.com
+  behavior:
+    auto_start: If enabled and timer not running, click play
+    auto_stop: If enabled and navigating away from task
+  detection: MutationObserver + popstate event
+  ui_interaction: Find timer elements via selectors, dispatch click events
+
+// ============================================================================
+// SECTION 23: LOGGER
+// ============================================================================
+
+logger:
+  levels[4]: DEBUG,INFO,WARN,ERROR
+  production_mode:
+    DEBUG: suppressed
+    INFO: suppressed
+    WARN: shown
+    ERROR: shown
+  format: [ClickUp] [LEVEL] message
+
+// ============================================================================
+// SECTION 24: RELEASE PACKAGE CONTENTS
+// ============================================================================
+
+release_package:
+  include[9]:
+    manifest.json
+    background.js
+    popup/*
+    src/*.js
+    styles/*
+    icons/*
+    task-modal.html
+    task-modal-entry.js
+
+  exclude[5]: *.ts,tests/,node_modules/,.github/,.git/
+
+// ============================================================================
+// END OF BLUEPRINT
+// ============================================================================
