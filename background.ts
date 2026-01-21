@@ -735,16 +735,16 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
 
     for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
-        let threadId: string | null = null;
+        let threadIdValue: string | null = null;
 
         if (useCustomField) {
-            // Toggle ON: Search in Custom Field
+            // Toggle ON: Search in Custom Field (supports multiple Thread IDs separated by comma)
             if (task.custom_fields && Array.isArray(task.custom_fields)) {
                 const threadIdField = task.custom_fields.find((field: any) =>
                     field.name && field.name.toLowerCase() === customFieldName
                 );
                 if (threadIdField) {
-                    threadId = threadIdField.value || threadIdField.text_value || null;
+                    threadIdValue = threadIdField.value || threadIdField.text_value || null;
                 }
             }
         } else {
@@ -753,28 +753,33 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
             for (const pattern of threadIdPatterns) {
                 const match = searchText.match(pattern);
                 if (match) {
-                    threadId = match[1];
+                    threadIdValue = match[1];
                     break;
                 }
             }
         }
 
-        if (threadId && typeof threadId === 'string' && threadId.length > 0) {
-            foundCount++;
-            console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId}`);
+        if (threadIdValue && typeof threadIdValue === 'string' && threadIdValue.length > 0) {
+            // Split by comma to support multiple Thread IDs
+            const threadIds = threadIdValue.split(',').map(id => id.trim()).filter(id => id.length > 0);
 
-            // Add to mapping
-            const entry = {
-                id: task.id,
-                name: task.name,
-                url: task.url,
-                status: task.status?.status || 'unknown'
-            };
+            for (const threadId of threadIds) {
+                foundCount++;
+                console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId}`);
 
-            const existing = currentMappings[threadId] || [];
-            if (!existing.find((t: any) => t.id === entry.id)) {
-                existing.push(entry);
-                currentMappings[threadId] = existing;
+                // Add to mapping
+                const entry = {
+                    id: task.id,
+                    name: task.name,
+                    url: task.url,
+                    status: task.status?.status || 'unknown'
+                };
+
+                const existing = currentMappings[threadId] || [];
+                if (!existing.find((t: any) => t.id === entry.id)) {
+                    existing.push(entry);
+                    currentMappings[threadId] = existing;
+                }
             }
         }
 
@@ -901,13 +906,15 @@ async function validateTaskLink(taskId: string, threadId: string): Promise<{ val
         let isLinked = false;
 
         if (useCustomField) {
-            // Check custom field
+            // Check custom field (supports multiple Thread IDs separated by comma)
             if (task.custom_fields && Array.isArray(task.custom_fields)) {
                 const field = task.custom_fields.find((f: any) =>
                     f.name && f.name.toLowerCase() === customFieldName
                 );
                 const fieldValue = field?.value || field?.text_value || '';
-                isLinked = fieldValue === threadId;
+                // Split by comma and check if threadId is in the list
+                const threadIds = fieldValue.split(',').map((id: string) => id.trim());
+                isLinked = threadIds.includes(threadId);
             }
         } else {
             // Check description/text_content for Thread ID pattern
@@ -972,14 +979,30 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
 
     // Save Thread ID based on toggle setting
     if (useCustomField && emailData.threadId && task.list?.id) {
-        // Toggle ON: Save to Custom Field
+        // Toggle ON: Save to Custom Field (supports multiple Thread IDs separated by comma)
         try {
             const customFields = await clickupAPI!.getAccessibleCustomFields(task.list.id);
             const threadIdField = customFields.fields.find(f => f.name.trim().toLowerCase() === customFieldName);
 
             if (threadIdField) {
-                await clickupAPI!.setCustomFieldValue(taskId, threadIdField.id, emailData.threadId);
-                console.log(`[ClickUp] Saved Thread ID to Custom Field "${customFieldName}" for attached task ${taskId}`);
+                // Get existing value from task's custom fields
+                const existingField = task.custom_fields?.find((f: any) =>
+                    f.name && f.name.toLowerCase() === customFieldName
+                );
+                const existingValue = existingField?.value || existingField?.text_value || '';
+
+                // Check if this Thread ID is already in the list
+                const existingIds = existingValue ? existingValue.split(',').map((id: string) => id.trim()) : [];
+                if (!existingIds.includes(emailData.threadId)) {
+                    // Append new Thread ID with comma separator
+                    const newValue = existingValue
+                        ? `${existingValue},${emailData.threadId}`
+                        : emailData.threadId;
+                    await clickupAPI!.setCustomFieldValue(taskId, threadIdField.id, newValue);
+                    console.log(`[ClickUp] Saved Thread ID to Custom Field "${customFieldName}" for attached task ${taskId} (total: ${existingIds.length + 1})`);
+                } else {
+                    console.log(`[ClickUp] Thread ID ${emailData.threadId} already linked to task ${taskId}`);
+                }
             } else {
                 console.warn(`[ClickUp] Custom Field "${customFieldName}" not found in list ${task.list.id}. Thread ID not saved to field.`);
             }

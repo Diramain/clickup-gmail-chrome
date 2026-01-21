@@ -1244,8 +1244,10 @@ export class TaskModal {
                 name: (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).value || 'Email Task',
                 markdown_description: this.getDescription(),
                 assignees: assignees,
-                start_date: startDate ? new Date(startDate).getTime() : undefined,
-                due_date: dueDate ? new Date(dueDate).getTime() : undefined
+                // FIX: Parse dates with local time to avoid UTC offset issues
+                // Adding T12:00:00 ensures the date stays correct regardless of timezone
+                start_date: startDate ? new Date(startDate + 'T12:00:00').getTime() : undefined,
+                due_date: dueDate ? new Date(dueDate + 'T12:00:00').getTime() : undefined
             };
 
             // Add priority if selected
