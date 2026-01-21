@@ -1,9 +1,9 @@
 # ClickUp Gmail Chrome Extension
-## Technical Documentation v1.1.3
+## Technical Documentation v1.1.4
 
 **Author:** Leandro Iramain  
 **Date:** January 2026  
-**Version:** 1.1.3
+**Version:** 1.1.4
 
 ---
 
@@ -1092,16 +1092,31 @@ Content-Type: text/html
 
 **File:** `background.ts`
 
-The thread ID is stored to enable finding tasks from Gmail:
+The thread ID is stored to enable finding tasks from Gmail. **Multiple Thread IDs** are supported (comma-separated):
 
 ```typescript
-// Option A: Custom Field (if configured)
+// Option A: Custom Field (if configured) - supports multiple IDs
 if (useCustomFieldForThreadId && threadIdFieldId) {
-    await clickupAPI.setCustomField(task.id, threadIdFieldId, emailData.threadId);
+    // Check if task already has Thread IDs
+    const existingValue = task.custom_fields?.find(f => f.name === fieldName)?.value || '';
+    const existingIds = existingValue.split(',').map(id => id.trim());
+    
+    if (!existingIds.includes(emailData.threadId)) {
+        // Append new ID with comma separator
+        const newValue = existingValue 
+            ? `${existingValue},${emailData.threadId}` 
+            : emailData.threadId;
+        await clickupAPI.setCustomFieldValue(task.id, threadIdFieldId, newValue);
+    }
 }
 
 // Option B: Always add to description (fallback)
 // The thread ID is embedded in the Gmail link URL itself
+```
+
+**Custom Field Format (multiple emails):**
+```
+19bc8ca9ffe18fde,19bd2f4a3c817abc,19be5c1d2e9f0123
 ```
 
 **API Call (Custom Field):**
@@ -1110,7 +1125,7 @@ POST https://api.clickup.com/api/v2/task/{taskId}/field/{fieldId}
 Content-Type: application/json
 
 {
-    "value": "19bc8ca9ffe18fde"
+    "value": "19bc8ca9ffe18fde,19bd2f4a3c817abc"
 }
 ```
 

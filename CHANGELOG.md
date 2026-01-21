@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-01-21
+
+### Added
+- **Multiple Thread IDs** - Attach multiple emails to the same task; Thread IDs are stored comma-separated in custom field
+
+### Fixed
+- **Date Timezone Bug** - Dates no longer show -1 day offset; fixed by using local time instead of UTC midnight
+
 ## [1.1.3] - 2026-01-20
 
 ### Improved
