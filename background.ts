@@ -74,6 +74,38 @@ chrome.runtime.onInstalled.addListener(() => {
         title: "Add to ClickUp",
         contexts: ["all"]
     });
+
+    // Create alarm for timer polling
+    chrome.alarms.create('timer-poll', { periodInMinutes: 1 });
+});
+
+// Alarm listener for polling
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === 'timer-poll') {
+        const store = await chrome.storage.local.get([STORAGE_KEYS.PREFERRED_TEAM, STORAGE_KEYS.CACHED_TEAMS]);
+        let teamId = store[STORAGE_KEYS.PREFERRED_TEAM];
+
+        if (!teamId && store[STORAGE_KEYS.CACHED_TEAMS]?.teams?.length > 0) {
+            teamId = store[STORAGE_KEYS.CACHED_TEAMS].teams[0].id;
+        }
+
+        if (teamId) {
+            await ensureAPI();
+            try {
+                const timer = await clickupAPI!.getRunningTimer(teamId);
+                // Update badge based on timer state
+                if (timer && (timer as any).data) { // Handle wrapped response
+                    await updateTimerBadge('playing');
+                } else if (timer) {
+                    await updateTimerBadge('playing');
+                } else {
+                    await updateTimerBadge('stopped');
+                }
+            } catch (e) {
+                console.error('[ClickUp] Timer poll failed:', e);
+            }
+        }
+    }
 });
 
 // Initialize API wrapper

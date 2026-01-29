@@ -724,11 +724,13 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 return;
             }
 
-            // BUG FIX: Request entries from last 7 days to get fresh data
-            const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+            // BUG FIX: Request entries only for today
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+
             const result = await sendMessage<any[]>({
                 action: 'getTimeEntries',
-                data: { teamId, start_date: sevenDaysAgo }
+                data: { teamId, start_date: startOfToday.getTime() }
             });
 
             if (result?.length > 0) {

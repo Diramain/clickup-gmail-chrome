@@ -371,7 +371,10 @@ export class ClickUpAPIWrapper {
     async startTimer(teamId: string, taskId: string): Promise<any> {
         return this.request(`/team/${teamId}/time_entries/start`, {
             method: 'POST',
-            body: JSON.stringify({ tid: taskId })
+            body: JSON.stringify({
+                tid: taskId,
+                billable: true
+            })
         });
     }
 
@@ -400,7 +403,8 @@ export class ClickUpAPIWrapper {
             body: JSON.stringify({
                 tid: taskId,
                 start: startTime,
-                duration: duration
+                duration: duration,
+                billable: true
             })
         });
     }
