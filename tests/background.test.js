@@ -4,6 +4,12 @@
  */
 
 const { mockStorage, mockRuntime } = require('./setup');
+const fs = require('fs');
+const path = require('path');
+
+function source(relativePath) {
+    return fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
+}
 
 // ============================================================================
 // Helper functions to test (extracted logic)
@@ -188,6 +194,101 @@ describe('Chrome Storage Integration', () => {
         await chrome.storage.local.remove('toRemove');
         const result = await chrome.storage.local.get('toRemove');
         expect(result.toRemove).toBeUndefined();
+    });
+});
+
+describe('Background-owned local data clear', () => {
+    test('popup delegates clear to background and background serializes mapping clear', () => {
+        const popup = source('popup/popup.ts');
+        const background = source('background.ts');
+
+        expect(popup).toMatch(/sendMessage\(\{ action: 'clearLocalData' \}\)/);
+        expect(popup).not.toMatch(/chrome\.storage\.local\.remove\(\[\s*['"]emailTaskMappings/);
+        expect(background).toMatch(/case 'clearLocalData'/);
+        expect(background).toMatch(/async function clearLocalData/);
+        expect(background).toMatch(/const next = mappingWriteQueue\.then\(async \(\) => \{/);
+        expect(background).toMatch(/await chrome\.storage\.local\.remove\(\[/);
+        expect(background).toMatch(/await chrome\.storage\.local\.set\(\{\s*\[STORAGE_KEYS\.EMAIL_TASK_MAPPINGS_V2\]: \{\}/);
+        expect(background).toMatch(/const schemaVersion = resolveSchemaVersion\(store\.schemaVersion\)/);
+        expect(background).toMatch(/hierarchyCache = \{\}/);
+        expect(background).not.toMatch(/lastEmailSync:\s*undefined|lastEmailSyncCount:\s*undefined/);
+    });
+
+    test('mapping writer reads and preserves future schemaVersion', () => {
+        const background = source('background.ts');
+
+        expect(background).toMatch(/chrome\.storage\.local\.get\(\[STORAGE_KEYS\.EMAIL_TASK_MAPPINGS, STORAGE_KEYS\.EMAIL_TASK_MAPPINGS_V2, 'schemaVersion'\]\)/);
+        expect(background).toMatch(/function safeSchemaVersion\(value: unknown\): number/);
+        expect(background).toMatch(/Number\.isFinite\(version\) && version >= 0 \? Math\.floor\(version\) : 0/);
+        expect(background).toMatch(/function resolveSchemaVersion\(stored: unknown, extra: unknown = 0\): number/);
+        const safe = (value) => {
+            const version = Number(value);
+            return Number.isFinite(version) && version >= 0 ? Math.floor(version) : 0;
+        };
+        const resolve = (stored, extra = 0) => Math.max(safe(stored), 2, safe(extra));
+        expect(resolve(7)).toBe(7);
+        expect(resolve('bad', Number.NaN)).toBe(2);
+        expect(resolve(Infinity, 9)).toBe(9);
+    });
+
+    test('serialized clear final state removes V1 and caches while preserving future schema version', async () => {
+        const state = {
+            emailTaskMappings: { thread1: [{ id: 'legacy' }] },
+            emailTaskMappingsV2: { thread1: [{ id: 'v2' }] },
+            schemaVersion: 7,
+            lastEmailSync: 1,
+            lastEmailSyncCount: 2,
+            hierarchyCache: { team: {} },
+            hierarchyPreloadStatus: { team: {} },
+            cachedTeams: { teams: [] },
+            cachedUser: { user: {} },
+        };
+        const order = [];
+        const storage = {
+            async get(key) {
+                order.push(`get:${Array.isArray(key) ? key.join(',') : key}`);
+                return typeof key === 'string' ? { [key]: state[key] } : state;
+            },
+            async remove(keys) {
+                order.push(`remove:${keys.join(',')}`);
+                keys.forEach(key => delete state[key]);
+            },
+            async set(items) {
+                order.push(`set:${Object.keys(items).join(',')}`);
+                Object.assign(state, items);
+            },
+        };
+
+        const store = await storage.get('schemaVersion');
+        await storage.remove(['emailTaskMappings', 'emailTaskMappingsV2', 'lastEmailSync', 'lastEmailSyncCount', 'hierarchyCache', 'hierarchyPreloadStatus', 'cachedTeams', 'cachedUser']);
+        await storage.set({ emailTaskMappingsV2: {}, schemaVersion: Math.max(Number(store.schemaVersion || 0), 2) });
+
+        expect(order).toEqual([
+            'get:schemaVersion',
+            'remove:emailTaskMappings,emailTaskMappingsV2,lastEmailSync,lastEmailSyncCount,hierarchyCache,hierarchyPreloadStatus,cachedTeams,cachedUser',
+            'set:emailTaskMappingsV2,schemaVersion',
+        ]);
+        expect(state.emailTaskMappings).toBeUndefined();
+        expect(state.emailTaskMappingsV2).toEqual({});
+        expect(state.schemaVersion).toBe(7);
+        expect(state.hierarchyCache).toBeUndefined();
+        expect(state.lastEmailSync).toBeUndefined();
+    });
+
+    test('syncEmailTasks no longer accepts emailData branch or destructive single-email sync', () => {
+        const background = source('background.ts');
+
+        expect(background).toMatch(/case 'syncEmailTasks'/);
+        expect(background).not.toMatch(/data\.emailData[\s\S]{0,120}syncSingleEmailTask/);
+        expect(background).not.toMatch(/mappings\[emailData\.threadId\]\s*=\s*tasks\.map/);
+    });
+
+    test('findLinkedTasks is local and visible-only, attach rejects unsanitized HTML before ensureAPI', () => {
+        const background = source('background.ts');
+
+        expect(background).toMatch(/async function findLinkedTasks/);
+        expect(background).toMatch(/toVisibleLinkedTasks\(mappings\[threadId\] \|\| \[\]\)\.map/);
+        expect(background).toMatch(/if \(data\.emailData\?\.html && data\.emailData\.htmlSanitized !== true\)[\s\S]{0,160}throw new Error\('El HTML del email debe estar sanitizado antes de adjuntarlo\.'\);[\s\S]{0,40}await ensureAPI\(\)/);
     });
 });
 

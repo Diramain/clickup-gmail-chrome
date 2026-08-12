@@ -37,6 +37,31 @@ const mockStorage = {
     }
 };
 
+const mockSessionStorage = {
+    data: {},
+    async get(keys) {
+        if (typeof keys === 'string') return { [keys]: this.data[keys] };
+        if (Array.isArray(keys)) {
+            const result = {};
+            keys.forEach(key => {
+                if (this.data[key] !== undefined) result[key] = this.data[key];
+            });
+            return result;
+        }
+        return this.data;
+    },
+    async set(items) {
+        Object.assign(this.data, items);
+    },
+    async remove(keys) {
+        const keysArray = Array.isArray(keys) ? keys : [keys];
+        keysArray.forEach(key => delete this.data[key]);
+    },
+    clear() {
+        this.data = {};
+    }
+};
+
 // Mock Chrome Runtime API
 const mockRuntime = {
     listeners: {},
@@ -70,14 +95,21 @@ const mockTabs = {
     sendMessage: jest.fn()
 };
 
+const mockWindows = {
+    create: jest.fn(),
+    update: jest.fn()
+};
+
 // Global Chrome object
 global.chrome = {
     storage: {
-        local: mockStorage
+        local: mockStorage,
+        session: mockSessionStorage
     },
     runtime: mockRuntime,
     identity: mockIdentity,
-    tabs: mockTabs
+    tabs: mockTabs,
+    windows: mockWindows
 };
 
 // Global fetch mock
@@ -86,6 +118,7 @@ global.fetch = jest.fn();
 // Helper to reset all mocks between tests
 beforeEach(() => {
     mockStorage.clear();
+    mockSessionStorage.clear();
     jest.clearAllMocks();
     global.fetch.mockReset();
 });
@@ -93,7 +126,9 @@ beforeEach(() => {
 // Export for use in tests
 module.exports = {
     mockStorage,
+    mockSessionStorage,
     mockRuntime,
     mockIdentity,
-    mockTabs
+    mockTabs,
+    mockWindows
 };

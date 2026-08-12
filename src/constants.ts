@@ -102,8 +102,6 @@ export const DATA_LIMITS = {
     /** Maximum number of email-task mappings to store */
     MAX_EMAIL_TASKS: 1000,
 
-    /** Maximum age of email-task mappings in days */
-    EMAIL_TASKS_MAX_AGE_DAYS: 90,
 } as const;
 
 // ============================================================================

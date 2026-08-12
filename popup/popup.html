@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 
 <head>
     <meta charset="UTF-8">
@@ -31,25 +31,25 @@
         <!-- Loading State -->
         <div id="loading" class="loading">
             <div class="spinner"></div>
-            <p>Loading...</p>
+            <p>Cargando…</p>
         </div>
 
         <!-- Login Required (same as before) -->
         <div id="login-required" class="section hidden">
             <div class="card">
-                <h2>OAuth Configuration</h2>
-                <p class="help-text">Create a ClickUp OAuth App to connect:</p>
+                <h2>Configuración OAuth</h2>
+                <p class="help-text">Esta ventana durable conserva el setup aunque cambies de pestaña. Creá una app OAuth de ClickUp para conectar:</p>
 
                 <!-- Step 1: Redirect URL -->
                 <div class="step-card">
                     <span class="step-number">1</span>
                     <div class="step-content">
-                        <p>Copy this <strong>Redirect URL</strong>:</p>
+                        <p>Copiá esta <strong>URL de redirección (Redirect URL)</strong>:</p>
                         <div class="url-box">
-                            <input type="text" id="redirectUrl" readonly>
-                            <button id="copyUrl" class="btn-icon" title="Copy URL">📋</button>
+                            <input type="text" id="redirectUrl" readonly aria-label="URL de redirección OAuth">
+                            <button id="copyUrl" class="btn-icon" title="Copiar URL" aria-label="Copiar URL de redirección">📋</button>
                         </div>
-                        <p class="hint">Click the 📋 button to copy</p>
+                        <p class="hint">Usá el botón 📋 para copiarla</p>
                     </div>
                 </div>
 
@@ -57,9 +57,8 @@
                 <div class="step-card">
                     <span class="step-number">2</span>
                     <div class="step-content">
-                        <p>Go to <a href="https://app.clickup.com/settings/integrations" target="_blank">ClickUp
-                                Integrations</a></p>
-                        <p class="hint">Click "Create an App" and paste the Redirect URL</p>
+                        <p>Andá a <a href="https://app.clickup.com/settings/integrations" target="_blank" rel="noopener noreferrer">Integraciones de ClickUp</a></p>
+                        <p class="hint">Elegí crear una app y pegá la URL de redirección</p>
                     </div>
                 </div>
 
@@ -67,91 +66,95 @@
                 <div class="step-card">
                     <span class="step-number">3</span>
                     <div class="step-content">
-                        <p>Enter your credentials below:</p>
+                        <p>Ingresá las credenciales abajo:</p>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label for="clientId">Client ID</label>
-                    <input type="text" id="clientId" placeholder="Enter Client ID">
+                    <label for="clientId">ID de cliente (Client ID)</label>
+                    <input type="text" id="clientId" placeholder="Ingresá el Client ID">
                 </div>
 
                 <div class="form-group">
-                    <label for="clientSecret">Client Secret</label>
-                    <input type="password" id="clientSecret" placeholder="Enter Client Secret">
+                    <label for="clientSecret">Secreto de cliente (Client Secret)</label>
+                    <input type="password" id="clientSecret" placeholder="Ingresá el Client Secret">
                 </div>
 
-                <button id="saveConfig" class="btn btn-secondary">Save Configuration</button>
+                <div class="btn-row">
+                    <button id="saveConfig" class="btn btn-secondary">Guardar configuración</button>
+                    <button id="discardOAuthChanges" class="btn btn-link" type="button">Descartar cambios</button>
+                </div>
+                <p id="oauthConfigStatus" class="hint" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
             </div>
 
             <button id="signIn" class="btn btn-primary" disabled>
-                Sign in with ClickUp
+                Iniciar sesión con ClickUp
             </button>
 
             <button id="openWindow" class="btn btn-link">
-                📐 Open in separate window (recommended)
+                📐 Abrir ventana durable de configuración
             </button>
         </div>
 
         <!-- Logged In - Tabbed Interface -->
         <div id="logged-in" class="section hidden">
             <!-- Tab Navigation - Tracking is default (first active) -->
-            <nav class="tab-nav">
-                <button class="tab-btn" data-tab="tasks">
+            <nav class="tab-nav" role="tablist" aria-label="Secciones de ClickUp Gmail">
+                <button class="tab-btn" data-tab="tasks" role="tab" aria-controls="tab-tasks" aria-selected="false">
                     <span class="tab-icon">📋</span>
-                    <span class="tab-label">Tasks</span>
+                    <span class="tab-label">Tareas</span>
                 </button>
-                <button class="tab-btn active" data-tab="tracking">
+                <button class="tab-btn active" data-tab="tracking" role="tab" aria-controls="tab-tracking" aria-selected="true">
                     <span class="tab-icon">⏱️</span>
-                    <span class="tab-label">Tracking</span>
+                    <span class="tab-label">Seguimiento</span>
                 </button>
-                <button class="tab-btn" data-tab="config">
+                <button class="tab-btn" data-tab="config" role="tab" aria-controls="tab-config" aria-selected="false">
                     <span class="tab-icon">⚙️</span>
-                    <span class="tab-label">Config</span>
+                    <span class="tab-label">Configuración</span>
                 </button>
             </nav>
 
             <!-- ========================================== -->
             <!-- TAB A: Tasks -->
             <!-- ========================================== -->
-            <section id="tab-tasks" class="tab-content hidden">
+            <section id="tab-tasks" class="tab-content hidden" role="tabpanel">
                 <!-- Search Task -->
                 <div class="card">
-                    <h3>🔍 Search Task</h3>
-                    <input type="text" id="taskSearch" placeholder="Search by title or task ID...">
+                    <h3>🔍 Buscar tarea</h3>
+                    <input type="text" id="taskSearch" placeholder="Buscar por título o ID de tarea…">
                     <div id="searchResults" class="search-results"></div>
                 </div>
 
                 <!-- Create Task - Two buttons -->
                 <div class="card">
-                    <h3>➕ Create Task</h3>
+                    <h3>➕ Crear tarea</h3>
                     <div class="create-task-buttons">
                         <button id="quickCreateTask" class="btn btn-primary">
-                            ⚡ Quick Create
+                            ⚡ Creación rápida
                         </button>
                         <button id="openTaskModal" class="btn btn-secondary">
-                            📝 Full Form
+                            📝 Formulario completo
                         </button>
                     </div>
-                    <p class="hint text-center mt-8">Quick: inline form / Full: popup like Gmail</p>
+                    <p class="hint text-center mt-8">Rápida: formulario integrado / Completa: ventana similar a Gmail</p>
                 </div>
 
                 <!-- Quick Create Form (toggleable) -->
                 <div id="quickCreateForm" class="card hidden">
-                    <h3>⚡ Quick Create</h3>
+                    <h3>⚡ Creación rápida</h3>
                     <div class="form-group">
-                        <input type="text" id="newTaskName" placeholder="Task name...">
+                        <input type="text" id="newTaskName" placeholder="Nombre de la tarea…">
                     </div>
                     <div class="form-group">
-                        <textarea id="newTaskDescription" placeholder="Description (optional)..." rows="2"></textarea>
+                        <textarea id="newTaskDescription" placeholder="Descripción (opcional)…" rows="2"></textarea>
                     </div>
                     <div class="form-group">
-                        <input type="text" id="listSearch" placeholder="Search destination list...">
+                        <input type="text" id="listSearch" placeholder="Buscar lista de destino…">
                         <div id="listSearchResults" class="search-results"></div>
                     </div>
                     <div class="btn-row">
-                        <button id="cancelQuickCreate" class="btn btn-link">Cancel</button>
-                        <button id="createTask" class="btn btn-primary" disabled>Create Task</button>
+                        <button id="cancelQuickCreate" class="btn btn-link">Cancelar</button>
+                        <button id="createTask" class="btn btn-primary" disabled>Crear tarea</button>
                     </div>
                 </div>
             </section>
@@ -159,35 +162,35 @@
             <!-- ========================================== -->
             <!-- TAB B: Time Tracking (DEFAULT) -->
             <!-- ========================================== -->
-            <section id="tab-tracking" class="tab-content active">
+            <section id="tab-tracking" class="tab-content active" role="tabpanel">
                 <!-- Running Timer -->
                 <div class="card timer-card">
                     <div id="runningTimer" class="running-timer hidden">
-                        <p class="timer-task-name" id="timerTaskName">Task Name</p>
+                        <p class="timer-task-name" id="timerTaskName">Nombre de la tarea</p>
                         <p class="timer-display" id="timerDisplay">00:00:00</p>
                         <div class="timer-controls">
-                            <button id="stopTimer" class="btn btn-danger">⏹️ Stop</button>
+                            <button id="stopTimer" class="btn btn-danger">⏹️ Detener</button>
                         </div>
                     </div>
                     <div id="noTimer" class="no-timer">
                         <p class="timer-display dim">00:00:00</p>
-                        <p class="hint">No timer running</p>
+                        <p class="hint">No hay temporizador activo</p>
                     </div>
                 </div>
 
                 <!-- Auto Tracking Toggles -->
                 <div class="card">
-                    <h3>🤖 Auto Tracking</h3>
-                    <p class="hint mb-8">Settings saved for future ClickUp.com integration</p>
+                    <h3>🤖 Seguimiento automático</h3>
+                    <p class="hint mb-8">Configuración guardada para futura integración con ClickUp.com</p>
                     <div class="toggle-row">
-                        <span class="toggle-label">Auto-start when opening task</span>
+                        <span class="toggle-label">Iniciar automáticamente al abrir una tarea</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="autoStartToggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
                     <div class="toggle-row">
-                        <span class="toggle-label">Auto-stop when closing task</span>
+                        <span class="toggle-label">Detener automáticamente al cerrar una tarea</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="autoStopToggle">
                             <span class="toggle-slider"></span>
@@ -197,31 +200,31 @@
 
                 <!-- Start Timer on Task -->
                 <div class="card">
-                    <h3>▶️ Start Timer</h3>
-                    <input type="text" id="trackTaskSearch" placeholder="Search task to track...">
+                    <h3>▶️ Iniciar temporizador</h3>
+                    <input type="text" id="trackTaskSearch" placeholder="Buscar tarea para registrar tiempo…">
                     <div id="trackSearchResults" class="search-results"></div>
-                    <button id="startTimerBtn" class="btn btn-primary" disabled>▶️ Start Timer</button>
+                    <button id="startTimerBtn" class="btn btn-primary" disabled>▶️ Iniciar temporizador</button>
                 </div>
 
                 <!-- Manual Time Entry -->
                 <div class="card">
-                    <h3>✍️ Manual Entry</h3>
+                    <h3>✍️ Entrada manual</h3>
                     <div class="form-group">
-                        <input type="text" id="manualTaskSearch" placeholder="Search task...">
+                        <input type="text" id="manualTaskSearch" placeholder="Buscar tarea…">
                         <div id="manualSearchResults" class="search-results"></div>
                     </div>
                     <div class="form-group">
-                        <label>Duration <span class="hint">(e.g. 1h, 30m, 1:30, 1h30m)</span></label>
-                        <input type="text" id="durationInput" placeholder="e.g. 1h 30m or 1:30">
+                        <label>Duración <span class="hint">(ej. 1h, 30m, 1:30, 1h30m)</span></label>
+                        <input type="text" id="durationInput" placeholder="ej. 1h 30m o 1:30">
                     </div>
-                    <button id="addManualTime" class="btn btn-secondary" disabled>Add Time Entry</button>
+                    <button id="addManualTime" class="btn btn-secondary" disabled>Agregar tiempo</button>
                 </div>
 
                 <!-- Time History -->
                 <div class="card">
-                    <h3>📊 Recent Entries</h3>
+                    <h3>📊 Entradas recientes</h3>
                     <div id="timeHistory" class="time-history">
-                        <p class="hint">Loading entries...</p>
+                        <p class="hint">Cargando entradas…</p>
                     </div>
                 </div>
             </section>
@@ -229,63 +232,63 @@
             <!-- ========================================== -->
             <!-- TAB C: Configuration -->
             <!-- ========================================== -->
-            <section id="tab-config" class="tab-content hidden">
+            <section id="tab-config" class="tab-content hidden" role="tabpanel">
                 <!-- User Info -->
                 <div class="user-info">
                     <img id="userAvatar" src="" alt="Avatar" class="avatar">
                     <div class="user-details">
-                        <span id="userName" class="user-name">User Name</span>
+                        <span id="userName" class="user-name">Usuario</span>
                         <span id="userEmail" class="user-email">email@example.com</span>
                     </div>
                 </div>
 
                 <!-- Preferred Workspace -->
                 <div class="card">
-                    <h3>🏢 Preferred Workspace</h3>
-                    <p class="help-text">Select your preferred workspace for default actions:</p>
+                    <h3>🏢 Espacio de trabajo preferido</h3>
+                    <p class="help-text">Seleccioná el espacio de trabajo preferido para acciones predeterminadas:</p>
                     <select id="teamSelect" class="select">
-                        <option value="">Select Workspace...</option>
+                        <option value="">Seleccionar espacio…</option>
                     </select>
                 </div>
                 <!-- Custom Field Settings -->
                 <div class="card">
-                    <h3>🏷️ Custom Field</h3>
+                    <h3>🏷️ Campo personalizado</h3>
                     <div class="toggle-row mb-4">
-                        <span class="toggle-label">Use Custom Field Storage</span>
+                        <span class="toggle-label">Usar campo personalizado</span>
                         <label class="toggle-switch">
                             <input type="checkbox" id="useCustomFieldToggle" checked>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <p class="help-text">Name of the Text Custom Field to store Email Thread IDs:</p>
+                    <p class="help-text">Nombre del campo personalizado de texto para guardar IDs de hilos de email:</p>
                     <div class="form-group">
-                        <input type="text" id="customFieldName" placeholder="Default: Gmail Thread ID">
+                        <input type="text" id="customFieldName" placeholder="Predeterminado: Gmail Thread ID">
                     </div>
-                    <button id="saveCustomFieldConfig" class="btn btn-secondary btn-small">Save Field Name</button>
-                    <p class="hint mt-4">If disabled, Thread ID will be saved in the task description.</p>
+                    <button id="saveCustomFieldConfig" class="btn btn-secondary btn-small">Guardar nombre del campo</button>
+                    <p class="hint mt-4">Si está desactivado, Thread ID se guardará en la descripción de la tarea.</p>
                 </div>
 
                 <!-- Sync Cards -->
                 <div class="card sync-card">
-                    <h3>📦 List Cache</h3>
-                    <p class="help-text" id="syncStatus">Pre-load lists for faster task creation</p>
+                    <h3>📦 Caché de listas</h3>
+                    <p class="help-text" id="syncStatus">Precargar listas para crear tareas más rápido</p>
                     <button id="syncLists" class="btn btn-primary">
-                        <span class="btn-text">🔄 Sync Lists</span>
+                        <span class="btn-text">🔄 Sincronizar listas</span>
                         <span class="spinner hidden"></span>
                     </button>
                 </div>
 
                 <div class="card sync-card">
-                    <h3>📧 Email Tasks</h3>
-                    <p class="help-text" id="emailSyncStatus">Sync tasks linked to emails</p>
+                    <h3>📧 Tareas de email</h3>
+                    <p class="help-text" id="emailSyncStatus">Sincronizar tareas vinculadas a emails</p>
                     <div class="sync-options">
                         <select id="emailSyncDays" class="select-inline">
-                            <option value="30">Last 30 days</option>
-                            <option value="60">Last 60 days</option>
-                            <option value="90">Last 90 days</option>
+                            <option value="30">Últimos 30 días</option>
+                            <option value="60">Últimos 60 días</option>
+                            <option value="90">Últimos 90 días</option>
                         </select>
                         <button id="syncEmailTasks" class="btn btn-primary btn-small">
-                            <span class="btn-text">🔄 Sync</span>
+                            <span class="btn-text">🔄 Sincronizar</span>
                             <span class="spinner hidden"></span>
                         </button>
                     </div>
@@ -293,40 +296,44 @@
 
                 <!-- Feedback -->
                 <div class="card">
-                    <h3>💬 Feedback</h3>
+                    <h3>💬 Comentarios</h3>
                     <div class="form-group">
-                        <textarea id="feedbackText" placeholder="Your feedback or suggestions..." rows="3"></textarea>
+                        <textarea id="feedbackText" placeholder="Tus comentarios o sugerencias…" rows="3"></textarea>
                     </div>
-                    <button id="sendFeedback" class="btn btn-secondary">Send Feedback</button>
+                    <button id="sendFeedback" class="btn btn-secondary">Enviar comentarios</button>
                     <a href="https://github.com/diramain/clickup-gmail-chrome" target="_blank" class="btn btn-link">
-                        ⭐ View on GitHub
+                        ⭐ Ver en GitHub
                     </a>
                 </div>
 
                 <!-- Dev Tools -->
                 <div class="card dev-tools">
-                    <h3>🔧 Dev Tools</h3>
-                    <button id="testTokenRefresh" class="btn btn-warning">🧪 Test Token Refresh</button>
+                    <h3>🔧 Herramientas de desarrollo</h3>
+                    <button id="testTokenRefresh" class="btn btn-warning">🧪 Probar renovación de token</button>
                     <p class="hint" id="testResult"></p>
                 </div>
 
                 <!-- DBA-H1 & DM-H1: Data Management -->
                 <div class="card">
-                    <h3>💾 Data Management</h3>
-                    <p class="help-text">Export your email-task mappings or clear stored data</p>
+                    <h3>💾 Gestión de datos</h3>
+                    <p class="help-text">Exportá vínculos email-tarea o borrá datos guardados</p>
                     <div class="btn-row mt-8">
-                        <button id="exportData" class="btn btn-secondary btn-small">📥 Export Data</button>
-                        <button id="clearData" class="btn btn-danger btn-small">🗑️ Clear Data</button>
+                        <button id="exportData" class="btn btn-secondary btn-small">📥 Exportar datos</button>
+                        <button id="clearData" class="btn btn-danger btn-small">🗑️ Borrar datos</button>
                     </div>
                     <p class="hint mt-8" id="dataStatus"></p>
                 </div>
 
-                <button id="signOut" class="btn btn-danger">Sign Out</button>
+                <button id="signOut" class="btn btn-danger">Cerrar sesión</button>
             </section>
         </div>
 
         <footer class="popup-footer">
-            <p>Built by <strong>Leandro Iramain</strong> with ❤️ and AI</p>
+            <p>
+                <a href="https://leandroiramain.com.ar" target="_blank" rel="noopener noreferrer">
+                    Desarrollado por Leandro Iramain
+                </a>
+            </p>
         </footer>
     </div>
     <script src="popup.js"></script>

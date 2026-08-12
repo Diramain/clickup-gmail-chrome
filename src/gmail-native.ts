@@ -8,6 +8,18 @@
 import type { ILogger } from './logger';
 import type { IGmailAdapter } from './gmail-adapter';
 import { TaskModal } from './modal';
+import { ensureThreadBar } from './gmail-render-utils';
+import {
+    EMAIL_TASK_MAPPINGS_V2_KEY,
+    applyValidationToTask,
+    isConfirmedThreadId,
+    readMappingsWithFallback,
+    shouldValidateLink,
+    toVisibleLinkedTasks,
+    type EmailTaskMappingV2,
+    type LinkValidationResult,
+} from './link-hardening';
+import { escapeHTML, safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
@@ -17,39 +29,15 @@ declare const GmailAdapter: IGmailAdapter;
 // Types
 // ============================================================================
 
-interface TaskMapping {
-    id: string;
-    name: string;
-    url: string;
-}
+type TaskMapping = EmailTaskMappingV2;
 
 interface EmailData {
     threadId: string;
     subject: string;
     from: string;
     html: string;
+    htmlSanitized?: true;
     attachments?: { url: string; filename: string; mimeType: string }[];
-}
-
-interface ValidationResponse {
-    valid: boolean;
-    linked?: boolean;
-    task?: any;
-    error?: string;
-}
-
-interface GmailData {
-    thumbnail: null;
-    html: string;
-    data: {
-        email: string;
-        id: string;
-        subject: string;
-        from: string;
-        attachments: string[];
-        msg: string;
-        client: string;
-    };
 }
 
 interface TaskCreatedEvent extends CustomEvent<{ task: TaskMapping; threadId: string }> { }
@@ -67,22 +55,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const threadId = getThreadId();
         if (threadId) {
             openTaskModal(threadId);
+            sendResponse({ success: true });
         } else {
-            Logger.warn(' Could not determine thread ID for modal');
+                Logger.warn('THREAD_ID_NOT_AVAILABLE_FOR_MODAL');
+            sendResponse({ success: false });
         }
     }
 });
 
-const processedMessages = new WeakSet<Element>();
 let linkedTasks: Record<string, TaskMapping[]> = {};
-let hasValidatedTasks = false;
+const validationInFlight = new Map<string, Promise<void>>();
 
 // Debounce utility
 let scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function debouncedScan(): void {
-    if (scanDebounceTimer) clearTimeout(scanDebounceTimer);
+    if (scanDebounceTimer) return;
     scanDebounceTimer = setTimeout(() => {
+        scanDebounceTimer = null;
         scanEmails();
         scanInbox();
     }, 100);
@@ -111,17 +101,15 @@ function initialize(): void {
 
 async function loadLinkedTasks(): Promise<void> {
     try {
-        const result = await chrome.storage.local.get('emailTaskMappings');
-        const allTasks = (result.emailTaskMappings || {}) as Record<string, TaskMapping[]>;
+        const result = await chrome.storage.local.get(['emailTaskMappings', EMAIL_TASK_MAPPINGS_V2_KEY]);
+        const allTasks = readMappingsWithFallback(
+            result[EMAIL_TASK_MAPPINGS_V2_KEY] || {},
+            result.emailTaskMappings || {}
+        ) as Record<string, TaskMapping[]>;
 
         const keys = Object.keys(allTasks);
         if (keys.length > 0) {
-            Logger.debug('Loaded linked tasks:', keys);
-        }
-
-        if (!hasValidatedTasks) {
-            hasValidatedTasks = true;
-            validateAndCleanTasks(allTasks);
+            Logger.debug(`Loaded linked task threads: ${keys.length}`);
         }
 
         linkedTasks = allTasks;
@@ -129,68 +117,6 @@ async function loadLinkedTasks(): Promise<void> {
     } catch (e) {
         linkedTasks = {};
     }
-}
-
-async function validateAndCleanTasks(allTasks: Record<string, TaskMapping[]>): Promise<void> {
-    Logger.info(' Validating tasks (one-time check)...');
-    let hasChanges = false;
-
-    for (const threadId of Object.keys(allTasks)) {
-        const tasks = allTasks[threadId];
-        if (!Array.isArray(tasks)) continue;
-
-        const validTasks: TaskMapping[] = [];
-        for (const task of tasks) {
-            try {
-                const response = await chrome.runtime.sendMessage({
-                    action: 'validateTask',
-                    taskId: task.id
-                }) as ValidationResponse;
-
-                const errorMsg = (response?.error || '').toLowerCase();
-                const isDeleted = errorMsg.includes('not found') || errorMsg.includes('deleted');
-
-                // Note: validateTask returns { valid: true/false, task }
-                if (response && response.valid && !isDeleted) {
-                    validTasks.push(task);
-                } else {
-                    hasChanges = true;
-                    Logger.info(' Removed deleted task:', task.id);
-                }
-            } catch (e) {
-                validTasks.push(task);
-            }
-        }
-
-        if (validTasks.length !== tasks.length) {
-            allTasks[threadId] = validTasks;
-        }
-    }
-
-    if (hasChanges) {
-        await chrome.storage.local.set({ emailTaskMappings: allTasks });
-        linkedTasks = allTasks;
-        refreshAllBars();
-    }
-}
-
-function refreshAllBars(): void {
-    document.querySelectorAll('.cu-email-bar').forEach((bar) => {
-        const threadId = (bar as HTMLElement).dataset.threadId || '';
-        const tasks = linkedTasks[threadId] || [];
-        const container = bar.querySelector('.cu-linked-tasks');
-
-        if (container) {
-            container.innerHTML = tasks.map(t => `
-                <a href="${t.url}" target="_blank" class="cu-task-link">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="#7B68EE">
-                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                    </svg>
-                    ${escapeHtml(t.name)}
-                </a>
-            `).join('');
-        }
-    });
 }
 
 // ============================================================================
@@ -205,7 +131,15 @@ function startObserver(): void {
 
     observer.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
+        attributes: true,
+        attributeFilter: [
+            'data-legacy-thread-id',
+            'data-thread-perm-id',
+            'data-thread-id',
+            'data-message-id',
+            'data-legacy-message-id',
+        ],
     });
 
     scanEmails();
@@ -223,24 +157,16 @@ function scanEmails(): void {
     }
 
     emailBodies.forEach((body) => {
-        const messageContainer = body.closest('.gs') || body.closest('.h7') || body.parentElement;
-        if (!messageContainer) return;
+        try {
+            if (!body.isConnected) return;
+            const mountHost = body.parentElement;
+            if (!mountHost) return;
 
-        const existingBar = messageContainer.querySelector('.cu-email-bar') as HTMLElement | null;
-
-        if (existingBar) {
-            const createdAt = parseInt(existingBar.dataset.createdAt || '0');
-            const age = Date.now() - createdAt;
-
-            if (age < 30000) return;
-
-            Logger.info(` Refreshing stale bar. Age: ${Math.round(age / 1000)}s`);
-            existingBar.remove();
+            const threadId = getThreadId();
+            ensureThreadBar(mountHost as HTMLElement, body as HTMLElement, threadId, createClickUpBar, reconcileClickUpBar);
+        } catch (error) {
+            Logger.warn('EMAIL_BODY_SCAN_FAILED');
         }
-
-        const threadId = getThreadId();
-        Logger.info(' Injecting bar for thread:', threadId);
-        injectClickUpBar(messageContainer as HTMLElement, body as HTMLElement, threadId);
     });
 }
 
@@ -268,6 +194,8 @@ function scanInbox(): void {
             }
         }
 
+        if (matchedTasks) matchedTasks = toVisibleLinkedTasks(matchedTasks);
+
         if (matchedTasks && matchedTasks.length > 0) {
             const subjectSpan = row.querySelector('.bqe') ||
                 row.querySelector('.bog span') ||
@@ -281,31 +209,32 @@ function scanInbox(): void {
 
             if (matchedTasks.length === 1) {
                 const link = document.createElement('a');
-                link.href = matchedTasks[0].url;
+                link.href = safeClickUpUrl(matchedTasks[0].url);
                 link.target = '_blank';
+                link.rel = 'noopener noreferrer';
                 link.className = 'cu-inbox-task-link';
                 link.textContent = '#' + matchedTasks[0].id;
                 link.addEventListener('click', (e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    window.open(matchedTasks![0].url, '_blank');
+                    window.open(safeClickUpUrl(matchedTasks![0].url), '_blank', 'noopener,noreferrer');
                 });
                 badge.appendChild(link);
             } else {
                 const countSpan = document.createElement('span');
                 countSpan.className = 'cu-inbox-task-count';
-                countSpan.textContent = matchedTasks.length + ' tasks';
+                countSpan.textContent = `${matchedTasks.length} tareas`;
                 badge.appendChild(countSpan);
             }
 
             if (subjectSpan?.parentElement) {
                 subjectSpan.parentElement.insertBefore(badge, subjectSpan);
-                Logger.info(' Added inbox badge for:', legacyThreadId);
+                Logger.info(' Added inbox badge');
             } else if (subjectCell) {
                 const firstChild = subjectCell.querySelector('.y6') || subjectCell.firstChild;
                 if (firstChild?.parentElement) {
                     firstChild.parentElement.insertBefore(badge, firstChild);
-                    Logger.info(' Added inbox badge (fallback) for:', legacyThreadId);
+                    Logger.info(' Added inbox badge fallback');
                 }
             }
         }
@@ -316,9 +245,9 @@ function scanInbox(): void {
 // Helper Functions
 // ============================================================================
 
-function getThreadId(): string {
+function getThreadId(): string | null {
     const threadId = GmailAdapter.getThreadId();
-    Logger.debug('Thread ID:', threadId);
+    Logger.debug('Thread ID resolved');
     return threadId;
 }
 
@@ -331,31 +260,45 @@ function getSenderEmail(): string {
 }
 
 function getEmailBody(): string {
-    return GmailAdapter.getEmailBodyHtml();
+    return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml());
 }
 
 // ============================================================================
 // ClickUp Bar Injection
 // ============================================================================
 
-function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: string): void {
+function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: string | null): void {
+    const bar = createClickUpBar(threadId);
+    body.parentElement?.insertBefore(bar, body);
+    Logger.info(' Bar injected');
+    if (isConfirmedThreadId(threadId)) verifyThreadTasks(threadId, bar);
+}
+
+function createClickUpBar(threadId: string | null): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'cu-email-bar';
-    bar.dataset.threadId = threadId;
+    if (isConfirmedThreadId(threadId)) {
+        bar.dataset.threadId = threadId;
+        delete bar.dataset.threadPending;
+    } else {
+        bar.dataset.threadId = '';
+        bar.dataset.threadPending = 'true';
+    }
     bar.dataset.createdAt = Date.now().toString();
 
-    Logger.debug(` Injecting bar for thread: ${threadId}`, { tasks: linkedTasks[threadId] });
+    Logger.debug(` Injecting bar with tasks: ${isConfirmedThreadId(threadId) ? (linkedTasks[threadId] || []).length : 0}`);
 
-    const existingTasks = linkedTasks[threadId] || [];
+    const existingTasks = isConfirmedThreadId(threadId) ? linkedTasks[threadId] || [] : [];
+    const pending = !isConfirmedThreadId(threadId);
 
     bar.innerHTML = `
     <div class="cu-bar-content">
-      <button class="cu-add-btn" title="Create ClickUp task from this email">
+      <button class="cu-add-btn" title="${pending ? 'Esperando datos de Gmail' : 'Crear tarea de ClickUp desde este email'}" ${pending ? 'disabled aria-disabled="true"' : ''}>
         <svg width="16" height="16" viewBox="0 0 180 180" fill="currentColor">
           <path d="M25.4 129.1L49.2 110.9C61.9 127.4 75.3 135 90.3 135C105.1 135 118.2 127.5 130.3 111.1L154.4 128.9C137 152.5 115.3 165 90.3 165C65.3 165 43.4 152.6 25.4 129.1Z"/>
           <polygon points="90.2 49.8 47.8 86.4 28.2 63.6 90.3 10.2 151.8 63.7 132.2 86.3"/>
         </svg>
-        Add to ClickUp
+        <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Agregar a ClickUp'}</span>
       </button>
       <div class="cu-linked-tasks">
         ${getLinkedTasksHtml(existingTasks)}
@@ -363,26 +306,58 @@ function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: s
     </div>
     `;
 
-    const addBtn = bar.querySelector('.cu-add-btn');
+    const addBtn = bar.querySelector('.cu-add-btn') as HTMLButtonElement | null;
     addBtn?.addEventListener('click', async (e) => {
         e.preventDefault();
-        openTaskModal(threadId);
+        const currentThreadId = bar.dataset.threadId || null;
+        if (!isConfirmedThreadId(currentThreadId)) return;
+        openTaskModal(currentThreadId);
     });
 
-    body.parentElement?.insertBefore(bar, body);
-    Logger.info(' Bar injected');
+    return bar;
+}
 
-    verifyThreadTasks(threadId, bar);
+function reconcileClickUpBar(bar: HTMLElement, threadId: string | null): void {
+    const confirmed = isConfirmedThreadId(threadId);
+    const button = bar.querySelector('.cu-add-btn') as HTMLButtonElement | null;
+    const label = bar.querySelector('.cu-add-label') as HTMLElement | null;
+
+    if (confirmed) {
+        bar.dataset.threadId = threadId;
+        delete bar.dataset.threadPending;
+        if (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+            button.title = 'Crear tarea de ClickUp desde este email';
+        }
+        if (label) label.textContent = 'Agregar a ClickUp';
+    } else {
+        bar.dataset.threadId = '';
+        bar.dataset.threadPending = 'true';
+        if (button) {
+            button.disabled = true;
+            button.setAttribute('aria-disabled', 'true');
+            button.title = 'Esperando datos de Gmail';
+        }
+        if (label) label.textContent = 'Esperando datos de Gmail…';
+    }
+
+    const container = bar.querySelector('.cu-linked-tasks');
+    if (container) {
+        container.innerHTML = confirmed ? getLinkedTasksHtml(toVisibleLinkedTasks(linkedTasks[threadId] || [])) : '';
+    }
+
+    if (confirmed) verifyThreadTasks(threadId, bar);
 }
 
 function getLinkedTasksHtml(tasks: TaskMapping[]): string {
     if (!tasks || tasks.length === 0) return '';
     return tasks.map(t => `
-        <a href="${t.url}" target="_blank" class="cu-task-link">
+        <a href="${escapeHTML(safeClickUpUrl(t.url))}" target="_blank" rel="noopener noreferrer" class="cu-task-link">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="#7B68EE">
             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
           </svg>
-          ${escapeHtml(t.name)}
+          ${escapeHTML(t.name)}
         </a>
     `).join('');
 }
@@ -395,47 +370,58 @@ async function verifyThreadTasks(threadId: string, barElement: Element): Promise
     const tasks = linkedTasks[threadId] || [];
     if (tasks.length === 0) return;
 
-    let changed = false;
-    const validTasks: TaskMapping[] = [];
+    const dueTasks = tasks.filter(task => shouldValidateLink(task));
+    if (dueTasks.length === 0) return;
 
-    for (const task of tasks) {
+    const taskIdsKey = dueTasks.map(task => task.id).sort().join(',');
+    const inFlightKey = `${threadId}:${taskIdsKey}`;
+    const existing = validationInFlight.get(inFlightKey);
+    if (existing) return existing;
+
+    const validation = runThreadValidation(threadId, barElement, dueTasks).finally(() => {
+        validationInFlight.delete(inFlightKey);
+    });
+    validationInFlight.set(inFlightKey, validation);
+    return validation;
+}
+
+async function runThreadValidation(threadId: string, barElement: Element, dueTasks: TaskMapping[]): Promise<void> {
+    let changed = false;
+    const currentTasks = linkedTasks[threadId] || [];
+    const updates = new Map<string, TaskMapping>();
+
+    for (const task of dueTasks) {
         try {
-            Logger.debug(' Verifying task:', task.id);
+            Logger.debug(' Verifying task link');
             const response = await chrome.runtime.sendMessage({
                 action: 'validateTaskLink',
                 taskId: task.id,
                 threadId: threadId
-            }) as ValidationResponse;
-            Logger.debug(` Validation response for ${task.id}:`, response);
+            }) as LinkValidationResult;
+            Logger.debug(` Validation response status: ${response?.status || 'unknown'}`);
 
-            const errorMsg = (response?.error || '').toLowerCase();
-            const isDeleted = errorMsg.includes('not found') || errorMsg.includes('deleted');
-
-            // Note: validateTaskLink returns { valid: true/false, linked: true/false, task }
-            // We only keep tasks that are valid (exist) AND linked (contain the Thread ID)
-            if (response && response.valid && response.linked && !isDeleted) {
-                validTasks.push(task);
+            if (response?.status) {
+                const updated = (response as any).linkRecord || applyValidationToTask(task, response);
+                updates.set(task.id, updated);
+                changed = changed || updated.linkStatus !== task.linkStatus || updated.lastValidatedAt !== task.lastValidatedAt;
+                if (response.status === 'not_found' || response.status === 'unlinked') {
+                    Logger.info(` Marked task link inactive: ${response.status}`);
+                }
             } else {
-                Logger.info(' Removed task (deleted or unlinked):', task.id);
                 changed = true;
             }
         } catch (e) {
-            validTasks.push(task);
+            // Network/message errors are ambiguous; keep current visible state and retry after TTL.
         }
     }
 
     if (changed) {
-        Logger.info(' Updating thread tasks after validation');
-        linkedTasks[threadId] = validTasks;
-
-        const store = await chrome.storage.local.get('emailTaskMappings');
-        const mapping = (store.emailTaskMappings || {}) as Record<string, TaskMapping[]>;
-        mapping[threadId] = validTasks;
-        await chrome.storage.local.set({ emailTaskMappings: mapping });
-
+        Logger.info(' Updating thread task statuses after validation');
+        const nextTasks = currentTasks.map(task => updates.get(task.id) || task);
+        linkedTasks[threadId] = nextTasks;
         const container = barElement.querySelector('.cu-linked-tasks');
         if (container) {
-            container.innerHTML = getLinkedTasksHtml(validTasks);
+            container.innerHTML = getLinkedTasksHtml(toVisibleLinkedTasks(nextTasks));
         }
     }
 }
@@ -450,6 +436,7 @@ function openTaskModal(threadId: string): void {
         subject: getEmailSubject(),
         from: getSenderEmail(),
         html: getEmailBody(),
+        htmlSanitized: true,
         attachments: GmailAdapter.getAttachmentUrls()
     };
 
@@ -457,89 +444,9 @@ function openTaskModal(threadId: string): void {
         const modal = new TaskModal();
         modal.show(emailData);
     } else {
-        console.error('[ClickUp Task Tracker] TaskModal not found');
-        showNotification('Error: Modal not loaded', 'error');
+        Logger.error('TASK_MODAL_NOT_FOUND');
+        showNotification('No se pudo abrir el formulario de tarea', 'error');
     }
-}
-
-function openClickUpOfficial(threadId: string): void {
-    const bodyEl = document.querySelector('.a3s.aiL');
-    const emailHtml = bodyEl ? bodyEl.innerHTML : '';
-
-    const senderEl = document.querySelector('.gD[email]');
-    const senderEmail = senderEl ? senderEl.getAttribute('email') || '' : '';
-
-    const userEmailEl = document.querySelector('[data-inboxsdk-user-email-address]') ||
-        document.querySelector('[data-email]');
-    const userEmail = userEmailEl ?
-        (userEmailEl.getAttribute('data-inboxsdk-user-email-address') ||
-            userEmailEl.getAttribute('data-email') || '') : '';
-
-    const subjectEl = document.querySelector('h2[data-thread-perm-id]') ||
-        document.querySelector('.hP');
-    const subject = subjectEl ? subjectEl.textContent?.trim() || 'Email' : 'Email';
-
-    const msgContainer = document.querySelector('[data-message-id]');
-    const legacyMsgEl = document.querySelector('[data-legacy-message-id]');
-    let messageId = threadId;
-    if (legacyMsgEl) {
-        messageId = legacyMsgEl.getAttribute('data-legacy-message-id') || messageId;
-    } else if (msgContainer) {
-        const rawMsgId = msgContainer.getAttribute('data-message-id');
-        messageId = rawMsgId && rawMsgId.includes('-') && legacyMsgEl ?
-            (legacyMsgEl as Element).getAttribute('data-legacy-message-id') || '' : rawMsgId || messageId;
-    }
-
-    const attachments: string[] = [];
-    const attEls = document.querySelectorAll('.ii.gt [download_url], .a3s.aiL [download_url]');
-    attEls.forEach(el => {
-        const url = el.getAttribute('download_url');
-        if (url) attachments.push(url);
-    });
-
-    const gmailData: GmailData = {
-        thumbnail: null,
-        html: emailHtml,
-        data: {
-            email: userEmail,
-            id: threadId,
-            subject: subject,
-            from: senderEmail,
-            attachments: attachments,
-            msg: messageId,
-            client: 'gmail'
-        }
-    };
-
-    Logger.info(' Saving Gmail data for ClickUp:', gmailData.data);
-
-    chrome.storage.local.set({
-        screenshotTime: Date.now(),
-        gmail: JSON.stringify(gmailData),
-        url: '/email'
-    }).then(() => {
-        Logger.info(' Data saved. Opening ClickUp interface...');
-        createClickUpIframe();
-    }).catch((err: Error) => {
-        Logger.error(' Failed to save data:', err);
-        showNotification('Error saving email data', 'error');
-    });
-}
-
-function createClickUpIframe(): void {
-    const popup = window.open(
-        'https://app.clickup.com/',
-        'clickup_create',
-        'width=500,height=700,left=200,top=100,scrollbars=yes,resizable=yes'
-    );
-
-    if (!popup) {
-        showNotification('Popup blocked! Please allow popups for this site.', 'error');
-        return;
-    }
-
-    Logger.info(' Popup opened - data saved to storage for ClickUp to read');
-    showNotification('ClickUp opened in new window. Create your task there!', 'success');
 }
 
 // ============================================================================
@@ -552,8 +459,9 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
 
     const tasksContainer = bar.querySelector('.cu-linked-tasks');
     const taskLink = document.createElement('a');
-    taskLink.href = task.url;
+    taskLink.href = safeClickUpUrl(task.url);
     taskLink.target = '_blank';
+    taskLink.rel = 'noopener noreferrer';
     taskLink.className = 'cu-task-link cu-task-new';
     taskLink.innerHTML = `
     <svg width="12" height="12" viewBox="0 0 24 24" fill="#7B68EE">
@@ -563,8 +471,19 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
     `;
     tasksContainer?.appendChild(taskLink);
 
+    if (!isConfirmedThreadId(threadId)) return;
     if (!linkedTasks[threadId]) linkedTasks[threadId] = [];
-    linkedTasks[threadId].push({ id: task.id, name: task.name, url: task.url });
+    linkedTasks[threadId].push({
+        id: task.id,
+        name: task.name,
+        url: task.url,
+        linkStatus: task.linkStatus || 'unverified',
+        linkSource: task.linkSource || 'unknown',
+        customFieldId: task.customFieldId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        failureCount: 0,
+    });
 }
 
 function escapeHtml(text: string): string {
@@ -597,6 +516,25 @@ window.addEventListener('popstate', () => {
     debouncedScan();
 });
 
+window.addEventListener('focus', () => {
+    revalidateVisibleBars();
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        revalidateVisibleBars();
+    }
+});
+
+function revalidateVisibleBars(): void {
+    document.querySelectorAll('.cu-email-bar').forEach((bar) => {
+        const threadId = (bar as HTMLElement).dataset.threadId || '';
+        if (isConfirmedThreadId(threadId)) {
+            verifyThreadTasks(threadId, bar);
+        }
+    });
+}
+
 setInterval(() => {
     if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
@@ -607,6 +545,7 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => {
+    scanEmails();
     scanInbox();
 }, 5000);
 

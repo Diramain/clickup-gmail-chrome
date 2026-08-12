@@ -26,21 +26,22 @@ interface ILogger {
     error(message: string, error?: Error | unknown, context?: unknown): void;
     group(label: string, fn: () => void): void;
     time(label: string): () => void;
+    sanitizeError(error: unknown): string;
 }
 
 const Logger: ILogger = {
     /**
-     * Enable verbose debug logging
-     * Can be toggled via: Logger.DEBUG = true
+     * Enable verbose debug logging for local, non-persistent troubleshooting only.
+     * Toggle explicitly in DevTools runtime when needed; never persist this flag.
      */
     DEBUG: false,
 
     /**
-     * SEC-M3: Production mode - suppress info/debug logs
-     * Set to true for Chrome Web Store builds
-     * Toggle via: Logger.PRODUCTION = true
+     * Release-safe by default. Production logging allows only event names,
+     * counters, and sanitized error codes. No payloads, storage snapshots,
+     * email content, URLs, OAuth config, tokens, teams, members, or task data.
      */
-    PRODUCTION: false,
+    PRODUCTION: true,
 
     /**
      * Prefix for all log messages
@@ -68,14 +69,10 @@ const Logger: ILogger = {
      * Debug log - only shown when DEBUG is true
      */
     debug(message: string, data: unknown = null): void {
-        if (!this.DEBUG) return;
+        if (!this.DEBUG || this.PRODUCTION) return;
 
         const prefix = `${this.PREFIX} [${this._timestamp()}] DEBUG:`;
-        if (data !== null) {
-            console.log(`%c${prefix} ${message}`, this.STYLES.debug, data);
-        } else {
-            console.log(`%c${prefix} ${message}`, this.STYLES.debug);
-        }
+        console.log(`%c${prefix} ${message}`, this.STYLES.debug);
     },
 
     /**
@@ -85,11 +82,7 @@ const Logger: ILogger = {
         if (this.PRODUCTION) return;  // SEC-M3: Skip in production
 
         const prefix = `${this.PREFIX}`;
-        if (data !== null) {
-            console.log(`%c${prefix} ${message}`, this.STYLES.info, data);
-        } else {
-            console.log(`%c${prefix} ${message}`, this.STYLES.info);
-        }
+        console.log(`%c${prefix} ${message}`, this.STYLES.info);
     },
 
     /**
@@ -97,8 +90,8 @@ const Logger: ILogger = {
      */
     warn(message: string, data: unknown = null): void {
         const prefix = `${this.PREFIX} ⚠️`;
-        if (data !== null) {
-            console.warn(`%c${prefix} ${message}`, this.STYLES.warn, data);
+        if (this.PRODUCTION) {
+            console.warn(`%c${prefix} ${message}`, this.STYLES.warn);
         } else {
             console.warn(`%c${prefix} ${message}`, this.STYLES.warn);
         }
@@ -112,19 +105,25 @@ const Logger: ILogger = {
         console.error(`%c${prefix} ${message}`, this.STYLES.error);
 
         if (error) {
-            if (error instanceof Error) {
-                console.error(`  → ${error.message}`);
+            console.error(`  → ${this.sanitizeError(error)}`);
+            if (!this.PRODUCTION && error instanceof Error) {
                 if (this.DEBUG && error.stack) {
                     console.error(error.stack);
                 }
-            } else {
-                console.error('  →', error);
             }
         }
 
-        if (context) {
-            console.error('  Context:', context);
-        }
+        void context;
+    },
+
+    sanitizeError(error: unknown): string {
+        const raw = error instanceof Error ? error.message : String(error || 'unknown_error');
+        if (/\b(401|403)\b/.test(raw)) return 'auth_error';
+        if (/\b429\b/.test(raw)) return 'rate_limited';
+        if (/\b5\d\d\b/.test(raw)) return 'upstream_error';
+        if (/network|fetch/i.test(raw)) return 'network_error';
+        if (/oauth|token|secret|credential|config/i.test(raw)) return 'credential_error';
+        return 'operation_failed';
     },
 
     /**
@@ -156,4 +155,4 @@ export { Logger };
 export type { ILogger };
 
 // Make available globally for content scripts
-(window as any).Logger = Logger;
+(globalThis as any).Logger = Logger;

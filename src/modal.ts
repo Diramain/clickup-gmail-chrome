@@ -5,6 +5,10 @@
 
 // Modal Components (for future use - gradual migration)
 import { LocationSearch, AssigneeSelector } from './modal/components';
+import { Logger } from './logger';
+import { escapeHTML, isSafeEditorLink, safeAvatarUrl, safeClickUpUrl, safeColor, sanitizeGmailHtml } from './utils/sanitize.utils';
+import { flattenHierarchySpaces, getTeamHierarchyCache } from './hierarchy-utils';
+import { extractTaskIdCandidate, rankTaskSearchResults } from './task-search';
 
 // ============================================================================
 // Types
@@ -139,6 +143,7 @@ export class TaskModal {
     private listCache: Map<string, ListItem[]> = new Map();
     private searchTimeout: ReturnType<typeof setTimeout> | null = null;
     private isSearching: boolean = false;
+    private taskSearchSequence: number = 0;
 
     constructor() { }
 
@@ -156,15 +161,15 @@ export class TaskModal {
         this.modal = document.createElement('div');
         this.modal.className = 'cu-modal-container';
         this.modal.innerHTML = `
-      <div class="cu-modal-window" tabindex="0">
+      <div class="cu-modal-window" tabindex="0" role="dialog" aria-modal="true" aria-labelledby="cu-modal-title">
         <div class="cu-modal-header" id="cu-modal-drag-handle">
-          <h2>Create ClickUp Task</h2>
-          <button class="cu-modal-close" title="Close (ESC)">x</button>
+          <h2 id="cu-modal-title">Crear tarea en ClickUp</h2>
+          <button class="cu-modal-close" title="Cerrar (ESC)" aria-label="Cerrar formulario">x</button>
         </div>
         
         <div class="cu-modal-tabs">
-          <button class="cu-tab cu-tab-active" data-tab="create">Create Task</button>
-          <button class="cu-tab" data-tab="attach">Attach to Existing</button>
+          <button class="cu-tab cu-tab-active" data-tab="create">Crear tarea</button>
+          <button class="cu-tab" data-tab="attach">Adjuntar a existente</button>
         </div>
         
         <div class="cu-modal-body">
@@ -172,55 +177,55 @@ export class TaskModal {
           <div class="cu-tab-content cu-tab-create active">
             
             <div class="cu-form-row">
-              <label>Location</label>
+              <label for="cu-location-input">Ubicación</label>
               <div class="cu-location-search">
                 <input type="text" id="cu-location-input" class="cu-input" 
-                       placeholder="Type to search lists..." autocomplete="off">
+                       placeholder="Escribí para buscar listas…" autocomplete="off" aria-label="Buscar listas">
                 <div class="cu-location-dropdown hidden">
                   <div class="cu-location-results"></div>
                 </div>
                 <div class="cu-selected-location hidden">
                   <span class="cu-location-path"></span>
-                  <button class="cu-location-clear" title="Change">x</button>
+                  <button class="cu-location-clear" title="Cambiar" aria-label="Cambiar ubicación">x</button>
                 </div>
               </div>
             </div>
             
             <div class="cu-form-row cu-form-row-inline">
               <div class="cu-form-group">
-                <label>Start Date</label>
+                <label for="cu-start-date">Fecha de inicio</label>
                 <input type="date" id="cu-start-date" class="cu-input">
               </div>
               <div class="cu-form-group">
-                <label>Due Date</label>
+                <label for="cu-due-date">Fecha de vencimiento</label>
                 <input type="date" id="cu-due-date" class="cu-input">
               </div>
             </div>
             
             <div class="cu-form-row cu-form-row-inline">
               <div class="cu-form-group">
-                <label>Priority</label>
+                <label for="cu-priority">Prioridad</label>
                 <select id="cu-priority" class="cu-input cu-select">
-                  <option value="">No priority</option>
-                  <option value="1">🔴 Urgent</option>
-                  <option value="2">🟠 High</option>
+                  <option value="">Sin prioridad</option>
+                  <option value="1">🔴 Urgente</option>
+                  <option value="2">🟠 Alta</option>
                   <option value="3">🟡 Normal</option>
-                  <option value="4">🔵 Low</option>
+                  <option value="4">🔵 Baja</option>
                 </select>
               </div>
               <div class="cu-form-group">
-                <label>Status</label>
+                <label for="cu-status">Estado</label>
                 <select id="cu-status" class="cu-input cu-select">
-                  <option value="">Select list first...</option>
+                  <option value="">Seleccioná una lista primero…</option>
                 </select>
               </div>
             </div>
             <div class="cu-form-row">
               <div class="cu-form-group">
-                <label>Assignee</label>
+                <label for="cu-assignee-search">Responsable</label>
                 <div class="cu-assignee-container">
                   <input type="text" id="cu-assignee-search" class="cu-input" 
-                         placeholder="Search members..." autocomplete="off">
+                         placeholder="Buscar miembros…" autocomplete="off" aria-label="Buscar responsables">
                   <div class="cu-assignee-dropdown hidden"></div>
                 </div>
               </div>
@@ -228,16 +233,16 @@ export class TaskModal {
             <div class="cu-selected-assignees"></div>
             
             <div class="cu-form-row">
-              <label>Task Name</label>
+              <label for="cu-task-name">Nombre de la tarea</label>
               <input type="text" id="cu-task-name" class="cu-input cu-input-large" 
-                     placeholder="Task name...">
+                     placeholder="Nombre de la tarea…">
             </div>
             
             <div class="cu-form-row">
-              <label>Description</label>
+              <label>Descripción</label>
               <div class="cu-editor-container">
                 <div class="cu-editor-tabs">
-                  <button type="button" class="cu-editor-tab active" data-view="visual">Visual</button>
+                  <button type="button" class="cu-editor-tab active" data-view="visual">Vista visual</button>
                   <button type="button" class="cu-editor-tab" data-view="source">Markdown</button>
                 </div>
                 <div class="cu-editor-toolbar">
@@ -273,7 +278,7 @@ export class TaskModal {
                   <button type="button" data-cmd="createLink" title="Hipervínculo (Ctrl+K)">🔗</button>
                 </div>
                 <div id="cu-editor-visual" class="cu-editor-visual" contenteditable="true" 
-                     placeholder="Escribe o pega contenido..."></div>
+                     placeholder="Escribí o pegá contenido…" aria-label="Descripción visual"></div>
                 <textarea id="cu-editor-source" class="cu-editor-source hidden" 
                           placeholder="Markdown: **negrita**, _cursiva_, - lista, 'código'"></textarea>
               </div>
@@ -281,38 +286,39 @@ export class TaskModal {
             
             <div class="cu-form-row cu-form-row-inline">
               <div class="cu-form-group">
-                <label>Time Estimate</label>
+                <label for="cu-time-estimate">Estimación de tiempo</label>
                 <input type="text" id="cu-time-estimate" class="cu-input" 
-                       placeholder="e.g., 2h 30m">
+                       placeholder="ej. 2h 30m">
               </div>
               <div class="cu-form-group">
-                <label>Track Time</label>
+                <label for="cu-time-tracked">Tiempo registrado</label>
                 <input type="text" id="cu-time-tracked" class="cu-input" 
-                       placeholder="e.g., 10m">
+                       placeholder="ej. 10m">
               </div>
             </div>
             
             <div class="cu-form-row">
               <label class="cu-checkbox-label">
                 <input type="checkbox" id="cu-attach-email" checked>
-                Attach email as HTML file
+                Adjuntar email como archivo HTML
               </label>
             </div>
             <div class="cu-form-row cu-attach-files-row">
               <label class="cu-checkbox-label">
-                <input type="checkbox" id="cu-attach-files" checked>
-                Attach email files <span id="cu-attach-files-count"></span>
+                <input type="checkbox" id="cu-attach-files" disabled>
+                Archivos originales del email deshabilitados en v1.2.0 <span id="cu-attach-files-count"></span>
               </label>
+              <p class="cu-hint">Esta versión sólo admite el adjunto HTML sanitizado del email.</p>
             </div>
           </div>
           
           <!-- Attach to Existing Tab -->
           <div class="cu-tab-content cu-tab-attach">
             <div class="cu-form-row">
-              <label>Search Task</label>
+              <label for="cu-task-search">Buscar tarea</label>
               <div class="cu-task-search-container">
                 <input type="text" id="cu-task-search" class="cu-input" 
-                       placeholder="Enter task ID or name (min 4 chars)..." autocomplete="off">
+                       placeholder="Ingresá Task ID o título (mín. 3 caracteres)…" autocomplete="off" aria-label="Buscar tarea existente por ID o título">
                 <div class="cu-task-search-results hidden"></div>
               </div>
             </div>
@@ -321,16 +327,16 @@ export class TaskModal {
                 <span class="cu-selected-task-name"></span>
                 <span class="cu-selected-task-list"></span>
               </div>
-              <button class="cu-selected-task-clear">x</button>
+              <button class="cu-selected-task-clear" aria-label="Quitar tarea seleccionada">x</button>
             </div>
-            <p class="cu-search-hint">Type at least 4 characters to search by name or paste exact task ID.</p>
+            <p class="cu-search-hint">Escribí al menos 4 caracteres para buscar por nombre o pegá un ID exacto de tarea.</p>
           </div>
         </div>
         
         <div class="cu-modal-footer">
-          <button class="cu-btn cu-btn-secondary cu-btn-cancel">Cancel</button>
+          <button class="cu-btn cu-btn-secondary cu-btn-cancel">Cancelar</button>
           <button class="cu-btn cu-btn-primary cu-btn-submit">
-            <span class="cu-btn-text">Create Task</span>
+            <span class="cu-btn-text">Crear tarea</span>
             <span class="cu-btn-spinner hidden"></span>
           </button>
         </div>
@@ -361,7 +367,7 @@ export class TaskModal {
 
         if (attachCount > 0) {
             attachFilesRow.style.display = '';
-            attachFilesCount.textContent = `(${attachCount} file${attachCount > 1 ? 's' : ''})`;
+            attachFilesCount.textContent = `(${attachCount} archivo${attachCount > 1 ? 's' : ''} original${attachCount > 1 ? 'es' : ''} sin adjuntar)`;
         } else {
             attachFilesRow.style.display = 'none';
         }
@@ -370,7 +376,7 @@ export class TaskModal {
     async prefillCurrentUser(): Promise<void> {
         try {
             const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
-            console.log('[Modal] Getting current user for assignee:', status);
+            Logger.info('MODAL_PREFILL_ASSIGNEE_START');
 
             if (status && status.user) {
                 const user = status.user.user || status.user;
@@ -385,11 +391,11 @@ export class TaskModal {
                         }
                     };
                     this.selectAssignee(user.id.toString(), member);
-                    console.log('[Modal] Pre-selected current user as assignee:', user.username || user.email);
+                    Logger.info('MODAL_PREFILL_ASSIGNEE_SELECTED');
                 }
             }
         } catch (error) {
-            console.error('[Modal] Error prefilling current user:', error);
+            Logger.error('MODAL_PREFILL_ASSIGNEE_ERROR', error);
         }
     }
 
@@ -540,10 +546,10 @@ export class TaskModal {
 
         // Task search
         const taskSearchInput = this.modal!.querySelector('#cu-task-search') as HTMLInputElement;
-        let searchTimeout: ReturnType<typeof setTimeout> | null = null;
         taskSearchInput.addEventListener('input', () => {
-            if (searchTimeout) clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => this.searchTasks(taskSearchInput.value), 300);
+            this.taskSearchSequence++;
+            if (this.searchTimeout) clearTimeout(this.searchTimeout);
+            this.searchTimeout = setTimeout(() => this.searchTasks(taskSearchInput.value), 300);
         });
 
         // Clear selected task
@@ -573,8 +579,9 @@ export class TaskModal {
         editor.focus();
 
         if (cmd === 'createLink') {
-            const url = prompt('Ingresa la URL:');
-            if (url) document.execCommand(cmd, false, url);
+            const url = prompt('Ingresá la URL:');
+            if (url && isSafeEditorLink(url)) document.execCommand(cmd, false, url);
+            else if (url) this.showToast('URL no permitida. Usá sólo enlaces HTTPS.', 'error');
         } else {
             document.execCommand(cmd, false, undefined);
         }
@@ -601,12 +608,12 @@ export class TaskModal {
                 break;
             case 'quote':
                 const quoteContent = selectedText || 'Tu cita aquí';
-                html = '<blockquote style="border-left:4px solid #7B68EE;padding-left:16px;margin:8px 0;color:#555;font-style:italic;">' + quoteContent + '</blockquote><br>';
+                html = '<blockquote style="border-left:4px solid #7B68EE;padding-left:16px;margin:8px 0;color:#555;font-style:italic;">' + this.escapeHtml(quoteContent) + '</blockquote><br>';
                 break;
         }
 
         if (html) {
-            document.execCommand('insertHTML', false, html);
+            document.execCommand('insertHTML', false, this.cleanHtmlForClickUp(html));
         }
     }
 
@@ -616,7 +623,7 @@ export class TaskModal {
 
         if (clipboardData.files && clipboardData.files.length > 0) {
             e.preventDefault();
-            this.showToast('Images not supported (use attachments)', 'error');
+                this.showToast('Las imágenes no están soportadas; usá adjuntos.', 'error');
             return;
         }
 
@@ -630,10 +637,7 @@ export class TaskModal {
 
     cleanHtmlForClickUp(html: string): string {
         const temp = document.createElement('div');
-        temp.innerHTML = html;
-
-        temp.querySelectorAll('img, script, style, iframe, object, embed, video, audio, canvas, svg, form, input, button')
-            .forEach(el => el.remove());
+        temp.innerHTML = sanitizeGmailHtml(html);
 
         temp.querySelectorAll('*').forEach(el => {
             el.removeAttribute('style');
@@ -646,7 +650,7 @@ export class TaskModal {
 
     htmlToClickUpMarkdown(html: string): string {
         const temp = document.createElement('div');
-        temp.innerHTML = html;
+        temp.innerHTML = this.cleanHtmlForClickUp(html);
 
         temp.querySelectorAll('script, style, img, svg, canvas, video, audio, iframe')
             .forEach(el => el.remove());
@@ -684,7 +688,7 @@ export class TaskModal {
         temp.querySelectorAll('a').forEach(a => {
             const href = a.getAttribute('href');
             const text = (a.textContent || '').trim();
-            if (href && text) {
+            if (href && text && isSafeEditorLink(href)) {
                 a.replaceWith(`[${text}](${href})`);
             } else if (text) {
                 a.replaceWith(text);
@@ -751,11 +755,11 @@ export class TaskModal {
 
     async loadFullHierarchy(): Promise<void> {
         try {
-            console.log('[Modal] Loading hierarchy (cache-first mode)...');
+            Logger.info('MODAL_LOAD_HIERARCHY_START');
 
             // Get preferred team ID first
-            const prefTeam = await chrome.storage.local.get(['preferredTeam', 'cachedTeams']);
-            let teamId = prefTeam.preferredTeam || prefTeam.cachedTeams?.teams?.[0]?.id;
+            const prefTeam = await chrome.storage.local.get(['preferredTeamId', 'cachedTeams']);
+            let teamId = prefTeam.preferredTeamId || prefTeam.cachedTeams?.teams?.[0]?.id;
 
             if (!teamId) {
                 // Fallback: fetch teams
@@ -766,7 +770,7 @@ export class TaskModal {
             }
 
             if (!teamId) {
-                console.error('[Modal] No team ID available');
+                Logger.warn('MODAL_NO_TEAM_ID');
                 return;
             }
 
@@ -774,70 +778,57 @@ export class TaskModal {
 
             // Try to load from cache first (structure: { [teamId]: { data: { spaces }, timestamp } })
             const cache = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
-            const teamCache = cache?.[teamId];
+            const teamCache = getTeamHierarchyCache(cache, teamId);
+            const cachedSpaces = teamCache?.data?.spaces || [];
 
-            if (teamCache?.data?.spaces?.length > 0) {
-                console.log('[Modal] Cache hit! Extracting lists from', teamCache.data.spaces.length, 'spaces');
+            if (cachedSpaces.length > 0) {
+                Logger.info(`MODAL_HIERARCHY_CACHE_HIT_${cachedSpaces.length}`);
 
-                // Extract flat list of all lists from hierarchy
-                const allLists: ListItem[] = [];
-                for (const space of teamCache.data.spaces) {
-                    const spaceColor = space.color || '#7B68EE';
-                    const spaceAvatar = space.avatar?.url || null;
-
-                    // Folderless lists
-                    for (const list of (space.lists || [])) {
-                        allLists.push({
-                            id: list.id,
-                            name: list.name,
-                            path: `${space.name} > ${list.name}`,
-                            spaceName: space.name,
-                            spaceColor,
-                            spaceAvatar
-                        });
-                    }
-
-                    // Lists inside folders
-                    for (const folder of (space.folders || [])) {
-                        for (const list of (folder.lists || [])) {
-                            allLists.push({
-                                id: list.id,
-                                name: list.name,
-                                path: `${space.name} > ${folder.name} > ${list.name}`,
-                                spaceName: space.name,
-                                folderName: folder.name,
-                                spaceColor,
-                                spaceAvatar
-                            });
-                        }
-                    }
-                }
+                const allLists = flattenHierarchySpaces(cachedSpaces) as ListItem[];
 
                 this.hierarchy.allLists = allLists;
-                this.hierarchy.spaces = teamCache.data.spaces;
-                console.log('[Modal] Loaded', allLists.length, 'lists from cache');
+                this.hierarchy.spaces = cachedSpaces as Space[];
+                Logger.info(`MODAL_LISTS_FROM_CACHE_${allLists.length}`);
 
                 // Check if cache is stale (older than 24 hours) and refresh in background
-                const cacheAge = Date.now() - (teamCache.timestamp || 0);
+                const cacheAge = Date.now() - (teamCache?.timestamp || 0);
                 if (cacheAge > 24 * 60 * 60 * 1000) {
-                    console.log('[Modal] Cache stale (>24h), refreshing in background...');
+                    Logger.info('MODAL_HIERARCHY_CACHE_STALE');
                     chrome.runtime.sendMessage({ action: 'preloadFullHierarchy' });
                 }
                 return;
             }
 
-            console.log('[Modal] Cache miss, loading from API...');
+            Logger.info('MODAL_HIERARCHY_CACHE_MISS');
+
+            const preload = await chrome.runtime.sendMessage({ action: 'preloadFullHierarchy', teamId });
+            if (preload?.success) {
+                const refreshed = await chrome.runtime.sendMessage({ action: 'getHierarchyCache' });
+                const refreshedTeamCache = getTeamHierarchyCache(refreshed, teamId);
+                const flattened = flattenHierarchySpaces(refreshedTeamCache?.data?.spaces) as ListItem[];
+                if (flattened.length > 0) {
+                    this.hierarchy.allLists = flattened;
+                    this.hierarchy.spaces = refreshedTeamCache!.data!.spaces as Space[];
+                    Logger.info(`MODAL_LISTS_FROM_PRELOAD_${flattened.length}`);
+                    return;
+                }
+            }
 
             // No cache - fetch spaces on demand
             const spacesResult = await chrome.runtime.sendMessage({ action: 'getSpaces', teamId });
 
             if (spacesResult?.spaces) {
                 this.hierarchy.spaces = spacesResult.spaces;
-                console.log('[Modal] Loaded', spacesResult.spaces.length, 'spaces. Lists will load on demand.');
+                const loadedLists: ListItem[] = [];
+                for (const space of spacesResult.spaces) {
+                    loadedLists.push(...await this.loadSpaceLists(space));
+                }
+                this.hierarchy.allLists = loadedLists;
+                Logger.info(`MODAL_SPACES_LOADED_${spacesResult.spaces.length}`);
             }
 
         } catch (error) {
-            console.error('[Modal] Failed to load hierarchy:', error);
+            Logger.error('MODAL_LOAD_HIERARCHY_ERROR', error);
         }
     }
 
@@ -849,7 +840,7 @@ export class TaskModal {
         try {
             // Load direct lists in space
             const listsResult = await chrome.runtime.sendMessage({
-                action: 'getLists', spaceId: space.id, folderId: null
+                action: 'getFolderlessLists', spaceId: space.id
             }) as ListsResponse;
 
             if (listsResult && listsResult.lists) {
@@ -891,7 +882,7 @@ export class TaskModal {
                 }
             }
         } catch (e) {
-            console.error('[Modal] Error loading lists for space:', space.name, e);
+            Logger.error('MODAL_LOAD_LISTS_FOR_SPACE_ERROR', e);
         }
 
         return lists;
@@ -900,20 +891,20 @@ export class TaskModal {
     async loadDefaultList(): Promise<void> {
         try {
             const storage = await chrome.storage.local.get(['defaultList', 'defaultListConfig']);
-            console.log('[Modal] Checking for saved default list:', storage);
+            Logger.info('MODAL_CHECK_DEFAULT_LIST');
 
             if (storage.defaultListConfig && storage.defaultListConfig.listId) {
                 const config = storage.defaultListConfig;
                 // Use stored path directly since allLists is not pre-loaded
-                console.log('[Modal] Pre-selecting saved list:', config.listName || config.listId);
+                Logger.info('MODAL_PRESELECT_DEFAULT_LIST');
                 this.selectLocation(config.listId, config.path || config.listName || config.listId);
             } else if (storage.defaultList) {
                 // Old format - just the list ID, use it directly
-                console.log('[Modal] Pre-selecting list by ID (legacy):', storage.defaultList);
+                Logger.info('MODAL_PRESELECT_LEGACY_LIST');
                 this.selectLocation(storage.defaultList, storage.defaultList);
             }
         } catch (error) {
-            console.error('[Modal] Error loading default list:', error);
+            Logger.error('MODAL_LOAD_DEFAULT_LIST_ERROR', error);
         }
     }
 
@@ -928,7 +919,7 @@ export class TaskModal {
 
         // If no cache loaded yet, show message
         if (this.hierarchy.allLists.length === 0) {
-            resultsContainer.innerHTML = '<p class="cu-hint">Loading lists... please wait</p>';
+            resultsContainer.innerHTML = '<p class="cu-hint">Cargando listas… esperá un momento</p>';
             dropdown.classList.remove('hidden');
             return;
         }
@@ -968,12 +959,13 @@ export class TaskModal {
     renderSearchResults(filtered: ListItem[], query: string, dropdown: HTMLElement, resultsContainer: HTMLElement): void {
         if (filtered.length > 0) {
             resultsContainer.innerHTML = filtered.slice(0, 15).map(list => {
-                const avatar = list.spaceAvatar
-                    ? `<img src="${list.spaceAvatar}" class="cu-space-avatar">`
-                    : `<span class="cu-space-avatar" style="background:${list.spaceColor}">${list.spaceName[0]}</span>`;
+                const avatarUrl = safeAvatarUrl(list.spaceAvatar);
+                const avatar = avatarUrl
+                    ? `<img src="${escapeHTML(avatarUrl)}" class="cu-space-avatar" alt="">`
+                    : `<span class="cu-space-avatar" style="background:${safeColor(list.spaceColor)}">${escapeHTML((list.spaceName || '?')[0])}</span>`;
 
                 return `
-          <div class="cu-location-item" data-list-id="${list.id}" data-path="${this.escapeHtml(list.path)}">
+          <div class="cu-location-item" data-list-id="${escapeHTML(list.id)}" data-path="${this.escapeHtml(list.path)}">
             ${avatar}
             <div class="cu-location-info">
               <span class="cu-location-item-name">${this.highlightMatch(list.name, query)}</span>
@@ -991,7 +983,7 @@ export class TaskModal {
 
             dropdown.classList.remove('hidden');
         } else {
-            resultsContainer.innerHTML = '<p class="cu-hint">No lists found. Try another search term.</p>';
+            resultsContainer.innerHTML = '<p class="cu-hint">No se encontraron listas. Probá con otra búsqueda.</p>';
             dropdown.classList.remove('hidden');
         }
     }
@@ -1022,7 +1014,7 @@ export class TaskModal {
 
         // Fetch list details (including statuses) and members in parallel
         try {
-            console.log('[Modal] Loading list details and members for:', listId);
+            Logger.info('MODAL_LOAD_LIST_DETAILS');
 
             const [listResult, membersResult] = await Promise.all([
                 chrome.runtime.sendMessage({
@@ -1037,24 +1029,29 @@ export class TaskModal {
 
             // Populate statuses
             if (listResult && listResult.statuses && listResult.statuses.length > 0) {
-                statusSelect.innerHTML = listResult.statuses.map((s: any) =>
-                    `<option value="${s.status}" style="color: ${s.color}">${s.status}</option>`
-                ).join('');
+                statusSelect.textContent = '';
+                listResult.statuses.forEach((s: any) => {
+                    const option = document.createElement('option');
+                    option.value = typeof s.status === 'string' ? s.status : '';
+                    option.textContent = typeof s.status === 'string' ? s.status : '';
+                    option.style.color = safeColor(s.color, '#333333');
+                    statusSelect.appendChild(option);
+                });
                 // Default to first status (usually "open" or "to do")
                 statusSelect.value = listResult.statuses[0].status;
-                console.log('[Modal] Loaded', listResult.statuses.length, 'statuses');
+                Logger.info(`MODAL_STATUSES_LOADED_${listResult.statuses.length}`);
             } else {
-                statusSelect.innerHTML = '<option value="">No statuses available</option>';
+                statusSelect.innerHTML = '<option value="">No hay estados disponibles</option>';
             }
 
             // Populate members
             if (membersResult && membersResult.members) {
                 this.hierarchy.members = membersResult.members;
-                console.log('[Modal] Loaded', membersResult.members.length, 'members');
+                Logger.info(`MODAL_MEMBERS_LOADED_${membersResult.members.length}`);
             }
         } catch (e) {
-            console.error('[Modal] Failed to load list details:', e);
-            statusSelect.innerHTML = '<option value="">Error loading statuses</option>';
+            Logger.error('MODAL_LOAD_LIST_DETAILS_ERROR', e);
+            statusSelect.innerHTML = '<option value="">No se pudieron cargar los estados</option>';
         }
     }
 
@@ -1078,7 +1075,7 @@ export class TaskModal {
         this.modal!.querySelector(`.cu-tab-${tab}`)!.classList.add('active');
 
         const submitBtn = this.modal!.querySelector('.cu-btn-submit .cu-btn-text') as HTMLElement;
-        submitBtn.textContent = tab === 'create' ? 'Create Task' : 'Attach Email';
+        submitBtn.textContent = tab === 'create' ? 'Crear tarea' : 'Adjuntar email';
     }
 
     switchEditorView(view: string): void {
@@ -1104,7 +1101,7 @@ export class TaskModal {
     searchAssignees(query: string): void {
         const dropdown = this.modal!.querySelector('.cu-assignee-dropdown') as HTMLElement;
 
-        console.log('[Modal] searchAssignees called, query:', query, 'members:', this.hierarchy.members);
+        Logger.info('MODAL_SEARCH_ASSIGNEES');
 
         if (!query) {
             dropdown.classList.add('hidden');
@@ -1112,7 +1109,7 @@ export class TaskModal {
         }
 
         if (this.hierarchy.members.length > 0) {
-            console.log('[Modal] First member structure:', JSON.stringify(this.hierarchy.members[0]));
+            Logger.info('MODAL_MEMBERS_AVAILABLE');
         }
 
         const filtered = this.hierarchy.members.filter(m => {
@@ -1121,18 +1118,19 @@ export class TaskModal {
                 user.email?.toLowerCase().includes(query.toLowerCase()));
         });
 
-        console.log('[Modal] Filtered members:', filtered.length);
+        Logger.info(`MODAL_FILTERED_MEMBERS_${filtered.length}`);
 
         if (filtered.length > 0) {
             dropdown.innerHTML = filtered.map(m => {
                 const user = m.user || m;
-                const avatar = user.profilePicture
-                    ? `<img src="${user.profilePicture}" class="cu-avatar">`
-                    : `<span class="cu-avatar cu-avatar-default">${(user.username || user.email || '?')[0].toUpperCase()}</span>`;
+                const avatarUrl = safeAvatarUrl(user.profilePicture);
+                const avatar = avatarUrl
+                    ? `<img src="${escapeHTML(avatarUrl)}" class="cu-avatar" alt="">`
+                    : `<span class="cu-avatar cu-avatar-default">${escapeHTML((user.username || user.email || '?')[0].toUpperCase())}</span>`;
                 return `
-          <div class="cu-assignee-option" data-id="${user.id}">
+          <div class="cu-assignee-option" data-id="${escapeHTML(String(user.id || ''))}">
             ${avatar}
-            <span class="cu-assignee-name">${this.escapeHtml(user.username || user.email || 'User')}</span>
+            <span class="cu-assignee-name">${this.escapeHtml(user.username || user.email || 'Usuario')}</span>
           </div>
         `;
             }).join('');
@@ -1164,14 +1162,15 @@ export class TaskModal {
 
         const user = member?.user || member;
 
-        const avatar = user?.profilePicture
-            ? `<img src="${user.profilePicture}" class="cu-avatar-small">`
-            : `<span class="cu-avatar-small cu-avatar-default">${(user?.username || user?.email || '?')[0]}</span>`;
+        const avatarUrl = safeAvatarUrl(user?.profilePicture);
+        const avatar = avatarUrl
+            ? `<img src="${escapeHTML(avatarUrl)}" class="cu-avatar-small" alt="">`
+            : `<span class="cu-avatar-small cu-avatar-default">${escapeHTML((user?.username || user?.email || '?')[0])}</span>`;
 
         const tag = document.createElement('span');
         tag.className = 'cu-assignee-tag';
-        tag.dataset.id = id;
-        tag.innerHTML = `${avatar} ${this.escapeHtml(user?.username || user?.email || 'User')} <button type="button">x</button>`;
+        tag.dataset.id = String(Number.parseInt(id, 10));
+        tag.innerHTML = `${avatar} ${this.escapeHtml(user?.username || user?.email || 'Usuario')} <button type="button" aria-label="Quitar responsable">x</button>`;
         tag.querySelector('button')!.addEventListener('click', () => tag.remove());
         container.appendChild(tag);
 
@@ -1212,24 +1211,25 @@ export class TaskModal {
         const activeTab = (this.modal!.querySelector('.cu-tab-active') as HTMLElement).dataset.tab;
 
         if (activeTab === 'attach') {
-            const taskId = this.selectedTaskId || (this.modal!.querySelector('#cu-task-search') as HTMLInputElement).value.trim();
+            const rawQuery = (this.modal!.querySelector('#cu-task-search') as HTMLInputElement).value.trim();
+            const taskId = this.selectedTaskId || extractTaskIdCandidate(rawQuery);
             if (taskId) {
                 await this.attachToTask(taskId);
             } else {
-                this.showToast('Please select or enter a task', 'error');
+                this.showToast('Seleccioná una tarea encontrada por ID o título.', 'error');
             }
             return;
         }
 
         if (!this.selectedListId) {
-            this.showToast('Please select a location', 'error');
+            this.showToast('Seleccioná una ubicación.', 'error');
             return;
         }
 
         const btn = this.modal!.querySelector('.cu-btn-submit') as HTMLButtonElement;
         btn.disabled = true;
         btn.querySelector('.cu-btn-spinner')!.classList.remove('hidden');
-        (btn.querySelector('.cu-btn-text') as HTMLElement).textContent = 'Creating...';
+        (btn.querySelector('.cu-btn-text') as HTMLElement).textContent = 'Creando…';
 
         try {
             const assignees = Array.from(this.modal!.querySelectorAll('.cu-assignee-tag'))
@@ -1241,7 +1241,7 @@ export class TaskModal {
             const timeTracked = this.parseTime((this.modal!.querySelector('#cu-time-tracked') as HTMLInputElement).value);
 
             const taskData: TaskData = {
-                name: (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).value || 'Email Task',
+                name: (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).value || 'Tarea desde email',
                 markdown_description: this.getDescription(),
                 assignees: assignees,
                 // FIX: Parse dates with local time to avoid UTC offset issues
@@ -1264,7 +1264,7 @@ export class TaskModal {
 
             if (timeEstimate) taskData.time_estimate = timeEstimate;
 
-            const attachWithFiles = (this.modal!.querySelector('#cu-attach-files') as HTMLInputElement).checked;
+            const attachWithFiles = false;
             const response = await chrome.runtime.sendMessage({
                 action: 'createTaskFull',
                 listId: this.selectedListId,
@@ -1277,20 +1277,22 @@ export class TaskModal {
 
             if (response && response.id) {
                 this.showSuccessPopup(response);
+                if ((response as any).warning) this.showToast('Tarea creada con advertencias.', 'success');
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
                     detail: { task: response, threadId: this.emailData!.threadId }
                 }));
                 this.close();
             } else {
-                this.showToast(response?.error || 'Failed', 'error');
+                this.showToast('No se pudo crear la tarea.', 'error');
             }
         } catch (error: any) {
-            this.showToast(error.message, 'error');
+            Logger.error('MODAL_CREATE_TASK_ERROR', error);
+            this.showToast('No se pudo crear la tarea.', 'error');
         }
 
         btn.disabled = false;
         btn.querySelector('.cu-btn-spinner')!.classList.add('hidden');
-        (btn.querySelector('.cu-btn-text') as HTMLElement).textContent = 'Create Task';
+        (btn.querySelector('.cu-btn-text') as HTMLElement).textContent = 'Crear tarea';
     }
 
     async attachToTask(taskId: string): Promise<void> {
@@ -1305,7 +1307,7 @@ export class TaskModal {
             }) as TaskResult;
 
             if (response && (response.id || response.success)) {
-                this.showToast('Email attached!', 'success');
+                this.showToast((response as any).warning ? 'Email adjuntado con advertencias.' : 'Email adjuntado.', 'success');
 
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
                     detail: { task: response, threadId: this.emailData!.threadId }
@@ -1313,16 +1315,17 @@ export class TaskModal {
 
                 this.close();
             } else {
-                this.showToast(response?.error || 'Failed', 'error');
+                this.showToast('No se pudo adjuntar el email.', 'error');
             }
 
         } catch (error: any) {
             // Check for extension context invalidation (happens when extension is reloaded)
             if (error?.message?.includes('Extension context invalidated') ||
                 error?.message?.includes('Extension runtime error')) {
-                this.showToast('Extension reloaded. Please refresh Gmail.', 'error');
+                this.showToast('La extensión se recargó. Actualizá Gmail.', 'error');
             } else {
-                this.showToast(error.message || 'Failed to attach email', 'error');
+                Logger.error('MODAL_ATTACH_EMAIL_ERROR', error);
+                this.showToast('No se pudo adjuntar el email.', 'error');
             }
         }
 
@@ -1339,12 +1342,12 @@ export class TaskModal {
         popup.innerHTML = `
             <div class="cu-success-popup-content">
                 <div class="cu-success-icon">✓</div>
-                <div class="cu-success-title">Task Created!</div>
+                <div class="cu-success-title">Tarea creada</div>
                 <div class="cu-success-task-name">${this.escapeHtml(task.name)}</div>
-                <button class="cu-btn cu-btn-primary cu-success-view-btn" data-url="${task.url}">
-                    🔗 View Task in ClickUp
+                <button class="cu-btn cu-btn-primary cu-success-view-btn" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
+                    🔗 Ver tarea en ClickUp
                 </button>
-                <div class="cu-success-auto-close">Closing in <span class="cu-countdown">5</span>s...</div>
+                <div class="cu-success-auto-close">Se cierra en <span class="cu-countdown">5</span>s…</div>
             </div>
         `;
 
@@ -1353,7 +1356,7 @@ export class TaskModal {
         // View task button handler
         const viewBtn = popup.querySelector('.cu-success-view-btn') as HTMLButtonElement;
         viewBtn.addEventListener('click', () => {
-            window.open(task.url, '_blank');
+            window.open(safeClickUpUrl(viewBtn.dataset.url || ''), '_blank', 'noopener,noreferrer');
             popup.remove();
         });
 
@@ -1399,97 +1402,38 @@ export class TaskModal {
 
     async searchTasks(query: string): Promise<void> {
         const resultsContainer = this.modal!.querySelector('.cu-task-search-results') as HTMLElement;
+        const requestSequence = ++this.taskSearchSequence;
+        const cleanQuery = query.trim();
 
-        if (query.length < 4) {
+        if (cleanQuery.length < 3) {
             resultsContainer.classList.add('hidden');
             return;
         }
 
-        resultsContainer.innerHTML = '<div class="cu-search-loading">Searching...</div>';
+        resultsContainer.innerHTML = '<div class="cu-search-loading">Buscando por Task ID o título…</div>';
         resultsContainer.classList.remove('hidden');
 
         try {
-            const taskId = this.extractTaskId(query);
-            let tasks: TaskResult[] = [];
-            let exactMatch: TaskResult | null = null;
-
-            if (taskId) {
-                try {
-                    const exactTask = await chrome.runtime.sendMessage({
-                        action: 'getTaskById',
-                        taskId: taskId
-                    }) as TaskResult;
-                    if (exactTask && exactTask.id) {
-                        exactMatch = exactTask;
-                    }
-                } catch (e) {
-                    console.log('[Modal] Exact task lookup failed:', e);
-                }
-            }
-
-            const searchQuery = taskId || query;
             const response = await chrome.runtime.sendMessage({
                 action: 'searchTasks',
-                query: searchQuery
+                query: cleanQuery
             }) as TasksResponse;
 
-            if (response && response.tasks) {
-                tasks = response.tasks;
-            }
-
-            // Sort results by relevance
-            if (tasks.length > 0) {
-                const queryLower = query.toLowerCase().trim();
-                const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
-
-                tasks.sort((a, b) => {
-                    const nameA = a.name.toLowerCase();
-                    const nameB = b.name.toLowerCase();
-
-                    // 1. Exact match (highest priority)
-                    const exactA = nameA === queryLower;
-                    const exactB = nameB === queryLower;
-                    if (exactA && !exactB) return -1;
-                    if (!exactA && exactB) return 1;
-
-                    // 2. Starts with query
-                    const startA = nameA.startsWith(queryLower);
-                    const startB = nameB.startsWith(queryLower);
-                    if (startA && !startB) return -1;
-                    if (!startA && startB) return 1;
-
-                    // 3. Contains all words
-                    const allWordsA = queryWords.every(w => nameA.includes(w));
-                    const allWordsB = queryWords.every(w => nameB.includes(w));
-                    if (allWordsA && !allWordsB) return -1;
-                    if (!allWordsA && allWordsB) return 1;
-
-                    // 4. Default by date updated (if available) or name length
-                    // Prefer shorter names if they match equally well (likely more precise)
-                    return nameA.length - nameB.length;
-                });
-            }
-
-            // Always add exact match from ID lookup to the top if found
-            if (exactMatch) {
-                // Remove it from list if it's there to avoid duplicates
-                tasks = tasks.filter(t => t.id !== exactMatch!.id);
-                tasks.unshift(exactMatch);
-            }
-
-
+            if (requestSequence !== this.taskSearchSequence) return;
+            const tasks = rankTaskSearchResults(response?.tasks || [], cleanQuery, 10);
 
             if (tasks.length > 0) {
-                const lowerQuery = (taskId || query).toLowerCase();
-                resultsContainer.innerHTML = tasks.slice(0, 10).map(task => {
-                    const listName = typeof task.list === 'object' ? task.list?.name : task.list || 'Unknown';
+                const taskId = extractTaskIdCandidate(cleanQuery);
+                const lowerQuery = (taskId || cleanQuery).toLowerCase();
+                resultsContainer.innerHTML = tasks.map(task => {
+                    const listName = typeof task.list === 'object' ? task.list?.name : task.list || 'Sin lista';
                     const isExact = task.id.toLowerCase() === lowerQuery;
                     return `
-                    <div class="cu-task-result ${isExact ? 'cu-task-exact' : ''}" data-task-id="${task.id}" data-task-name="${this.escapeHtml(task.name)}" 
-                         data-task-url="${task.url}" data-task-list="${this.escapeHtml(listName)}">
-                        <div class="cu-task-result-name">${this.highlightMatch(task.name, query)}</div>
+                    <div class="cu-task-result ${isExact ? 'cu-task-exact' : ''}" data-task-id="${escapeHTML(task.id || '')}" data-task-name="${escapeHTML(task.name)}"
+                         data-task-url="${escapeHTML(safeClickUpUrl(task.url || ''))}" data-task-list="${escapeHTML(listName)}">
+                        <div class="cu-task-result-name">${this.highlightMatch(task.name, cleanQuery)}</div>
                         <div class="cu-task-result-meta">
-                            <span class="cu-task-result-id">#${task.id}</span>
+                            <span class="cu-task-result-id">#${escapeHTML(task.id || '')}</span>
                             <span class="cu-task-result-list">${this.escapeHtml(listName)}</span>
                         </div>
                     </div>
@@ -1507,46 +1451,23 @@ export class TaskModal {
                     });
                 });
             } else {
-                resultsContainer.innerHTML = '<div class="cu-search-empty">No tasks found</div>';
+                resultsContainer.innerHTML = '<div class="cu-search-empty">No se encontraron tareas por ID o título</div>';
             }
         } catch (error: any) {
-            console.error('[Modal] Search error:', error);
+            if (requestSequence !== this.taskSearchSequence) return;
+            Logger.error('MODAL_SEARCH_ERROR', error);
             // Check for extension context invalidation (happens when extension is reloaded)
             if (error?.message?.includes('Extension context invalidated') ||
                 error?.message?.includes('Extension runtime error')) {
-                resultsContainer.innerHTML = '<div class="cu-search-error">Extension reloaded. Please refresh Gmail.</div>';
+                resultsContainer.innerHTML = '<div class="cu-search-error">La extensión se recargó. Actualizá Gmail.</div>';
             } else {
-                resultsContainer.innerHTML = '<div class="cu-search-error">Search failed</div>';
+                resultsContainer.innerHTML = '<div class="cu-search-error">No se pudo buscar</div>';
             }
         }
     }
 
     extractTaskId(input: string): string | null {
-        const urlMatch = input.match(/clickup\.com\/t\/([a-zA-Z0-9]+)/);
-        if (urlMatch) {
-            return urlMatch[1];
-        }
-
-        // Regex for ClickUp Task IDs: alfanumeric, often starts with numbers but not always.
-        // Avoid simple words by checking for mixed case or numbers + letters
-        const idRegex = /^[a-zA-Z0-9]{5,12}$/;
-        const trimmed = input.trim();
-
-        if (idRegex.test(trimmed)) {
-            // Extra check: if it's purely letters and < 6 chars, it's likely a word (e.g. "team", "task")
-            // ClickUp IDs usually have numbers or are longer if letters only (rare)
-            if (/^[a-zA-Z]+$/.test(trimmed) && trimmed.length < 8) {
-                return null;
-            }
-            return trimmed;
-        }
-
-        const hashMatch = input.match(/^#([a-zA-Z0-9]+)$/);
-        if (hashMatch) {
-            return hashMatch[1];
-        }
-
-        return null;
+        return extractTaskIdCandidate(input);
     }
 
     selectTask(task: TaskResult): void {
@@ -1566,7 +1487,7 @@ export class TaskModal {
         (selectedContainer.querySelector('.cu-selected-task-name') as HTMLElement).textContent = task.name;
         const listName = typeof task.list === 'object' ? task.list?.name : task.list;
         (selectedContainer.querySelector('.cu-selected-task-list') as HTMLElement).textContent =
-            listName ? `in ${listName}` : `#${task.id}`;
+            listName ? `en ${listName}` : `#${task.id}`;
     }
 
     clearSelectedTask(): void {

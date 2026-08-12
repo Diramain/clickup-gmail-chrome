@@ -398,6 +398,18 @@ select option {
     color: rgba(255, 255, 255, 0.4);
 }
 
+.popup-footer a {
+    color: rgba(255, 255, 255, 0.58);
+    text-decoration: none;
+}
+
+.popup-footer a:hover,
+.popup-footer a:focus-visible {
+    color: #49CCF9;
+    text-decoration: underline;
+    outline: none;
+}
+
 /* ============================================================================
    Tab Navigation
    ============================================================================ */
@@ -684,11 +696,41 @@ select option {
     margin-right: 8px;
 }
 
+.time-entry-item .entry-task-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.time-entry-item .entry-task-link:hover,
+.time-entry-item .entry-task-link:focus-visible {
+    color: #49CCF9;
+    text-decoration: underline;
+}
+
+.time-entry-item .entry-task-link:focus-visible {
+    outline: 2px solid #49CCF9;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
 .time-entry-item .entry-duration {
     font-size: 12px;
     font-weight: 600;
     color: #49CCF9;
     font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.time-entry-item.time-entry-running {
+    background: rgba(0, 200, 83, 0.08);
+}
+
+.time-entry-item .entry-state {
+    display: inline-block;
+    margin-left: 6px;
+    color: #00c853;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 /* ============================================================================

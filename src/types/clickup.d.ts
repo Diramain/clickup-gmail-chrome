@@ -243,6 +243,7 @@ export interface EmailData {
     subject: string;
     from: string;
     html: string;
+    htmlSanitized?: true;
     email?: string;
     userEmail?: string;
     attachments?: AttachmentInfo[];
@@ -261,6 +262,12 @@ export interface EmailTaskMapping {
     url: string;
     status?: string;
     createdAt?: number;
+    updatedAt?: number;
+    lastValidatedAt?: number;
+    linkStatus?: 'pending' | 'partial_failed' | 'unverified' | 'linked' | 'unlinked_candidate' | 'unlinked' | 'not_found_candidate' | 'not_found' | 'auth_error' | 'rate_limited' | 'transient_error' | 'unknown_error';
+    linkSource?: 'custom_field' | 'description' | 'comment' | 'sync' | 'legacy' | 'unknown';
+    customFieldId?: string;
+    failureCount?: number;
 }
 
 export interface StorageData {
@@ -273,6 +280,7 @@ export interface StorageData {
     };
     preferredTeamId?: string; // Replaces defaultList
     emailTaskMappings?: Record<string, EmailTaskMapping[]>;
+    emailTaskMappingsV2?: Record<string, EmailTaskMapping[]>;
     cachedTeams?: ClickUpTeamsResponse;
     cachedUser?: ClickUpUserResponse;
 }
@@ -312,6 +320,7 @@ export type MessageAction =
     | 'preloadFullHierarchy'
     | 'getHierarchyCache'
     | 'syncEmailTasks'
+    | 'clearLocalData'
     | 'getEmailTasksSyncStatus'
     // Time Tracking Actions
     | 'startTimer'
@@ -376,4 +385,3 @@ export interface TaskMapping {
     name: string;
     url: string;
 }
-

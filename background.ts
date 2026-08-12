@@ -16,8 +16,42 @@ import {
     TimeEntry,
     ClickUpCustomField
 } from './src/types/clickup';
-import { ClickUpAPIWrapper, TokenRefreshCallback } from './src/services/api.service';
-import { getSecureOAuthConfig, saveSecureOAuthConfig, getSecureToken } from './src/services/crypto.service';
+import { ClickUpAPIWrapper, ClickUpRateGovernor, TokenRefreshCallback, type RateGovernorState } from './src/services/api.service';
+import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
+import { Logger } from './src/logger';
+import { validateExtensionMessage } from './src/message-security';
+import {
+    EMAIL_TASK_MAPPINGS_V2_KEY,
+    SingleFlight,
+    applyValidationToTask,
+    classifyValidationError,
+    commentsContainThreadId,
+    escapeRegExp,
+    isConfirmedThreadId,
+    LINK_SCHEMA_VERSION,
+    mergeThreadIdValue,
+    migrateMappingsV1ToV2,
+    nextHierarchyPreloadStatus,
+    readMappingsWithFallback,
+    runWithConcurrencyLimit,
+    shouldAttemptHierarchyPreload,
+    selectThreadIdCustomField,
+    transitionLinkStatus,
+    toVisibleLinkedTasks,
+    type EmailTaskMappingsV2,
+    type EmailTaskMappingV2,
+    type HierarchyPreloadStatus,
+    type LinkSource,
+    type LinkValidationResult,
+    type LinkValidationStatus,
+} from './src/link-hardening';
+import { isSyncProgressMessage, type SyncProgressMessage } from './src/sync-progress';
+import {
+    extractTaskIdCandidate,
+    hasHighConfidenceTaskSearchResult,
+    rankTaskSearchResults,
+} from './src/task-search';
+import { extractCurrentUserId } from './src/time-entry-history';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -39,16 +73,90 @@ const STORAGE_KEYS = {
     OAUTH_CONFIG: 'oauthConfig', // New key for storing OAuth credentials
     PREFERRED_TEAM: 'preferredTeamId', // Replaces defaultList
     EMAIL_TASK_MAPPINGS: 'emailTaskMappings',
+    EMAIL_TASK_MAPPINGS_V2: EMAIL_TASK_MAPPINGS_V2_KEY,
     CACHED_TEAMS: 'cachedTeams',
     CACHED_USER: 'cachedUser',
-    CACHED_HIERARCHY: 'hierarchyCache' // Unified cache key
+    CACHED_HIERARCHY: 'hierarchyCache', // Unified cache key
+    HIERARCHY_PRELOAD_STATUS: 'hierarchyPreloadStatus',
+    RATE_GOVERNOR_STATE: 'clickupRateGovernorState',
+    DRAFT_CLIENT_ID: 'draftClientId',
+    DRAFT_CLIENT_SECRET: 'draftClientSecret'
 };
 
 const EXPIRATION_TIME = 24 * 60 * 60 * 1000; // 24 hours
+const TASK_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const TASK_SEARCH_MAX_PAGES = 50;
+const TASK_SEARCH_PAGE_SIZE = 100;
+const TASK_SEARCH_RESULT_LIMIT = 10;
+const CURRENT_USER_VALIDATION_TTL_MS = 5 * 60 * 1000;
+const RECENT_TIME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function emitSyncProgress(message: SyncProgressMessage): void {
+    if (!isSyncProgressMessage(message)) return;
+    void chrome.runtime.sendMessage(message).catch(() => undefined);
+}
 
 interface CacheEntry<T> {
     data: T;
     timestamp: number;
+}
+
+interface TaskSearchCache {
+    tasks: Map<string, ClickUpTask>;
+    nextPage: number;
+    complete: boolean;
+    expiresAt: number;
+    inFlight?: Promise<void>;
+}
+
+const taskSearchCaches = new Map<string, TaskSearchCache>();
+
+function getTaskSearchCache(teamId: string): TaskSearchCache {
+    const current = taskSearchCaches.get(teamId);
+    if (current && current.expiresAt > Date.now()) return current;
+
+    const fresh: TaskSearchCache = {
+        tasks: new Map(),
+        nextPage: 0,
+        complete: false,
+        expiresAt: Date.now() + TASK_SEARCH_CACHE_TTL_MS,
+    };
+    taskSearchCaches.set(teamId, fresh);
+    return fresh;
+}
+
+function addTasksToSearchCache(cache: TaskSearchCache, tasks: ClickUpTask[]): void {
+    for (const task of tasks) {
+        if (task?.id && task?.name) cache.tasks.set(task.id, task);
+    }
+    cache.expiresAt = Date.now() + TASK_SEARCH_CACHE_TTL_MS;
+}
+
+function seedTaskSearchCache(teamId: string, tasks: ClickUpTask[]): void {
+    addTasksToSearchCache(getTaskSearchCache(teamId), tasks);
+}
+
+async function loadNextTaskSearchPage(teamId: string, cache: TaskSearchCache): Promise<void> {
+    if (cache.complete) return;
+    if (cache.inFlight) {
+        await cache.inFlight;
+        return;
+    }
+
+    const page = cache.nextPage;
+    cache.inFlight = (async () => {
+        const response = await clickupAPI!.getWorkspaceTasksPage(teamId, page);
+        const tasks = response.tasks || [];
+        addTasksToSearchCache(cache, tasks);
+        cache.nextPage = page + 1;
+        cache.complete = tasks.length < TASK_SEARCH_PAGE_SIZE || cache.nextPage >= TASK_SEARCH_MAX_PAGES;
+    })();
+
+    try {
+        await cache.inFlight;
+    } finally {
+        cache.inFlight = undefined;
+    }
 }
 
 interface HierarchyData {
@@ -57,7 +165,12 @@ interface HierarchyData {
 }
 
 let clickupAPI: ClickUpAPIWrapper | null = null;
+let currentUserValidatedAt = 0;
 let hierarchyCache: Record<string, CacheEntry<HierarchyData>> = {};
+const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
+let mappingWriteQueue: Promise<void> = Promise.resolve();
+const customFieldUpdateQueues = new Map<string, Promise<void>>();
+const HIERARCHY_FOLDER_CONCURRENCY = 3;
 
 // Default badge state
 const BADGE_STATES = {
@@ -68,12 +181,8 @@ const BADGE_STATES = {
 
 // Initialize
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('[ClickUp] Extension installed');
-    chrome.contextMenus.create({
-        id: "addToClickUp",
-        title: "Add to ClickUp",
-        contexts: ["all"]
-    });
+    Logger.info('EXTENSION_INSTALLED');
+    chrome.storage.local.remove(STORAGE_KEYS.DRAFT_CLIENT_SECRET);
 
     // Create alarm for timer polling
     chrome.alarms.create('timer-poll', { periodInMinutes: 1 });
@@ -102,7 +211,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
                     await updateTimerBadge('stopped');
                 }
             } catch (e) {
-                console.error('[ClickUp] Timer poll failed:', e);
+                Logger.error('TIMER_POLL_FAILED', e);
             }
         }
     }
@@ -117,7 +226,7 @@ async function refreshAccessToken(): Promise<{ success: boolean; token?: string 
         const refreshToken = await getSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
 
         if (!refreshToken || !oauthConfig) {
-            console.error('[ClickUp] Cannot refresh token: missing refresh token or config');
+            Logger.warn('TOKEN_REFRESH_SKIPPED');
             return { success: false };
         }
 
@@ -132,7 +241,7 @@ async function refreshAccessToken(): Promise<{ success: boolean; token?: string 
         });
 
         if (!response.ok) {
-            console.error('[ClickUp] Token refresh failed:', response.status, await response.text());
+            Logger.warn(`TOKEN_REFRESH_FAILED_${response.status}`);
             return { success: false };
         }
 
@@ -140,8 +249,8 @@ async function refreshAccessToken(): Promise<{ success: boolean; token?: string 
         const newToken = result.access_token;
 
         if (newToken) {
-            console.log('[ClickUp] Token refreshed successfully');
-            await chrome.storage.local.set({ [STORAGE_KEYS.AUTH_TOKEN]: newToken });
+            Logger.info('TOKEN_REFRESHED');
+            await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, newToken);
             // Should properly close over clickupAPI if possible, or reliance on wrapper updating itself if we pass callback?
             // The wrapper calls this, gets the token, and updates itself.
             return { success: true, token: newToken };
@@ -150,48 +259,65 @@ async function refreshAccessToken(): Promise<{ success: boolean; token?: string 
         return { success: false };
 
     } catch (e) {
-        console.error('[ClickUp] Error refreshing token:', e);
+        Logger.error('TOKEN_REFRESH_ERROR', e);
         return { success: false };
     }
 }
 
 // Initialize API wrapper
 async function initializeAPI() {
-    const data = await chrome.storage.local.get(STORAGE_KEYS.AUTH_TOKEN);
-    const token = data[STORAGE_KEYS.AUTH_TOKEN];
+    const token = await getSecureToken(STORAGE_KEYS.AUTH_TOKEN);
 
     if (token) {
-        clickupAPI = new ClickUpAPIWrapper(token);
+        const store = await chrome.storage.local.get(STORAGE_KEYS.RATE_GOVERNOR_STATE);
+        const governor = new ClickUpRateGovernor(
+            undefined,
+            undefined,
+            store[STORAGE_KEYS.RATE_GOVERNOR_STATE] as RateGovernorState | undefined,
+            async (state) => {
+                await chrome.storage.local.set({ [STORAGE_KEYS.RATE_GOVERNOR_STATE]: state });
+            }
+        );
+        clickupAPI = new ClickUpAPIWrapper(token, governor);
         clickupAPI.setTokenRefreshCallback(refreshAccessToken);
     }
 }
 
 initializeAPI();
+initializeLinkStorageShadow().catch((e) => {
+    Logger.error('LINK_STORAGE_SHADOW_MIGRATION_SKIPPED', e);
+});
+
+async function initializeLinkStorageShadow(): Promise<void> {
+    await updateEmailTaskMappings((mappings) => mappings, { schemaVersion: LINK_SCHEMA_VERSION });
+}
 
 // Listen for messages from popup or content script
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
-    // Log meaningful data without sensitive info
-    const logData = { ...message };
-    if (logData.action === 'authenticate') delete logData.data; // Don't log tokens
-    console.log(`[ClickUp] Background received message: ${message.action}`, message.data || (Object.keys(message).length > 2 ? message : ''));
+    const validation = validateExtensionMessage(message, sender, chrome.runtime.id);
+    if (!validation.ok) {
+        Logger.warn(`MESSAGE_REJECTED_${validation.code || 'UNKNOWN'}`);
+        sendResponse({ success: false, error: validation.code || 'INVALID_MESSAGE' });
+        return false;
+    }
+
+    Logger.info(`MESSAGE_${message.action}`);
 
     handleMessage(message, sender)
         .then(response => {
-            console.log('[ClickUp] Sending response:', response);
-
             // Serialize error if present
             if (response && response.error && response.error instanceof Error) {
                 sendResponse({
                     success: false,
-                    error: response.error.message // Send only the message string
+                    error: Logger.sanitizeError(response.error)
                 });
             } else {
                 sendResponse(response);
             }
         })
         .catch(error => {
-            console.error('[ClickUp] Error handling message:', error);
-            sendResponse({ success: false, error: error.message || 'Unknown error' });
+            Logger.error('MESSAGE_HANDLER_ERROR', error);
+            sendResponse({ success: false, error: Logger.sanitizeError(error) });
         });
 
     return true; // Keep channel open for async response
@@ -241,24 +367,35 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
                 const result = await tokenResponse.json();
 
-                await chrome.storage.local.set({ [STORAGE_KEYS.AUTH_TOKEN]: result.access_token });
+                await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
 
                 if (result.refresh_token) {
-                    await chrome.storage.local.set({ [STORAGE_KEYS.REFRESH_TOKEN]: result.refresh_token });
+                    await saveSecureToken(STORAGE_KEYS.REFRESH_TOKEN, result.refresh_token);
                 }
+
+                await chrome.storage.local.remove([
+                    STORAGE_KEYS.DRAFT_CLIENT_ID,
+                    STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                    STORAGE_KEYS.CACHED_USER,
+                ]);
+                currentUserValidatedAt = 0;
 
                 await initializeAPI();
                 const user = await getCachedUser();
 
                 return { success: true, user };
             } catch (e) {
-                console.error('[ClickUp] Auth failed:', e);
-                return { success: false, error: String(e) };
+                Logger.error('AUTH_FAILED', e);
+                return { success: false, error: Logger.sanitizeError(e) };
             }
 
         case 'saveOAuthConfig':
             // SEC-C1: Use encrypted storage for OAuth config
             await saveSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG, data);
+            await chrome.storage.local.remove([STORAGE_KEYS.DRAFT_CLIENT_ID, STORAGE_KEYS.DRAFT_CLIENT_SECRET]);
+            if (!await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)) {
+                throw new Error('OAuth configuration was not stored securely');
+            }
             return { success: true };
 
         case 'testTokenRefresh': // New action for testing
@@ -277,9 +414,19 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             }
 
         case 'logout':
-            await chrome.storage.local.remove([STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.REFRESH_TOKEN, STORAGE_KEYS.CACHED_USER, STORAGE_KEYS.CACHED_TEAMS]);
+            await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+            await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+            await chrome.storage.local.remove([
+                STORAGE_KEYS.OAUTH_CONFIG,
+                STORAGE_KEYS.DRAFT_CLIENT_ID,
+                STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                STORAGE_KEYS.CACHED_USER,
+                STORAGE_KEYS.CACHED_TEAMS,
+            ]);
             clickupAPI = null;
+            currentUserValidatedAt = 0;
             hierarchyCache = {};
+            taskSearchCaches.clear();
             await chrome.action.setBadgeText({ text: '' });
             return { success: true };
 
@@ -290,11 +437,11 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getStatus': // Combined status check
             try {
                 await initializeAPI();
-                const config = await chrome.storage.local.get(STORAGE_KEYS.PREFERRED_TEAM);
+                const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
                 const user = clickupAPI ? await getCachedUser().catch(() => null) : null;
                 return {
                     authenticated: !!clickupAPI && !!user,
-                    configured: !!config[STORAGE_KEYS.PREFERRED_TEAM],
+                    configured,
                     user: user
                 };
             } catch (e) {
@@ -335,9 +482,9 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             const pTeamId = message.teamId || (data ? data.teamId : undefined);
             try {
                 const listCount = await preloadHierarchy(pTeamId);
-                return { success: true, listCount: listCount || 0 };
+                return { success: listCount >= 0, listCount: Math.max(0, listCount) };
             } catch (e) {
-                console.error('[ClickUp] Preload failed:', e);
+                Logger.error('HIERARCHY_PRELOAD_MESSAGE_FAILED', e);
                 return { success: false, listCount: 0 };
             }
 
@@ -351,7 +498,9 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await getFolders(message.spaceId || (data ? data.spaceId : undefined));
 
         case 'getLists':
-            return await getLists(message.folderId || (data ? data.folderId : undefined));
+            const listsFolderId = message.folderId || (data ? data.folderId : undefined);
+            const listsSpaceId = message.spaceId || (data ? data.spaceId : undefined);
+            return listsFolderId ? await getLists(listsFolderId) : await getFolderlessLists(listsSpaceId);
 
         case 'getFolderlessLists':
             return await getFolderlessLists(message.spaceId || (data ? data.spaceId : undefined));
@@ -416,13 +565,18 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await findLinkedTasks(data.threadId);
 
         case 'syncEmailTasks':
-            if (data.days) {
-                return await syncEmailTasksByTime(data.days);
-            } else if (data.emailData) {
-                await syncSingleEmailTask(data.emailData);
-                return { success: true };
+            if (Number.isInteger(data.days)) {
+                try {
+                    return await syncEmailTasksByTime(data.days);
+                } catch (error) {
+                    emitSyncProgress({ action: 'syncProgress', scope: 'email', phase: 'error' });
+                    throw error;
+                }
             }
             throw new Error('Invalid sync parameters');
+
+        case 'clearLocalData':
+            return await clearLocalData(sender);
 
         case 'searchTasks':
             const sQuery = message.query || (data ? data.query : undefined);
@@ -471,7 +625,15 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             );
 
         case 'getTimeEntries':
-            return await clickupAPI!.getTimeEntries(data.teamId, data.start_date, data.end_date);
+            const currentUserId = await getValidatedCurrentUserId();
+            if (!currentUserId) throw new Error('CURRENT_USER_UNAVAILABLE');
+            const recentEndDate = Date.now();
+            return await clickupAPI!.getTimeEntries(
+                data.teamId,
+                recentEndDate - RECENT_TIME_WINDOW_MS,
+                recentEndDate,
+                currentUserId
+            );
 
         case 'updateTimerBadge':
             await updateTimerBadge(data.state);
@@ -500,6 +662,22 @@ async function getCachedUser() {
     const user = await clickupAPI!.getUser();
     await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_USER]: user });
     return user;
+}
+
+async function getValidatedCurrentUserId(): Promise<number | null> {
+    await ensureAPI();
+    const now = Date.now();
+
+    if (now - currentUserValidatedAt >= CURRENT_USER_VALIDATION_TTL_MS) {
+        const freshUser = await clickupAPI!.getUser();
+        const freshUserId = extractCurrentUserId(freshUser);
+        if (!freshUserId) return null;
+        await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_USER]: freshUser });
+        currentUserValidatedAt = now;
+        return freshUserId;
+    }
+
+    return extractCurrentUserId(await getCachedUser());
 }
 
 async function getUser() {
@@ -556,11 +734,31 @@ async function preloadHierarchy(teamId?: string): Promise<number> {
     }
 
     if (!teamId) {
-        console.error('[ClickUp] Cannot preload hierarchy: No team selected');
+        Logger.warn('HIERARCHY_PRELOAD_NO_TEAM');
         return 0;
     }
 
-    console.log('[ClickUp] Starting hierarchy preload for team:', teamId);
+    return hierarchyPreloadSingleFlight.run(teamId, () => preloadHierarchyForTeamWithCooldown(teamId!));
+}
+
+async function preloadHierarchyForTeamWithCooldown(teamId: string): Promise<number> {
+    const statusStore = await chrome.storage.local.get(STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS);
+    const allStatuses = (statusStore[STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS] || {}) as Record<string, HierarchyPreloadStatus>;
+    const teamStatus = allStatuses[teamId];
+    if (!shouldAttemptHierarchyPreload(teamStatus)) {
+        Logger.warn('HIERARCHY_PRELOAD_COOLDOWN');
+        return 0;
+    }
+
+    return preloadHierarchyForTeam(teamId);
+}
+
+async function preloadHierarchyForTeam(teamId: string): Promise<number> {
+    await ensureAPI();
+
+    Logger.info('HIERARCHY_PRELOAD_START');
+    emitSyncProgress({ action: 'syncProgress', scope: 'hierarchy', phase: 'starting' });
+    await setHierarchyPreloadStatus(teamId, 'in_progress');
 
     try {
         const hierarchy: any = { spaces: [] };
@@ -568,13 +766,19 @@ async function preloadHierarchy(teamId?: string): Promise<number> {
         let totalListCount = 0;
         const totalSpaces = spacesRes.spaces.length;
 
-        console.log(`[ClickUp] Found ${totalSpaces} spaces to sync...`);
+        Logger.info(`HIERARCHY_SPACES_COUNT_${totalSpaces}`);
+        emitSyncProgress({
+            action: 'syncProgress',
+            scope: 'hierarchy',
+            phase: 'fetching',
+            total: totalSpaces,
+        });
 
         for (let i = 0; i < spacesRes.spaces.length; i++) {
             const space = spacesRes.spaces[i];
             const spaceData: any = { ...space, folders: [], lists: [] };
 
-            console.log(`[ClickUp] Syncing space ${i + 1}/${totalSpaces}: "${space.name}"`);
+            Logger.info(`HIERARCHY_SPACE_PROGRESS_${i + 1}_OF_${totalSpaces}`);
 
             // Parallelize fetching folders and folderless lists
             const [foldersRes, listsRes] = await Promise.all([
@@ -588,12 +792,10 @@ async function preloadHierarchy(teamId?: string): Promise<number> {
             // Fetch lists for each folder
             // To avoid rate limits, we might want to batch this or do it sequentially if needed
             // For now, simple Promise.all
-            const folderPromises = foldersRes.folders.map(async (folder) => {
+            const foldersWithLists = await runWithConcurrencyLimit(foldersRes.folders, HIERARCHY_FOLDER_CONCURRENCY, async (folder) => {
                 const fLists = await clickupAPI!.getLists(folder.id);
                 return { ...folder, lists: fLists.lists };
             });
-
-            const foldersWithLists = await Promise.all(folderPromises);
             spaceData.folders = foldersWithLists;
 
             // Count lists inside folders
@@ -601,7 +803,15 @@ async function preloadHierarchy(teamId?: string): Promise<number> {
                 totalListCount += folder.lists.length;
             }
 
-            console.log(`[ClickUp]   ├─ ${listsRes.lists.length} folderless lists, ${foldersRes.folders.length} folders (${totalListCount} total lists so far)`);
+            Logger.info(`HIERARCHY_COUNTS_LISTS_${totalListCount}_FOLDERS_${foldersRes.folders.length}`);
+            emitSyncProgress({
+                action: 'syncProgress',
+                scope: 'hierarchy',
+                phase: 'processing',
+                current: i + 1,
+                total: totalSpaces,
+                listCount: totalListCount,
+            });
 
             hierarchy.spaces.push(spaceData);
         }
@@ -616,14 +826,30 @@ async function preloadHierarchy(teamId?: string): Promise<number> {
         };
 
         await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_HIERARCHY]: cache });
-        console.log('[ClickUp] Hierarchy preload complete. Total lists:', totalListCount);
+        await setHierarchyPreloadStatus(teamId, 'success');
+        Logger.info(`HIERARCHY_PRELOAD_COMPLETE_${totalListCount}`);
+        emitSyncProgress({
+            action: 'syncProgress',
+            scope: 'hierarchy',
+            phase: 'complete',
+            listCount: totalListCount,
+        });
 
         return totalListCount;
 
     } catch (e) {
-        console.error('[ClickUp] Hierarchy preload failed:', e);
-        return 0;
+        Logger.error('HIERARCHY_PRELOAD_FAILED', e);
+        await setHierarchyPreloadStatus(teamId, 'failed');
+        emitSyncProgress({ action: 'syncProgress', scope: 'hierarchy', phase: 'error' });
+        return -1;
     }
+}
+
+async function setHierarchyPreloadStatus(teamId: string, status: HierarchyPreloadStatus['status']): Promise<void> {
+    const store = await chrome.storage.local.get(STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS);
+    const statuses = (store[STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS] || {}) as Record<string, HierarchyPreloadStatus>;
+    statuses[teamId] = nextHierarchyPreloadStatus(statuses[teamId], status);
+    await chrome.storage.local.set({ [STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS]: statuses });
 }
 
 async function getCachedHierarchy(teamId: string) {
@@ -693,37 +919,85 @@ function extractThreadId(task: any, customFieldName: string): string | null {
 }
 
 async function findLinkedTasks(threadId: string): Promise<ClickUpTask[]> {
-    await ensureAPI();
-
-    // Get configured Custom Field Name
-    const settings = await chrome.storage.local.get(['threadIdField']);
-    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
-
-    // 1. Search in local mapping first (fastest)
-    // TODO: Implement local mapping check if reliable
-
-    // 2. No default list anymore. We cannot efficiently search global tasks without context.
-    // We rely on 'syncEmailTasks' (bulk) or local mapping.
-
-    return [];
+    if (!isConfirmedThreadId(threadId)) return [];
+    const mappings = await getEmailTaskMappingsForRead();
+    return toVisibleLinkedTasks(mappings[threadId] || []).map(task => ({
+        id: task.id,
+        name: task.name,
+        url: task.url,
+        status: { status: task.status || 'unknown' } as any,
+    } as ClickUpTask));
 }
 
-async function syncSingleEmailTask(emailData: EmailData) {
-    const tasks = await findLinkedTasks(emailData.threadId);
+async function getEmailTaskMappingsForRead(): Promise<EmailTaskMappingsV2> {
+    const store = await chrome.storage.local.get([STORAGE_KEYS.EMAIL_TASK_MAPPINGS, STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]);
+    return readMappingsWithFallback(
+        store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2] || {},
+        store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {}
+    );
+}
 
-    // Store in local storage for quick access by content script
-    // mapping: { [threadId]: [ {id, name, status, ...} ] }
-    const store = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASK_MAPPINGS);
-    const mappings = store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {};
+async function updateEmailTaskMappings(
+    mutator: (mappings: EmailTaskMappingsV2) => EmailTaskMappingsV2 | void,
+    extraWrites: Record<string, unknown> = {}
+): Promise<EmailTaskMappingsV2> {
+    let updated: EmailTaskMappingsV2 = {};
+    const next = mappingWriteQueue.then(async () => {
+        const store = await chrome.storage.local.get([STORAGE_KEYS.EMAIL_TASK_MAPPINGS, STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2, 'schemaVersion']);
+        const current = migrateMappingsV1ToV2(
+            store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {},
+            store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2] || {}
+        );
+        updated = mutator(current) || current;
+        await chrome.storage.local.set({
+            [STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]: updated,
+            ...extraWrites,
+            schemaVersion: resolveSchemaVersion(store.schemaVersion, extraWrites.schemaVersion),
+        });
+    });
 
-    mappings[emailData.threadId] = tasks.map(t => ({
-        id: t.id,
-        name: t.name,
-        url: t.url,
-        status: t.status.status
-    }));
+    mappingWriteQueue = next.catch(() => undefined);
+    await next;
+    return updated;
+}
 
-    await chrome.storage.local.set({ [STORAGE_KEYS.EMAIL_TASK_MAPPINGS]: mappings });
+function safeSchemaVersion(value: unknown): number {
+    const version = Number(value);
+    return Number.isFinite(version) && version >= 0 ? Math.floor(version) : 0;
+}
+
+function resolveSchemaVersion(stored: unknown, extra: unknown = 0): number {
+    return Math.max(safeSchemaVersion(stored), LINK_SCHEMA_VERSION, safeSchemaVersion(extra));
+}
+
+async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ success: boolean }> {
+    if (sender.id !== chrome.runtime.id || !(sender.url || '').startsWith(`chrome-extension://${chrome.runtime.id}/`)) {
+        throw new Error('clearLocalData is extension-only');
+    }
+
+    const next = mappingWriteQueue.then(async () => {
+        const store = await chrome.storage.local.get('schemaVersion');
+        const schemaVersion = resolveSchemaVersion(store.schemaVersion);
+        await chrome.storage.local.remove([
+            STORAGE_KEYS.EMAIL_TASK_MAPPINGS,
+            STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2,
+            'lastEmailSync',
+            'lastEmailSyncCount',
+            STORAGE_KEYS.CACHED_HIERARCHY,
+            STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+            STORAGE_KEYS.CACHED_TEAMS,
+            STORAGE_KEYS.CACHED_USER,
+        ]);
+        await chrome.storage.local.set({
+            [STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]: {},
+            schemaVersion,
+        });
+        hierarchyCache = {};
+    });
+
+    mappingWriteQueue = next.catch(() => undefined);
+    await next;
+    return { success: true };
 }
 
 async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; foundCount: number }> {
@@ -739,23 +1013,32 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
     if (!teamId) throw new Error('No team found');
 
     const dateFrom = Date.now() - (days * 24 * 60 * 60 * 1000);
-    console.log(`[ClickUp] Email Sync: Fetching ALL tasks modified since ${new Date(dateFrom).toISOString()}...`);
+    Logger.info('EMAIL_SYNC_START');
+    emitSyncProgress({ action: 'syncProgress', scope: 'email', phase: 'starting' });
 
     // Use paginated method to get ALL tasks, not just first 100
-    const tasks = await clickupAPI!.getAllTasksSince(teamId, dateFrom);
+    const tasks = await clickupAPI!.getAllTasksSince(teamId, dateFrom, (progress) => {
+        emitSyncProgress({
+            action: 'syncProgress',
+            scope: 'email',
+            phase: 'fetching',
+            current: progress.page,
+            processed: progress.totalFetched,
+        });
+    });
     const totalTasks = tasks.length;
-    console.log(`[ClickUp] Email Sync: Found ${totalTasks} total tasks. Scanning for Gmail Thread IDs...`);
+    seedTaskSearchCache(teamId, tasks);
+    Logger.info(`EMAIL_SYNC_TASK_COUNT_${totalTasks}`);
 
     // Get configured settings
     const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
-    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim();
     const useCustomField = settings.useCustomFieldForThreadId !== false; // Default: true
 
-    console.log(`[ClickUp] Email Sync: Mode: ${useCustomField ? 'Custom Field' : 'Description'}, looking for "${customFieldName}"`);
+    Logger.info(`EMAIL_SYNC_MODE_${useCustomField ? 'CUSTOM_FIELD' : 'DESCRIPTION'}`);
 
-    const mappings = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASK_MAPPINGS);
-    const currentMappings = mappings[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {};
     let foundCount = 0;
+    const foundEntries: Array<{ threadId: string; entry: EmailTaskMappingV2 }> = [];
 
     // Patterns to find Thread ID in description/text_content
     const threadIdPatterns = [
@@ -768,15 +1051,16 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
     for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
         let threadIdValue: string | null = null;
+        let customFieldId: string | undefined;
 
         if (useCustomField) {
             // Toggle ON: Search in Custom Field (supports multiple Thread IDs separated by comma)
             if (task.custom_fields && Array.isArray(task.custom_fields)) {
-                const threadIdField = task.custom_fields.find((field: any) =>
-                    field.name && field.name.toLowerCase() === customFieldName
-                );
+                const threadIdField = selectThreadIdCustomField(task.custom_fields as any[], undefined, customFieldName);
                 if (threadIdField) {
-                    threadIdValue = threadIdField.value || threadIdField.text_value || null;
+                    customFieldId = threadIdField.id;
+                    const rawThreadIdValue = threadIdField.value || threadIdField.text_value || null;
+                    threadIdValue = typeof rawThreadIdValue === 'string' ? rawThreadIdValue : null;
                 }
             }
         } else {
@@ -793,67 +1077,162 @@ async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; f
 
         if (threadIdValue && typeof threadIdValue === 'string' && threadIdValue.length > 0) {
             // Split by comma to support multiple Thread IDs
-            const threadIds = threadIdValue.split(',').map(id => id.trim()).filter(id => id.length > 0);
+            const threadIds = threadIdValue.split(',').map(id => id.trim()).filter(isConfirmedThreadId);
 
             for (const threadId of threadIds) {
                 foundCount++;
-                console.log(`[ClickUp] Email Sync: Found link in task "${task.name.substring(0, 40)}..." → Thread ${threadId}`);
+                Logger.info('EMAIL_SYNC_LINK_FOUND');
 
                 // Add to mapping
-                const entry = {
+                const entry: EmailTaskMappingV2 = {
                     id: task.id,
                     name: task.name,
                     url: task.url,
-                    status: task.status?.status || 'unknown'
+                    status: task.status?.status || 'unknown',
+                    linkStatus: 'linked' as const,
+                    linkSource: useCustomField ? 'custom_field' as const : 'description' as const,
+                    customFieldId,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    failureCount: 0,
                 };
 
-                const existing = currentMappings[threadId] || [];
-                if (!existing.find((t: any) => t.id === entry.id)) {
-                    existing.push(entry);
-                    currentMappings[threadId] = existing;
-                }
+                foundEntries.push({ threadId, entry });
             }
         }
 
         // Log progress every 100 tasks
-        if ((i + 1) % 100 === 0) {
-            console.log(`[ClickUp] Email Sync: Scanned ${i + 1}/${totalTasks} tasks (${foundCount} links found)`);
+        if ((i + 1) % 100 === 0 || i === totalTasks - 1) {
+            Logger.info(`EMAIL_SYNC_PROGRESS_${i + 1}_OF_${totalTasks}_FOUND_${foundCount}`);
+            emitSyncProgress({
+                action: 'syncProgress',
+                scope: 'email',
+                phase: 'processing',
+                current: i + 1,
+                total: totalTasks,
+                found: foundCount,
+            });
         }
     }
 
-    console.log(`[ClickUp] Email Sync: Complete. Scanned ${totalTasks} tasks, found ${foundCount} linked.`);
+    Logger.info(`EMAIL_SYNC_COMPLETE_SCANNED_${totalTasks}_FOUND_${foundCount}`);
 
-    await chrome.storage.local.set({
-        [STORAGE_KEYS.EMAIL_TASK_MAPPINGS]: currentMappings,
-        // Save sync status for UI persistence
+    await updateEmailTaskMappings((mappings) => {
+        for (const { threadId, entry } of foundEntries) {
+            const current = mappings[threadId] || [];
+            const existing = current.find(task => task.id === entry.id);
+            if (existing) {
+                existing.name = entry.name;
+                existing.url = entry.url;
+                existing.status = entry.status;
+                existing.linkStatus = 'linked';
+                existing.linkSource = entry.linkSource;
+                existing.customFieldId = entry.customFieldId || existing.customFieldId;
+                existing.updatedAt = Date.now();
+                existing.failureCount = 0;
+            } else {
+                current.push(entry);
+                mappings[threadId] = current;
+            }
+        }
+    }, {
         'lastEmailSync': Date.now(),
-        'lastEmailSyncCount': foundCount
+        'lastEmailSyncCount': foundCount,
+    });
+
+    emitSyncProgress({
+        action: 'syncProgress',
+        scope: 'email',
+        phase: 'complete',
+        processed: totalTasks,
+        found: foundCount,
     });
 
     return { success: true, foundCount };
 }
 
-async function saveEmailTaskMapping(threadId: string, task: ClickUpTask) {
-    const store = await chrome.storage.local.get(STORAGE_KEYS.EMAIL_TASK_MAPPINGS);
-    const mappings = store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {};
+interface SaveEmailTaskMappingOptions {
+    linkStatus?: LinkValidationStatus;
+    linkSource?: LinkSource;
+    customFieldId?: string;
+}
 
-    const current = mappings[threadId] || [];
-    // Avoid duplicates
-    if (!current.find((t: any) => t.id === task.id)) {
-        current.push({
-            id: task.id,
-            name: task.name,
-            url: task.url,
-            status: task.status.status
-        });
-        mappings[threadId] = current;
-        await chrome.storage.local.set({ [STORAGE_KEYS.EMAIL_TASK_MAPPINGS]: mappings });
-    }
+async function saveEmailTaskMapping(threadId: string, task: ClickUpTask, options: SaveEmailTaskMappingOptions = {}): Promise<EmailTaskMappingV2 | null> {
+    if (!isConfirmedThreadId(threadId)) return null;
+    let record: EmailTaskMappingV2 | null = null;
+
+    await updateEmailTaskMappings((mappings) => {
+        const current = mappings[threadId] || [];
+        const existing = current.find((t: any) => t.id === task.id);
+        const now = Date.now();
+        const linkStatus = options.linkStatus || 'unverified';
+
+        if (existing) {
+            existing.name = task.name;
+            existing.url = task.url;
+            existing.status = task.status.status;
+            existing.linkStatus = linkStatus;
+            existing.linkSource = options.linkSource || existing.linkSource || 'unknown';
+            existing.customFieldId = options.customFieldId || existing.customFieldId;
+            existing.updatedAt = now;
+            record = existing;
+        } else {
+            record = {
+                id: task.id,
+                name: task.name,
+                url: task.url,
+                status: task.status.status,
+                linkStatus,
+                linkSource: options.linkSource || 'unknown',
+                customFieldId: options.customFieldId,
+                createdAt: now,
+                updatedAt: now,
+                failureCount: 0,
+            };
+            current.push(record);
+            mappings[threadId] = current;
+        }
+    });
+    return record;
+}
+
+async function getStoredTaskMapping(threadId: string, taskId: string) {
+    const mappings = await getEmailTaskMappingsForRead();
+    return (mappings[threadId] || []).find(task => task.id === taskId) || null;
+}
+
+async function appendThreadIdToCustomFieldSerialized(
+    taskId: string,
+    fieldId: string,
+    threadId: string,
+    configuredFieldName: string
+): Promise<boolean> {
+    const previous = customFieldUpdateQueues.get(taskId) || Promise.resolve();
+    let confirmed = false;
+
+    const next = previous.then(async () => {
+        const freshTask = await clickupAPI!.getTask(taskId);
+        const field = selectThreadIdCustomField(freshTask.custom_fields as any[], fieldId, configuredFieldName);
+        if (!field?.id) {
+            Logger.warn('LINK_FIELD_NOT_FOUND');
+            confirmed = false;
+            return;
+        }
+
+        const existingValue = field.value || field.text_value || '';
+        const newValue = mergeThreadIdValue(existingValue, threadId);
+        await clickupAPI!.setCustomFieldValue(taskId, field.id, newValue);
+        confirmed = true;
+    });
+
+    customFieldUpdateQueues.set(taskId, next.catch(() => undefined));
+    await next;
+    return confirmed;
 }
 
 // ... helper functions for searching tasks ...
 
-async function searchTasks(query: string, teamId: string) {
+async function searchTasks(query: string, teamId?: string) {
     await ensureAPI();
 
     // Resolve Team ID
@@ -870,24 +1249,18 @@ async function searchTasks(query: string, teamId: string) {
 
     let cleanQuery = query.trim();
 
-    // 0. Extract ID from URL if present
-    const urlMatch = cleanQuery.match(/\/t\/([a-zA-Z0-9]+)/);
-    if (urlMatch) {
-        cleanQuery = urlMatch[1];
-    }
-
     // Truncate to avoid 413 or API errors with massive inputs
     if (cleanQuery.length > 100) {
         cleanQuery = cleanQuery.substring(0, 100);
     }
 
-    // 1. Try as Task ID (if it looks like one: alphanumeric 5-12 chars, no spaces)
-    const isPotentialId = /^[a-zA-Z0-9]{5,12}$/.test(cleanQuery) || /^#[a-zA-Z0-9]+$/.test(cleanQuery);
-    if (isPotentialId) {
+    // 1. Preserve the fast direct lookup for an exact ID, #ID or ClickUp task URL.
+    const taskId = extractTaskIdCandidate(cleanQuery);
+    if (taskId) {
         try {
-            const taskId = cleanQuery.replace('#', '');
             const task = await clickupAPI!.getTask(taskId);
             if (task && task.id) {
+                seedTaskSearchCache(teamId, [task]);
                 return { tasks: [task] };
             }
         } catch (e) {
@@ -895,12 +1268,22 @@ async function searchTasks(query: string, teamId: string) {
         }
     }
 
-    // 2. Search API
+    // 2. The team task endpoint does not provide reliable title search. Build a
+    // bounded, ephemeral in-memory index and return only ID/title matches.
     try {
-        const results = await clickupAPI!.searchTasks(teamId, cleanQuery);
-        return { tasks: results.tasks || [] };
+        const cache = getTaskSearchCache(teamId);
+        let matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
+
+        while (!cache.complete
+            && matches.length < TASK_SEARCH_RESULT_LIMIT
+            && !hasHighConfidenceTaskSearchResult(matches, cleanQuery)) {
+            await loadNextTaskSearchPage(teamId, cache);
+            matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
+        }
+
+        return { tasks: matches };
     } catch (e) {
-        console.error('[ClickUp] Search failed:', e);
+        Logger.error('SEARCH_FAILED', e);
         return { tasks: [] };
     }
 }
@@ -910,13 +1293,13 @@ async function getTaskById(taskId: string) {
     return await clickupAPI!.getTask(taskId);
 }
 
-async function validateTask(taskId: string) {
+async function validateTask(taskId: string): Promise<LinkValidationResult> {
     await ensureAPI();
     try {
         const task = await clickupAPI!.getTask(taskId);
-        return { valid: true, task };
-    } catch (e) {
-        return { valid: false };
+        return { status: 'linked', valid: true, linked: true, task };
+    } catch (e: any) {
+        return classifyValidationError(e?.status, e);
     }
 }
 
@@ -924,26 +1307,35 @@ async function validateTask(taskId: string) {
  * Validate that a specific Thread ID is still linked to a task
  * Checks either custom field or description based on toggle setting
  */
-async function validateTaskLink(taskId: string, threadId: string): Promise<{ valid: boolean; linked: boolean; task?: any }> {
+async function validateTaskLink(taskId: string, threadId: string): Promise<LinkValidationResult> {
     await ensureAPI();
 
     try {
+        if (!isConfirmedThreadId(threadId)) return { status: 'unverified', valid: false, linked: false, error: 'invalid_thread_id' };
         const task = await clickupAPI!.getTask(taskId);
 
         // Get settings
         const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
-        const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+        const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim();
         const useCustomField = settings.useCustomFieldForThreadId !== false;
+        const storedMapping = await getStoredTaskMapping(threadId, taskId);
 
         let isLinked = false;
 
-        if (useCustomField) {
+        if (storedMapping?.linkSource === 'comment') {
+            try {
+                const comments = await clickupAPI!.getTaskComments(taskId);
+                isLinked = commentsContainThreadId(comments, threadId);
+            } catch (e: any) {
+                const classified = classifyValidationError(e?.status, e);
+                if (['auth_error', 'rate_limited', 'transient_error', 'unknown_error'].includes(classified.status)) return classified;
+            }
+        } else if (useCustomField) {
             // Check custom field (supports multiple Thread IDs separated by comma)
             if (task.custom_fields && Array.isArray(task.custom_fields)) {
-                const field = task.custom_fields.find((f: any) =>
-                    f.name && f.name.toLowerCase() === customFieldName
-                );
-                const fieldValue = field?.value || field?.text_value || '';
+                const field = selectThreadIdCustomField(task.custom_fields as any[], storedMapping?.customFieldId, customFieldName);
+                const rawFieldValue = field?.value || field?.text_value || '';
+                const fieldValue = typeof rawFieldValue === 'string' ? rawFieldValue : String(rawFieldValue || '');
                 // Split by comma and check if threadId is in the list
                 const threadIds = fieldValue.split(',').map((id: string) => id.trim());
                 isLinked = threadIds.includes(threadId);
@@ -951,19 +1343,44 @@ async function validateTaskLink(taskId: string, threadId: string): Promise<{ val
         } else {
             // Check description/text_content for Thread ID pattern
             const searchText = (task.description || '') + ' ' + (task.text_content || '');
+            const escapedThreadId = escapeRegExp(threadId);
             const patterns = [
-                new RegExp(`\\*\\*Thread ID:\\*\\*\\s*${threadId}`, 'i'),
-                new RegExp(`Thread ID:\\s*${threadId}`, 'i'),
-                new RegExp(`inbox/${threadId}`, 'i')
+                new RegExp(`\\*\\*Thread ID:\\*\\*\\s*${escapedThreadId}`, 'i'),
+                new RegExp(`Thread ID:\\s*${escapedThreadId}`, 'i'),
+                new RegExp(`inbox/${escapedThreadId}`, 'i')
             ];
             isLinked = patterns.some(p => p.test(searchText));
         }
 
-        console.log(`[ClickUp] validateTaskLink: Task ${taskId}, Thread ${threadId}, Linked: ${isLinked}`);
-        return { valid: true, linked: isLinked, task };
-    } catch (e) {
-        return { valid: false, linked: false };
+        Logger.info(`VALIDATE_TASK_LINK_${isLinked ? 'LINKED' : 'UNLINKED'}`);
+        const result: LinkValidationResult = { status: isLinked ? 'linked' : 'unlinked', valid: true, linked: isLinked, task };
+        const linkRecord = await applyValidationResultToMapping(threadId, taskId, result, task);
+        return { ...result, linkRecord } as LinkValidationResult & { linkRecord?: EmailTaskMappingV2 };
+    } catch (e: any) {
+        const result = classifyValidationError(e?.status, e);
+        const linkRecord = await applyValidationResultToMapping(threadId, taskId, result);
+        return { ...result, linkRecord } as LinkValidationResult & { linkRecord?: EmailTaskMappingV2 };
     }
+}
+
+async function applyValidationResultToMapping(threadId: string, taskId: string, result: LinkValidationResult, freshTask?: ClickUpTask): Promise<EmailTaskMappingV2 | null> {
+    if (!isConfirmedThreadId(threadId)) return null;
+    let updatedRecord: EmailTaskMappingV2 | null = null;
+    await updateEmailTaskMappings((mappings) => {
+        const current = mappings[threadId] || [];
+        const existing = current.find(task => task.id === taskId);
+        if (!existing) return;
+        if (freshTask) {
+            existing.name = freshTask.name || existing.name;
+            existing.url = freshTask.url || existing.url;
+            existing.status = freshTask.status?.status || existing.status;
+        }
+        updatedRecord = applyValidationToTask(existing, result);
+        const index = current.findIndex(task => task.id === taskId);
+        if (index >= 0) current[index] = updatedRecord;
+        mappings[threadId] = current;
+    });
+    return updatedRecord;
 }
 
 async function createTaskSimple(data: { listId: string; name: string; description: string; assignees?: number[]; priority?: number }): Promise<ClickUpTask> {
@@ -992,10 +1409,13 @@ async function updateTimerBadge(state: 'playing' | 'stopped' | 'paused'): Promis
 async function createTaskFromEmail(emailData: EmailData): Promise<ClickUpTask> {
     await ensureAPI();
     // With Default List removed, this function requires a list target.
-    throw new Error('Please use the Task Modal to create tasks (Default List feature deprecated).');
+    throw new Error('Usá el formulario de tarea para crear tareas.');
 }
 
 async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask> {
+    if (data.emailData?.html && data.emailData.htmlSanitized !== true) {
+        throw new Error('El HTML del email debe estar sanitizado antes de adjuntarlo.');
+    }
     await ensureAPI();
 
     const { taskId, emailData } = data;
@@ -1006,60 +1426,80 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
 
     // Get configured Custom Field Name for Thread ID
     const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
-    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim();
     const useCustomField = settings.useCustomFieldForThreadId !== false; // Default: true
+    let linkConfirmed = false;
+    let linkSource: LinkSource = 'unknown';
+    let customFieldId: string | undefined;
+
+    if (emailData.threadId) {
+        await saveEmailTaskMapping(emailData.threadId, task, { linkStatus: 'pending', linkSource: 'unknown' });
+    }
 
     // Save Thread ID based on toggle setting
     if (useCustomField && emailData.threadId && task.list?.id) {
         // Toggle ON: Save to Custom Field (supports multiple Thread IDs separated by comma)
         try {
             const customFields = await clickupAPI!.getAccessibleCustomFields(task.list.id);
-            const threadIdField = customFields.fields.find(f => f.name.trim().toLowerCase() === customFieldName);
+            const threadIdField = selectThreadIdCustomField(customFields.fields as any[], undefined, customFieldName);
 
             if (threadIdField) {
-                // Get existing value from task's custom fields
-                const existingField = task.custom_fields?.find((f: any) =>
-                    f.name && f.name.toLowerCase() === customFieldName
-                );
-                const existingValue = existingField?.value || existingField?.text_value || '';
-
-                // Check if this Thread ID is already in the list
-                const existingIds = existingValue ? existingValue.split(',').map((id: string) => id.trim()) : [];
-                if (!existingIds.includes(emailData.threadId)) {
-                    // Append new Thread ID with comma separator
-                    const newValue = existingValue
-                        ? `${existingValue},${emailData.threadId}`
-                        : emailData.threadId;
-                    await clickupAPI!.setCustomFieldValue(taskId, threadIdField.id, newValue);
-                    console.log(`[ClickUp] Saved Thread ID to Custom Field "${customFieldName}" for attached task ${taskId} (total: ${existingIds.length + 1})`);
-                } else {
-                    console.log(`[ClickUp] Thread ID ${emailData.threadId} already linked to task ${taskId}`);
-                }
+                customFieldId = threadIdField.id;
+                linkConfirmed = await appendThreadIdToCustomFieldSerialized(taskId, threadIdField.id!, emailData.threadId, customFieldName);
+                linkSource = linkConfirmed ? 'custom_field' : 'unknown';
+                Logger.info(`LINK_CUSTOM_FIELD_${linkConfirmed ? 'CONFIRMED' : 'UNCONFIRMED'}`);
             } else {
-                console.warn(`[ClickUp] Custom Field "${customFieldName}" not found in list ${task.list.id}. Thread ID not saved to field.`);
+                Logger.warn('LINK_FIELD_NOT_FOUND');
             }
         } catch (e) {
-            console.error('[ClickUp] Failed to set Custom Field for attached task:', e);
+            Logger.warn('LINK_CUSTOM_FIELD_FAILED');
         }
     } else if (!useCustomField && emailData.threadId) {
         // Toggle OFF: Save to Description via Comment (can't edit task description directly via API easily)
         // We'll add thread ID in a structured comment that can be searched
         const threadIdComment = `📎 **Thread ID:** ${emailData.threadId}`;
-        await clickupAPI!.addComment(taskId, threadIdComment);
-        console.log(`[ClickUp] Saved Thread ID to comment for attached task ${taskId} (custom field disabled)`);
+        try {
+            await clickupAPI!.addComment(taskId, threadIdComment);
+            linkConfirmed = true;
+            linkSource = 'comment';
+            Logger.info('LINK_COMMENT_CONFIRMED');
+        } catch (e) {
+            Logger.warn('LINK_COMMENT_FAILED');
+        }
+    }
+
+    if (emailData.threadId) {
+        await saveEmailTaskMapping(emailData.threadId, task, {
+            linkStatus: transitionLinkStatus('pending', linkConfirmed),
+            linkSource,
+            customFieldId,
+        });
     }
 
     // Add comment with email link
-    const commentText = `📧 **Email adjunto:** ${emailData.subject}\nFrom: ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})`;
-    await clickupAPI!.addComment(taskId, commentText);
+    const commentText = `📧 **Email adjunto:** ${emailData.subject}\nDe: ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})`;
+    let partialWarning: string | undefined;
+    try {
+        await clickupAPI!.addComment(taskId, commentText);
+    } catch (e) {
+        Logger.warn('ATTACH_COMMENT_FAILED');
+        partialWarning = 'Email vinculado, pero no se pudo agregar el comentario.';
+    }
 
     // Attach email HTML
     if (emailData.html) {
-        await clickupAPI!.uploadAttachment(taskId, emailData.html, emailData.subject, emailData);
+        try {
+            await clickupAPI!.uploadAttachment(taskId, emailData.html, emailData.subject, emailData);
+        } catch (e) {
+            Logger.warn('ATTACH_HTML_UPLOAD_FAILED');
+            partialWarning = partialWarning || 'Email vinculado, pero no se pudo subir el adjunto HTML.';
+        }
     }
 
-    // Save to local mapping for quick lookup
-    await saveEmailTaskMapping(emailData.threadId, task);
+    if (partialWarning && emailData.threadId) {
+        await saveEmailTaskMapping(emailData.threadId, task, { linkStatus: 'partial_failed', linkSource, customFieldId });
+        return { ...task, warning: partialWarning, partial: true } as ClickUpTask & { warning: string; partial: true };
+    }
 
     return task;
 }
@@ -1072,22 +1512,22 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
     const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
     const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
     const useMethod = settings.useCustomFieldForThreadId !== false; // Default: true
-    console.log(`[ClickUp] Thread ID storage method: ${useMethod ? 'Custom Field' : 'Description'}, setting value: ${settings.useCustomFieldForThreadId}`);
+    Logger.info(`LINK_METHOD_${useMethod ? 'CUSTOM_FIELD' : 'DESCRIPTION'}`);
 
     // 1. Get Custom Field definition from List
     let threadIdFieldId: string | null = null;
     if (useMethod && emailData && emailData.threadId) { // Only try to get field if emailData is present
         try {
             const customFields = await clickupAPI!.getAccessibleCustomFields(listId);
-            const threadIdField = customFields.fields.find(f => f.name.trim().toLowerCase() === customFieldName);
+            const threadIdField = selectThreadIdCustomField(customFields.fields as any[], undefined, customFieldName);
 
-            if (threadIdField) {
+            if (threadIdField?.id) {
                 threadIdFieldId = threadIdField.id;
             } else {
-                console.warn(`[ClickUp] Custom Field "${customFieldName}" not found in list ${listId}. Link will NOT be saved.`);
+                Logger.warn('LINK_FIELD_NOT_FOUND');
             }
         } catch (e) {
-            console.error('[ClickUp] Failed to fetch custom fields for list:', listId, e);
+            Logger.warn('LINK_FIELD_LOOKUP_FAILED');
         }
     } else if (!useMethod && emailData && emailData.threadId) {
         // Toggle OFF: Append to Description (use markdown_description as that's what modal sends)
@@ -1099,47 +1539,85 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
         } else {
             taskData.markdown_description = threadIdLine;
         }
-        console.log('[ClickUp] Thread ID appended to description (custom field disabled)');
+        Logger.info('LINK_DESCRIPTION_INCLUDED');
     }
 
     // 2. Create Task
     const task = await clickupAPI!.createTask(listId, taskData);
+    let responseTask: ClickUpTask = task;
 
     // 3. Link Email (Thread ID)
     if (emailData && emailData.threadId) {
-        await saveEmailTaskMapping(emailData.threadId, task);
+        await saveEmailTaskMapping(emailData.threadId, task, {
+            linkStatus: useMethod ? 'pending' : 'linked',
+            linkSource: useMethod ? 'unknown' : 'description',
+            customFieldId: threadIdFieldId || undefined,
+        });
 
         if (threadIdFieldId) {
+            let linkConfirmed = false;
             try {
-                await clickupAPI!.setCustomFieldValue(task.id, threadIdFieldId, emailData.threadId);
-                console.log(`[ClickUp] Saved Thread ID to Custom Field "${customFieldName}" (${threadIdFieldId})`);
+                linkConfirmed = await appendThreadIdToCustomFieldSerialized(task.id, threadIdFieldId, emailData.threadId, customFieldName);
+                Logger.info(`LINK_CUSTOM_FIELD_${linkConfirmed ? 'CONFIRMED' : 'UNCONFIRMED'}`);
             } catch (e: unknown) {
-                console.error('[ClickUp] Failed to set Custom Field:', e);
+                Logger.warn('LINK_CUSTOM_FIELD_FAILED');
                 const errorMessage = e instanceof Error ? e.message : String(e);
                 if (errorMessage.includes('usages exceeded')) {
                     // PLAN LIMIT HIT
-                    console.warn('[ClickUp] PLAN LIMIT REACHED: Custom field usages exceeded. Cannot save Thread ID.');
-                    // TODO: Notify user via UI?
-                    await clickupAPI!.addComment(task.id, `⚠️ **System Alert:** Could not link email Thread ID via Custom Field due to ClickUp Plan limits.\n\nThread ID: ${emailData.threadId}`);
+                    Logger.warn('LINK_PLAN_LIMIT');
+                    try {
+                        await clickupAPI!.addComment(task.id, `⚠️ **Alerta del sistema:** No se pudo vincular el Thread ID del email mediante campo personalizado por límites del plan de ClickUp.\n\nThread ID: ${emailData.threadId}`);
+                    } catch (commentError) {
+                        Logger.warn('LINK_PLAN_LIMIT_COMMENT_FAILED');
+                    }
                 }
             }
+            await saveEmailTaskMapping(emailData.threadId, task, {
+                linkStatus: transitionLinkStatus('pending', linkConfirmed),
+                linkSource: linkConfirmed ? 'custom_field' : 'unknown',
+                customFieldId: threadIdFieldId,
+            });
+        } else if (useMethod) {
+            await saveEmailTaskMapping(emailData.threadId, task, {
+                linkStatus: 'unverified',
+                linkSource: 'unknown',
+            });
         }
     }
 
     // 4. Attachments & Comments
     if (emailData) {
+        const warnings: string[] = [];
+        const markPartial = async (): Promise<void> => {
+            if (!emailData.threadId) return;
+            await saveEmailTaskMapping(emailData.threadId, task, {
+                linkStatus: 'partial_failed',
+                linkSource: useMethod ? (threadIdFieldId ? 'custom_field' : 'unknown') : 'description',
+                customFieldId: threadIdFieldId || undefined,
+            });
+        };
+
+        const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
+        const commentText = `📧 **Email vinculado:**\n🔗 [Ver email original en Gmail](${gmailUrl})`;
         try {
-            const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
-            const commentText = `📧 **Email vinculado:**\n🔗 [Ver email original en Gmail](${gmailUrl})`;
-
-            // Only add comment if we have email data, basically always if we are here
             await clickupAPI!.addComment(task.id, commentText);
-
-            if (emailData.html) {
-                await clickupAPI!.uploadAttachment(task.id, emailData.html, emailData.subject, emailData);
-            }
         } catch (e) {
-            console.error('[ClickUp] Failed to attach email info:', e);
+            Logger.warn('CREATE_TASK_EMAIL_COMMENT_FAILED');
+            warnings.push('no se pudo agregar el comentario del email');
+        }
+
+        if (emailData.html) {
+            try {
+                await clickupAPI!.uploadAttachment(task.id, emailData.html, emailData.subject, emailData);
+            } catch (e) {
+                Logger.warn('CREATE_TASK_HTML_UPLOAD_FAILED');
+                warnings.push('no se pudo subir el adjunto HTML');
+            }
+        }
+
+        if (warnings.length > 0) {
+            await markPartial();
+            responseTask = { ...task, warning: `Tarea creada, pero ${warnings.join(' y ')}.`, warnings, partial: true } as ClickUpTask & { warning: string; warnings: string[]; partial: true };
         }
     }
 
@@ -1147,9 +1625,9 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
     if (data.timeTracked && data.teamId) {
         try {
             await clickupAPI!.createTimeEntry(data.teamId, task.id, data.timeTracked);
-            console.log(`[ClickUp] Added ${data.timeTracked}ms time entry to task ${task.id}`);
+            Logger.info('TIME_ENTRY_ADDED');
         } catch (e) {
-            console.error('[ClickUp] Failed to add time entry:', e);
+            Logger.error('TIME_ENTRY_ADD_FAILED', e);
         }
     }
 
@@ -1159,10 +1637,10 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
         if (tabs[0]?.id) {
             chrome.tabs.sendMessage(tabs[0].id, {
                 action: 'taskCreated',
-                data: { threadId: emailData.threadId, task }
+                data: { threadId: emailData.threadId, task: responseTask }
             });
         }
     }
 
-    return task;
+    return responseTask;
 }

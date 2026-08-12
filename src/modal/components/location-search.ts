@@ -120,7 +120,7 @@ export class LocationSearch {
                 });
             });
         } else {
-            this.results.innerHTML = '<p class="cu-no-results">No lists found</p>';
+            this.results.innerHTML = '<p class="cu-no-results">No se encontraron listas</p>';
             this.results.classList.remove('hidden');
         }
     }
@@ -138,7 +138,7 @@ export class LocationSearch {
                         ${list.spaceAvatar ? `<img src="${list.spaceAvatar}" alt="">` : list.spaceName.charAt(0)}
                     </div>
                     <span>${this.deps.escapeHtml(list.name)}</span>
-                    <button class="cu-clear-selection">&times;</button>
+                    <button class="cu-clear-selection" aria-label="Quitar selección">&times;</button>
                 </div>
             `;
 

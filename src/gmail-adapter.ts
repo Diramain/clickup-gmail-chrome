@@ -31,11 +31,11 @@ interface SubjectContainer {
 interface IGmailAdapter {
     SELECTORS: GmailSelectors;
     getEmailBodyElement(): Element | null;
-    getAllEmailBodies(): NodeListOf<Element>;
+    getAllEmailBodies(): Element[];
     getEmailBodyHtml(): string;
     getSenderEmail(): string;
     getSubject(): string;
-    getThreadId(): string;
+    getThreadId(): string | null;
     getMessageContainer(bodyElement: Element): Element | null;
     getInboxRows(): NodeListOf<Element>;
     getRowLegacyThreadId(row: Element): string | null;
@@ -88,14 +88,25 @@ const GmailAdapter: IGmailAdapter = {
      * Get email body element
      */
     getEmailBodyElement(): Element | null {
-        return document.querySelector(this.SELECTORS.emailBody);
+        return this.getAllEmailBodies()[0] || null;
     },
 
     /**
      * Get all email body elements (for multi-message threads)
      */
-    getAllEmailBodies(): NodeListOf<Element> {
-        return document.querySelectorAll(this.SELECTORS.emailBody);
+    getAllEmailBodies(): Element[] {
+        const primary = Array.from(document.querySelectorAll('.a3s.aiL'))
+            .filter((el) => el.isConnected);
+        const fallback = Array.from(document.querySelectorAll('.ii.gt'))
+            .filter((el) => el.isConnected)
+            .filter((el) => !el.querySelector('.a3s.aiL'))
+            .filter((el) => !primary.some((body) => el.contains(body) || body.contains(el)));
+
+        return [...primary, ...fallback].filter((el, index, all) =>
+            all.indexOf(el) === index && !all.some((other, otherIndex) =>
+                otherIndex !== index && other.contains(el)
+            )
+        );
     },
 
     /**
@@ -119,13 +130,13 @@ const GmailAdapter: IGmailAdapter = {
      */
     getSubject(): string {
         const el = document.querySelector(this.SELECTORS.subjectHeader);
-        return el ? el.textContent?.trim() || 'Email Task' : 'Email Task';
+        return el ? el.textContent?.trim() || 'Tarea desde email' : 'Tarea desde email';
     },
 
     /**
      * Get thread ID - prefers stable legacy/perm IDs
      */
-    getThreadId(): string {
+    getThreadId(): string | null {
         // Strategy: Use legacy hex ID for consistent task matching
 
         // 1. Try URL hash first (most reliable)
@@ -156,8 +167,7 @@ const GmailAdapter: IGmailAdapter = {
             if (id) return id;
         }
 
-        // 4. Last resort - generate temporary ID
-        return 'email_' + Date.now();
+        return null;
     },
 
     /**

@@ -12,6 +12,27 @@ src/*.js
 
 # Distribution packages
 *.zip
+*.crx
+package.sh
+release*/
+release_v*/
+dist/extension.zip
+
+# Extension signing / identity material
+key.pem
+pubkey.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local backups / exports
+clickup-gmail-backup-*.json
+
+# Internal AI capsule / operational evidence (repository is public)
+docs/ai/
 
 # OS files
 .DS_Store
@@ -26,8 +47,7 @@ Thumbs.db
 *.log
 
 # Environment
-.env
-.env.local
+.env*
 
 # Lock files - keep for CI reproducibility
 # package-lock.json

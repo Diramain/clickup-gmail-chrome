@@ -17,12 +17,15 @@ import type {
     TimeEntry,
     ClickUpCustomFieldsResponse
 } from '../types/clickup';
+import { calculateRetryDelayMs } from '../link-hardening';
+import { wrapSanitizedEmailHtml } from '../utils/sanitize.utils';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
 const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
+const MAX_RESTORED_BLOCK_MS = 15 * 60 * 1000;
 
 // ============================================================================
 // Types
@@ -39,6 +42,112 @@ interface TimeEntryResponse {
 
 export type TokenRefreshCallback = () => Promise<{ success: boolean; token?: string }>;
 
+export interface RateGovernorState {
+    intervalMs?: unknown;
+    blockedUntil?: unknown;
+}
+
+export type RateGovernorStateCallback = (state: { intervalMs: number; blockedUntil: number }) => void | Promise<void>;
+
+export interface TaskPageProgress {
+    page: number;
+    pageSize: number;
+    totalFetched: number;
+}
+
+function sanitizeRateGovernorState(state?: RateGovernorState | null, now = Date.now()): { intervalMs?: number; blockedUntil?: number } {
+    if (!state || typeof state !== 'object') return {};
+    const intervalMs = Number(state.intervalMs);
+    const blockedUntil = Number(state.blockedUntil);
+    const maxBlockedUntil = now + MAX_RESTORED_BLOCK_MS;
+    return {
+        ...(Number.isFinite(intervalMs) && intervalMs >= 50 && intervalMs <= 60_000 ? { intervalMs: Math.floor(intervalMs) } : {}),
+        ...(Number.isFinite(blockedUntil) && blockedUntil >= 0 && blockedUntil <= maxBlockedUntil ? { blockedUntil: Math.floor(blockedUntil) } : {}),
+    };
+}
+
+export class ClickUpRateGovernor {
+    private nextSlotAt = 0;
+    private intervalMs = 600; // conservative 100 req/min default
+    private blockedUntil = 0;
+    private reserveQueue: Promise<void> = Promise.resolve();
+
+    constructor(
+        private readonly sleepFn: (ms: number) => Promise<void> = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+        private readonly nowFn: () => number = () => Date.now(),
+        initialState?: RateGovernorState | null,
+        private readonly onStateChange?: RateGovernorStateCallback,
+    ) {
+        const sanitized = sanitizeRateGovernorState(initialState, this.nowFn());
+        if (sanitized.intervalMs !== undefined) this.intervalMs = sanitized.intervalMs;
+        if (sanitized.blockedUntil !== undefined) this.blockedUntil = sanitized.blockedUntil;
+    }
+
+    async reserve(): Promise<void> {
+        const next = this.reserveQueue.then(() => this.reserveInternal());
+        this.reserveQueue = next.catch(() => undefined);
+        return next;
+    }
+
+    private async reserveInternal(): Promise<void> {
+        let logicalNow = this.nowFn();
+        for (let i = 0; i < 10; i++) {
+            const waitUntil = Math.max(this.nextSlotAt, this.blockedUntil);
+            const waitMs = Math.max(0, waitUntil - logicalNow);
+            if (waitMs <= 0) break;
+            await this.sleepFn(waitMs);
+            logicalNow = Math.max(this.nowFn(), logicalNow + waitMs);
+        }
+        const afterWait = Math.max(this.nowFn(), logicalNow);
+        this.nextSlotAt = Math.max(afterWait, this.nextSlotAt) + this.intervalMs;
+    }
+
+    observe(headers: Headers | null | undefined): void {
+        if (!headers) return;
+        const previousInterval = this.intervalMs;
+        const previousBlockedUntil = this.blockedUntil;
+        const limit = Number(headers.get('X-RateLimit-Limit'));
+        const remaining = Number(headers.get('X-RateLimit-Remaining'));
+        const reset = Number(headers.get('X-RateLimit-Reset'));
+        if (Number.isFinite(limit) && limit > 0) {
+            this.intervalMs = Math.max(50, Math.ceil(60_000 / limit));
+        }
+        if (Number.isFinite(remaining) && remaining <= 0 && Number.isFinite(reset) && reset > 0) {
+            const resetMs = reset > 10_000_000_000 ? reset : reset * 1000;
+            const boundedResetMs = Math.min(resetMs, this.nowFn() + MAX_RESTORED_BLOCK_MS);
+            this.blockedUntil = Math.max(this.blockedUntil, boundedResetMs);
+        }
+        if (this.intervalMs !== previousInterval || this.blockedUntil !== previousBlockedUntil) {
+            this.persistStateSafely();
+        }
+    }
+
+    deferFor(delayMs: number): void {
+        if (!Number.isFinite(delayMs) || delayMs <= 0) return;
+        const boundedDelay = Math.min(Math.floor(delayMs), MAX_RESTORED_BLOCK_MS);
+        const previousBlockedUntil = this.blockedUntil;
+        this.blockedUntil = Math.max(this.blockedUntil, this.nowFn() + boundedDelay);
+        if (this.blockedUntil !== previousBlockedUntil) this.persistStateSafely();
+    }
+
+    getIntervalMs(): number {
+        return this.intervalMs;
+    }
+
+    getState(): { intervalMs: number; blockedUntil: number } {
+        return { intervalMs: this.intervalMs, blockedUntil: this.blockedUntil };
+    }
+
+    private async persistState(): Promise<void> {
+        if (!this.onStateChange) return;
+        await this.onStateChange(this.getState());
+    }
+
+    private persistStateSafely(): void {
+        void this.persistState().catch(() => undefined);
+    }
+}
+
 // ============================================================================
 // ClickUp API Wrapper Class
 // ============================================================================
@@ -46,12 +155,14 @@ export type TokenRefreshCallback = () => Promise<{ success: boolean; token?: str
 export class ClickUpAPIWrapper {
     private token: string;
     private onTokenRefresh: TokenRefreshCallback | null = null;
+    private governor: ClickUpRateGovernor;
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_STATUS_CODES = [429, 500, 502, 503, 504];
 
-    constructor(token: string) {
+    constructor(token: string, governor: ClickUpRateGovernor = new ClickUpRateGovernor()) {
         this.token = token;
+        this.governor = governor;
     }
 
     /**
@@ -73,7 +184,8 @@ export class ClickUpAPIWrapper {
      */
     async request<T = any>(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<T> {
         try {
-            const response = await fetch(`${CLICKUP_API_BASE}${endpoint}`, {
+            const method = normalizeRequestMethod(options.method);
+            const response = await this.fetchWithGovernor(`${CLICKUP_API_BASE}${endpoint}`, {
                 ...options,
                 headers: {
                     'Authorization': this.token,
@@ -84,7 +196,7 @@ export class ClickUpAPIWrapper {
 
             // Handle 401 Unauthorized - try to refresh token once
             if (response.status === 401 && retryCount === 0 && this.onTokenRefresh) {
-                console.log('[API] Got 401 Unauthorized, attempting token refresh...');
+                console.log('[API] AUTH_RETRY');
                 const result = await this.onTokenRefresh();
                 if (result.success && result.token) {
                     this.token = result.token;
@@ -97,9 +209,12 @@ export class ClickUpAPIWrapper {
             }
 
             // Handle rate limiting and server errors with exponential backoff
-            if (ClickUpAPIWrapper.RETRY_STATUS_CODES.includes(response.status) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
-                const delay = Math.pow(2, retryCount) * 1000;
-                console.log(`[API] Got ${response.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${ClickUpAPIWrapper.MAX_RETRIES})`);
+            if (this.shouldRetryResponse(response.status, method) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
+                const delay = response.status === 429
+                    ? calculateRetryDelayMs(response.headers, retryCount)
+                    : Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
+                if (response.status === 429) this.governor.deferFor(delay);
+                console.log('[API] RETRY_STATUS');
                 await this.sleep(delay);
                 return this.request(endpoint, options, retryCount + 1);
             }
@@ -114,9 +229,10 @@ export class ClickUpAPIWrapper {
             return response.json();
         } catch (error: any) {
             // Handle network errors with retry
-            if (error.name === 'TypeError' && error.message.includes('fetch') && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
-                const delay = Math.pow(2, retryCount) * 1000;
-                console.log(`[API] Network error, retrying in ${delay}ms (attempt ${retryCount + 1}/${ClickUpAPIWrapper.MAX_RETRIES})`);
+            const method = normalizeRequestMethod(options.method);
+            if (this.shouldRetryNetworkError(error, method) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
+                const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
+                console.log('[API] RETRY_NETWORK');
                 await this.sleep(delay);
                 return this.request(endpoint, options, retryCount + 1);
             }
@@ -124,8 +240,75 @@ export class ClickUpAPIWrapper {
         }
     }
 
+    private shouldRetryResponse(status: number, method: string): boolean {
+        if (!ClickUpAPIWrapper.RETRY_STATUS_CODES.includes(status)) return false;
+        if (status === 429) return true;
+        return isSafeReadMethod(method);
+    }
+
+    private shouldRetryNetworkError(error: any, method: string): boolean {
+        return error?.name === 'TypeError' && String(error?.message || '').includes('fetch') && isSafeReadMethod(method);
+    }
+
     private sleep(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    private async fetchWithGovernor(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+        await this.governor.reserve();
+        const response = await fetch(input, init);
+        this.governor.observe(response.headers);
+        return response;
+    }
+
+    private async requestFormData<T = any>(endpoint: string, formData: FormData, retryCount = 0): Promise<T> {
+        try {
+            const response = await this.fetchWithGovernor(`${CLICKUP_API_BASE}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Authorization': this.token },
+                body: formData
+            });
+
+            if (response.status === 401 && retryCount === 0 && this.onTokenRefresh) {
+                console.log('[API] AUTH_RETRY');
+                const result = await this.onTokenRefresh();
+                if (result.success && result.token) {
+                    this.token = result.token;
+                    return this.requestFormData(endpoint, formData, 1);
+                }
+                const err: ApiError = new Error('Authentication failed. Please sign out and sign in again.');
+                err.status = 401;
+                err.requiresReauth = true;
+                throw err;
+            }
+
+            if (this.shouldRetryResponse(response.status, 'POST') && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
+                const delay = response.status === 429
+                    ? calculateRetryDelayMs(response.headers, retryCount)
+                    : Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
+                if (response.status === 429) this.governor.deferFor(delay);
+                console.log('[API] RETRY_STATUS');
+                await this.sleep(delay);
+                return this.requestFormData(endpoint, formData, retryCount + 1);
+            }
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                const err: ApiError = new Error(error.err || `API Error: ${response.status}`);
+                err.status = response.status;
+                throw err;
+            }
+
+            return response.json();
+        } catch (error: any) {
+            if (this.shouldRetryNetworkError(error, 'POST') && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
+                const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
+                console.log('[API] RETRY_NETWORK');
+                await this.sleep(delay);
+                return this.requestFormData(endpoint, formData, retryCount + 1);
+            }
+            throw error;
+        }
     }
 
     // ========================================================================
@@ -215,8 +398,9 @@ export class ClickUpAPIWrapper {
         return this.request(`/task/${taskId}`);
     }
 
-    async searchTasks(teamId: string, query: string): Promise<ClickUpTasksResponse> {
-        return this.request(`/team/${teamId}/task?query=${encodeURIComponent(query)}`);
+    async getWorkspaceTasksPage(teamId: string, page: number): Promise<ClickUpTasksResponse> {
+        const safePage = Number.isInteger(page) && page >= 0 ? page : 0;
+        return this.request(`/team/${teamId}/task?include_closed=true&subtasks=true&page=${safePage}`);
     }
 
     async getTasks(listId: string): Promise<ClickUpTasksResponse> {
@@ -235,7 +419,11 @@ export class ClickUpAPIWrapper {
      * Get ALL tasks modified since a date, with pagination
      * Iterates through all pages until no more results
      */
-    async getAllTasksSince(teamId: string, dateFrom: number): Promise<ClickUpTask[]> {
+    async getAllTasksSince(
+        teamId: string,
+        dateFrom: number,
+        onPage?: (progress: TaskPageProgress) => void
+    ): Promise<ClickUpTask[]> {
         const allTasks: ClickUpTask[] = [];
         let page = 0;
         let hasMore = true;
@@ -247,6 +435,11 @@ export class ClickUpAPIWrapper {
 
             const tasks = result.tasks || [];
             allTasks.push(...tasks);
+            onPage?.({
+                page: page + 1,
+                pageSize: tasks.length,
+                totalFetched: allTasks.length,
+            });
 
             // ClickUp returns max 100 per page, if less then we're done
             if (tasks.length < 100) {
@@ -287,10 +480,14 @@ export class ClickUpAPIWrapper {
         subject: string,
         emailData: EmailData | null = null
     ): Promise<any> {
+        if (html && emailData?.htmlSanitized !== true) {
+            throw new Error('El HTML del email debe estar sanitizado antes de subirlo.');
+        }
         const formData = new FormData();
-        const filename = (subject || 'Email').replace(/[<>:"/\\|?*]/g, '').substring(0, 100) + '.html';
+        const filename = (subject || 'Email sanitizado').replace(/[<>:"/\\|?*]/g, '').substring(0, 100) + '.html';
 
-        const htmlBlob = new Blob([html], { type: 'text/html' });
+        const safeHtml = wrapSanitizedEmailHtml(html, emailData?.htmlSanitized === true);
+        const htmlBlob = new Blob([safeHtml], { type: 'text/html' });
         formData.append('attachment', htmlBlob, filename);
 
         if (emailData?.threadId) {
@@ -305,51 +502,7 @@ export class ClickUpAPIWrapper {
             formData.append('email', emailLinkData);
         }
 
-        const response = await fetch(`${CLICKUP_API_BASE}/task/${taskId}/attachment`, {
-            method: 'POST',
-            headers: { 'Authorization': this.token },
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error(`Upload failed: ${response.status}`);
-        }
-
-        return response.json();
-    }
-
-    async uploadFileFromUrl(
-        taskId: string,
-        fileUrl: string,
-        filename: string,
-        mimeType: string
-    ): Promise<any> {
-        console.log('[API] Downloading file:', filename);
-
-        const fileResponse = await fetch(fileUrl, {
-            credentials: 'include'
-        });
-
-        if (!fileResponse.ok) {
-            throw new Error(`Failed to download file: ${fileResponse.status}`);
-        }
-
-        const fileBlob = await fileResponse.blob();
-
-        const formData = new FormData();
-        formData.append('attachment', fileBlob, filename);
-
-        const response = await fetch(`${CLICKUP_API_BASE}/task/${taskId}/attachment`, {
-            method: 'POST',
-            headers: { 'Authorization': this.token },
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error(`Upload failed: ${response.status}`);
-        }
-
-        return response.json();
+        return this.requestFormData(`/task/${taskId}/attachment`, formData);
     }
 
     // ========================================================================
@@ -412,12 +565,16 @@ export class ClickUpAPIWrapper {
     async getTimeEntries(
         teamId: string,
         startDate?: number,
-        endDate?: number
+        endDate?: number,
+        assigneeId?: number
     ): Promise<TimeEntry[]> {
         const params = new URLSearchParams();
 
         if (startDate) params.append('start_date', startDate.toString());
         if (endDate) params.append('end_date', endDate.toString());
+        if (Number.isInteger(assigneeId) && (assigneeId as number) > 0) {
+            params.append('assignee', String(assigneeId));
+        }
 
         const queryString = params.toString();
         const url = `/team/${teamId}/time_entries${queryString ? '?' + queryString : ''}`;
@@ -425,4 +582,12 @@ export class ClickUpAPIWrapper {
         const response = await this.request<TimeEntryResponse>(url);
         return response.data || [];
     }
+}
+
+function normalizeRequestMethod(method: RequestInit['method']): string {
+    return String(method || 'GET').toUpperCase();
+}
+
+function isSafeReadMethod(method: string): boolean {
+    return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 }

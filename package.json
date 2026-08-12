@@ -1,11 +1,15 @@
 {
   "name": "clickup-gmail-chrome",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "description": "Chrome extension to create ClickUp tasks from Gmail",
   "private": true,
+  "author": "Leandro Iramain",
+  "homepage": "https://leandroiramain.com.ar",
   "scripts": {
     "build": "tsc && node build.js",
+    "build:release": "npm run build && node scripts/build-release.js",
     "build:js": "node build.js",
+    "validate:release": "node scripts/validate-release.js",
     "watch": "tsc -w & node build.js --watch",
     "typecheck": "tsc --noEmit",
     "test": "jest",

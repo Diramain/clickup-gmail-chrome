@@ -74,7 +74,7 @@ class TimerService {
             await chrome.action.setBadgeText({ text: config.text });
             await chrome.action.setBadgeBackgroundColor({ color: config.color });
         } catch (e) {
-            console.error('[Timer] Failed to update badge:', e);
+            console.error('[Timer] UPDATE_BADGE_FAILED');
         }
     }
 
@@ -97,7 +97,7 @@ class TimerService {
             throw new Error('API methods not initialized');
         }
 
-        console.log('[Timer] Starting timer for task:', taskId);
+        console.log('[Timer] START_TIMER');
         const result = await this.apiStartTimer(teamId, taskId);
         await this.updateBadge('playing');
         return result;
@@ -146,7 +146,7 @@ class TimerService {
             throw new Error('API methods not initialized');
         }
 
-        console.log('[Timer] Creating time entry:', { teamId, taskId, duration });
+        console.log('[Timer] CREATE_TIME_ENTRY');
         return await this.apiCreateTimeEntry(teamId, taskId, duration, start);
     }
 

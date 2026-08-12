@@ -1,24 +1,25 @@
 # ClickUp Gmail Chrome Extension
 
-> 🤖 **Built with AI**: This extension was developed by **Leandro Iramain** with the assistance of AI (Anthropic Claude / Antigravity).
+> 🤖 **Built with AI**: This extension was developed by [**Leandro Iramain**](https://leandroiramain.com.ar) with the assistance of AI.
 
-A Chrome extension to create ClickUp tasks directly from Gmail emails with time tracking, auto-sync, and encrypted storage.
+A Chrome extension to create ClickUp tasks directly from Gmail emails with time tracking, email-task linking, safer local data handling, and local-first build validation.
 
 ![Chrome](https://img.shields.io/badge/Chrome-MV3-green.svg)
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
-![Tests](https://img.shields.io/badge/Tests-104%20passing-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-1.1.4-blue.svg)
+![Tests](https://img.shields.io/badge/Tests-local%20suite-brightgreen.svg)
+![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🆕 What's New in v1.1.4
+## 🆕 What's New in v1.2.0
 
-- ✨ **Multiple Thread IDs:** Attach multiple emails to the same task (comma-separated in custom field)
-- ✅ **Fixed:** Date timezone bug - dates no longer show -1 day offset
-- 🔍 **Improved:** Task search prioritizes exact title matches
-- 📧 **Improved:** Email sync now scans ALL tasks (fixed 100 task limit)
+- ✅ **Link reliability:** Gmail thread links now use a safer V2 state model with validation, retries, and less accidental unlinking.
+- 🔐 **Message and render hardening:** Runtime messages are origin/schema checked; Gmail HTML and high-risk UI sinks are sanitized before use.
+- 💾 **Safer local data tools:** Exports are versioned and limited to link/settings data; clear requires a recent export and explicit confirmation.
+- 📦 **Release preflight:** Added local release build/validation scripts with an explicit allowlist and blocked-file checks. No ZIP/signing is performed by default.
+- ✍️ **Author metadata:** Extension metadata and popup footer now identify Leandro Iramain as author.
 
 
 ---
@@ -49,21 +50,22 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails with time 
 ### Sync & Migration
 - **Email Tasks Sync** - Sync existing email-task links when migrating PC/browser
 - **Thread ID Tracking** - Email links stored in task description for efficient sync
-- **Email Attachments** - Attach email files directly to ClickUp tasks
+- **Sanitized Email HTML Attachment** - Attach a sanitized HTML snapshot of the email to ClickUp tasks. Original Gmail file attachments are disabled in v1.2.0.
 
 ---
 
 ## 🔐 Security
 
-This extension implements enterprise-grade security:
+This extension reduces common local-extension risks but is not a security boundary against a compromised browser profile, machine, or malicious extension. OAuth credentials and tokens are handled locally; token storage uses Web Crypto helpers to reduce accidental exposure, not to provide absolute protection if the local profile is compromised.
 
 | Feature | Description |
 |---------|-------------|
-| **AES-256-GCM Encryption** | All OAuth tokens encrypted at rest |
-| **Secure Token Storage** | Uses Web Crypto API |
-| **Production Logger** | Debug logs suppressed in production |
-| **Minimal Permissions** | Only requests necessary permissions |
-| **No External Tracking** | Zero telemetry or analytics |
+| **Local token handling** | OAuth tokens are stored through Web Crypto helper routines where available |
+| **Production-safe logger** | Debug and sensitive payload logging is suppressed in normal builds |
+| **Message validation** | Runtime messages are checked by sender origin and expected shape |
+| **Sanitized Gmail HTML** | Email HTML is sanitized before being attached or rendered through extension flows |
+| **Narrower permissions** | Runtime host permissions are limited to Gmail, ClickUp API, and app.clickup.com |
+| **No analytics** | No telemetry or analytics code is included |
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
@@ -74,7 +76,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 - **TypeScript** - 100% typed codebase
 - **Manifest V3** - Modern Chrome extension format
 - **esbuild** - Fast bundling
-- **Jest** - 104 unit tests
+- **Jest** - local unit/integration-style tests for hardening-critical paths
 - **GitHub Actions** - CI/CD pipeline
 
 ---
@@ -83,8 +85,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 | Document | Description |
 |----------|-------------|
-| [User Guide](USER_GUIDE.md) | Installation and feature usage |
-| [Technical Docs](TECHNICAL_DOCS.md) | Architecture, security, and API details |
+| [User Guide](USER_GUIDE.md) | Legacy v1.1.3 usage snapshot; see this README and the changelog for v1.2.0 changes |
+| [Technical Docs](TECHNICAL_DOCS.md) | Legacy v1.1.4 architecture snapshot; implementation and release docs are authoritative for v1.2.0 |
 | [Changelog](CHANGELOG.md) | Version history and changes |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
 | [Security](SECURITY.md) | Security policy |
@@ -116,6 +118,10 @@ npm install
 # Build
 npm run build
 
+# Build the supported local release directory and validate it
+npm run build:release
+npm run validate:release
+
 # Run tests
 npm test
 
@@ -125,6 +131,8 @@ npm test
 # 3. Click "Load unpacked"
 # 4. Select this folder
 ```
+
+Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are intentionally ignored and are not part of the v1.2.0 release process.
 
 ---
 
@@ -158,7 +166,7 @@ clickup-gmail-chrome/
 │   └── popup.css
 ├── styles/
 │   └── modal.css
-├── tests/                 # 7 test suites, 104 tests
+├── tests/                 # Jest suites for service, UI, privacy, and release checks
 └── .github/workflows/     # CI/CD pipeline
 ```
 
@@ -207,7 +215,7 @@ npm test -- --watch
 npm test -- --coverage
 ```
 
-**Test Suites:** 7 | **Tests:** 104 | **Coverage:** Core functions
+The local baseline includes typecheck, Jest, normal build, release build, release validation, and whitespace diff checks.
 
 ---
 
@@ -219,7 +227,7 @@ npm test -- --coverage
 
 ## 🙏 Credits
 
-- **Leandro Iramain** ([@diramain](https://github.com/Diramain)) - Project Manager
+- **Leandro Iramain** ([website](https://leandroiramain.com.ar), [@diramain](https://github.com/Diramain)) - Author / Product Manager
 - **Anthropic Claude / Antigravity** - AI Pair Programming
 - **ClickUp API** - Task management platform
 

@@ -25,7 +25,11 @@ Since browser extensions cannot truly hide secrets in client-side code, we recom
 2. **Create a new OAuth app** if you suspect compromise
 3. **Consider a backend proxy** for production apps with many users
 
-The client secret is stored in `chrome.storage.local` after the user enters it during setup. It is NOT encrypted because it must be sent to ClickUp's API.
+The OAuth client secret is stored locally after the user enters it during setup. In v1.2.0 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before storage in `chrome.storage.local`.
+
+This is best-effort at-rest protection: the encryption key is stored in the same browser profile, so it does not protect against a compromised host or compromised browser profile. The client secret is decrypted only when needed for OAuth or token exchange with ClickUp.
+
+For broad distribution or higher-risk deployments, a backend OAuth proxy remains recommended so the client secret does not need to live in the browser extension profile.
 
 ---
 

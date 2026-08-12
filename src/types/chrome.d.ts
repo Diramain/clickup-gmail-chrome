@@ -14,6 +14,7 @@ declare namespace chrome {
 
         const local: StorageArea;
         const sync: StorageArea;
+        const session: StorageArea;
     }
 
     namespace runtime {
@@ -81,6 +82,7 @@ declare namespace chrome {
         }
 
         function create(createData: CreateData): Promise<chrome.windows.Window>;
+        function update(windowId: number, updateInfo: { focused?: boolean }): Promise<chrome.windows.Window>;
 
         interface Window {
             id?: number;

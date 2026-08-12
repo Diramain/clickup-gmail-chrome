@@ -7,14 +7,23 @@ import type {
     ClickUpTeamsResponse,
     ClickUpUserResponse,
     CachedListItem,
-    TaskMapping
+    EmailTaskMapping
 } from '../types/clickup';
+import {
+    EMAIL_TASK_MAPPINGS_V2_KEY,
+    LINK_SCHEMA_VERSION,
+    type EmailTaskMappingsV1,
+    type EmailTaskMappingsV2,
+    isConfirmedThreadId,
+    migrateMappingsV1ToV2,
+    readMappingsWithFallback,
+} from '../link-hardening';
 
 // ============================================================================
 // Schema Version
 // ============================================================================
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // ============================================================================
 // Storage Keys
@@ -42,6 +51,7 @@ export const STORAGE_KEYS = {
 
     // Data
     EMAIL_TASKS: 'emailTaskMappings',
+    EMAIL_TASKS_V2: EMAIL_TASK_MAPPINGS_V2_KEY,
     EMAIL_TASKS_SYNC: 'emailTasksSync',
 
     // Draft (temporary)
@@ -56,9 +66,6 @@ export const STORAGE_KEYS = {
 export const DATA_LIMITS = {
     /** Maximum number of email-task mappings to store */
     MAX_EMAIL_TASKS: 1000,
-
-    /** Maximum age of email-task mappings in days */
-    EMAIL_TASKS_MAX_AGE_DAYS: 90,
 
     /** Hierarchy cache TTL in milliseconds */
     HIERARCHY_CACHE_TTL: 24 * 60 * 60 * 1000, // 24 hours
@@ -110,6 +117,7 @@ interface StorageSchema {
 
 class StorageService {
     private storage = chrome.storage.local;
+    private emailTaskWriteQueue: Promise<void> = Promise.resolve();
 
     // ------------------------------------------------------------------------
     // Schema Management
@@ -126,7 +134,7 @@ class StorageService {
             await this.set(STORAGE_KEYS.SCHEMA_VERSION, SCHEMA_VERSION);
         }
 
-        // Run cleanup on initialize
+        // Link cleanup is intentionally non-destructive in schema V2.
         await this.cleanupOldData();
     }
 
@@ -134,15 +142,25 @@ class StorageService {
      * Run migrations between schema versions
      */
     private async migrate(fromVersion: number, toVersion: number): Promise<void> {
-        console.log(`[Storage] Migrating from v${fromVersion} to v${toVersion}`);
+        console.log('[Storage] MIGRATION_START');
 
         // Version 0 -> 1: Initial schema, no migration needed
         if (fromVersion === 0 && toVersion >= 1) {
             // Just set the version, data is already in correct format
         }
 
-        // Add future migrations here:
-        // if (fromVersion < 2 && toVersion >= 2) { ... }
+        if (fromVersion < LINK_SCHEMA_VERSION && toVersion >= LINK_SCHEMA_VERSION) {
+            await this.migrateEmailTasksV2Shadow();
+        }
+    }
+
+    async migrateEmailTasksV2Shadow(): Promise<EmailTaskMappingsV2> {
+        const data = await this.storage.get([STORAGE_KEYS.EMAIL_TASKS, STORAGE_KEYS.EMAIL_TASKS_V2]);
+        const v1 = (data[STORAGE_KEYS.EMAIL_TASKS] || {}) as EmailTaskMappingsV1;
+        const currentV2 = (data[STORAGE_KEYS.EMAIL_TASKS_V2] || {}) as EmailTaskMappingsV2;
+        const migrated = migrateMappingsV1ToV2(v1, currentV2);
+        await this.set(STORAGE_KEYS.EMAIL_TASKS_V2, migrated);
+        return migrated;
     }
 
     // ------------------------------------------------------------------------
@@ -226,38 +244,62 @@ class StorageService {
     // Email Tasks (with limits)
     // ------------------------------------------------------------------------
 
-    async getEmailTasks(): Promise<Record<string, TaskMapping[]>> {
-        return await this.get<Record<string, TaskMapping[]>>(STORAGE_KEYS.EMAIL_TASKS) || {};
+    async getEmailTasks(): Promise<Record<string, EmailTaskMapping[]>> {
+        const data = await this.storage.get([STORAGE_KEYS.EMAIL_TASKS, STORAGE_KEYS.EMAIL_TASKS_V2]);
+        return readMappingsWithFallback(
+            data[STORAGE_KEYS.EMAIL_TASKS_V2] || {},
+            data[STORAGE_KEYS.EMAIL_TASKS] || {}
+        );
     }
 
-    async setEmailTasks(tasks: Record<string, TaskMapping[]>): Promise<void> {
+    async setEmailTasks(tasks: Record<string, EmailTaskMapping[]>): Promise<void> {
         // Enforce limit
         const entries = Object.entries(tasks);
 
         if (entries.length > DATA_LIMITS.MAX_EMAIL_TASKS) {
-            // Keep most recent entries (assuming keys are sortable by date)
-            const sorted = entries.sort((a, b) => b[0].localeCompare(a[0]));
-            const limited = sorted.slice(0, DATA_LIMITS.MAX_EMAIL_TASKS);
-            tasks = Object.fromEntries(limited);
-            console.log(`[Storage] Trimmed email tasks to ${DATA_LIMITS.MAX_EMAIL_TASKS}`);
+            console.warn(`[Storage] Email task mappings exceed soft limit (${entries.length}/${DATA_LIMITS.MAX_EMAIL_TASKS}); write is report-only, no truncation applied`);
         }
 
-        await this.set(STORAGE_KEYS.EMAIL_TASKS, tasks);
+        await this.set(STORAGE_KEYS.EMAIL_TASKS_V2, tasks);
     }
 
-    async addEmailTask(threadId: string, task: TaskMapping): Promise<void> {
-        const tasks = await this.getEmailTasks();
+    async updateEmailTasks(mutator: (tasks: EmailTaskMappingsV2) => EmailTaskMappingsV2 | void): Promise<EmailTaskMappingsV2> {
+        let updated: EmailTaskMappingsV2 = {};
+        const next = this.emailTaskWriteQueue.then(async () => {
+            const data = await this.storage.get([STORAGE_KEYS.EMAIL_TASKS, STORAGE_KEYS.EMAIL_TASKS_V2]);
+            const current = readMappingsWithFallback(
+                data[STORAGE_KEYS.EMAIL_TASKS_V2] || {},
+                data[STORAGE_KEYS.EMAIL_TASKS] || {}
+            );
+            const result = mutator(current);
+            updated = result || current;
+            await this.setEmailTasks(updated);
+        });
 
-        if (!tasks[threadId]) {
-            tasks[threadId] = [];
-        }
+        this.emailTaskWriteQueue = next.catch(() => undefined);
+        await next;
+        return updated;
+    }
 
-        // Avoid duplicates
-        if (!tasks[threadId].find(t => t.id === task.id)) {
-            tasks[threadId].push(task);
-        }
+    async addEmailTask(threadId: string, task: EmailTaskMapping): Promise<void> {
+        if (!isConfirmedThreadId(threadId)) return;
 
-        await this.setEmailTasks(tasks);
+        await this.updateEmailTasks((tasks) => {
+            if (!tasks[threadId]) {
+                tasks[threadId] = [];
+            }
+
+            if (!tasks[threadId].find(t => t.id === task.id)) {
+                tasks[threadId].push({
+                    ...task,
+                    linkStatus: 'unverified',
+                    linkSource: 'unknown',
+                    createdAt: task.createdAt || Date.now(),
+                    updatedAt: Date.now(),
+                    failureCount: 0,
+                });
+            }
+        });
     }
 
     // ------------------------------------------------------------------------
@@ -265,33 +307,15 @@ class StorageService {
     // ------------------------------------------------------------------------
 
     /**
-     * Remove old data that exceeds limits or TTL
+     * Report mapping volume only. No automatic mapping purge is performed.
      */
     async cleanupOldData(): Promise<void> {
-        console.log('[Storage] Running cleanup...');
+        console.log('[Storage] Link cleanup is report-only for schema v2');
 
-        // Clean old email tasks
         const tasks = await this.getEmailTasks();
-        const cutoffDate = Date.now() - (DATA_LIMITS.EMAIL_TASKS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000);
-
-        let removed = 0;
-        const cleaned: Record<string, TaskMapping[]> = {};
-
-        for (const [threadId, taskList] of Object.entries(tasks)) {
-            // Keep if has any recent task
-            cleaned[threadId] = taskList;
-        }
-
-        // Enforce max limit
-        const entries = Object.entries(cleaned);
+        const entries = Object.entries(tasks);
         if (entries.length > DATA_LIMITS.MAX_EMAIL_TASKS) {
-            const sorted = entries.slice(0, DATA_LIMITS.MAX_EMAIL_TASKS);
-            await this.set(STORAGE_KEYS.EMAIL_TASKS, Object.fromEntries(sorted));
-            removed = entries.length - DATA_LIMITS.MAX_EMAIL_TASKS;
-        }
-
-        if (removed > 0) {
-            console.log(`[Storage] Removed ${removed} old email task entries`);
+            console.warn(`[Storage] Email task mappings exceed soft limit (${entries.length}/${DATA_LIMITS.MAX_EMAIL_TASKS}); no automatic purge performed`);
         }
     }
 
@@ -334,5 +358,5 @@ export const storageService = new StorageService();
 
 // Initialize on load
 storageService.initialize().catch(err => {
-    console.error('[Storage] Initialization failed:', err);
+    console.error('[Storage] INIT_FAILED');
 });

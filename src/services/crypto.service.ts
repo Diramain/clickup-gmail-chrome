@@ -1,8 +1,8 @@
 /**
- * Crypto Service - Secure token encryption/decryption
- * Uses Web Crypto API with AES-256-GCM for encryption
+ * Crypto Service - token encryption/decryption for local storage.
  * 
- * @security This provides at-rest encryption for sensitive tokens
+ * @security This reduces accidental exposure in storage snapshots/logs. The key is
+ * stored in the same browser profile, so it does not protect a compromised profile.
  */
 
 // Storage key for the encryption key
@@ -140,14 +140,14 @@ export async function getSecureToken(storageKey: string): Promise<string | null>
         try {
             return await decryptToken(value as EncryptedData);
         } catch (error) {
-            console.error('[Crypto] Decryption failed:', error);
+            console.error('[Crypto] DECRYPT_FAILED');
             return null;
         }
     }
 
     // Legacy plain text token - migrate to encrypted
     if (typeof value === 'string') {
-        console.log('[Crypto] Migrating legacy token to encrypted format');
+        console.log('[Crypto] MIGRATE_LEGACY_TOKEN');
         await saveSecureToken(storageKey, value);
         return value;
     }
@@ -191,22 +191,54 @@ interface EncryptedOAuthConfig {
 
 /**
  * Saves OAuth config with encrypted client secret
- * @security Encrypts the client secret while leaving clientId accessible
+     * @security Reduces accidental exposure of clientSecret in storage snapshots.
+     * This does not protect a compromised browser profile.
  */
 export async function saveSecureOAuthConfig(storageKey: string, config: OAuthConfig): Promise<void> {
-    if (!config || !config.clientSecret) return;
+    const clientId = typeof config?.clientId === 'string' ? config.clientId.trim() : '';
+    const clientSecret = typeof config?.clientSecret === 'string' ? config.clientSecret.trim() : '';
 
-    const encryptedSecret = await encryptToken(config.clientSecret);
+    if (!clientId || !clientSecret) {
+        throw new Error('Missing OAuth configuration fields');
+    }
+
+    const encryptedSecret = await encryptToken(clientSecret);
 
     const secureConfig: EncryptedOAuthConfig = {
-        clientId: config.clientId,
+        clientId,
         encryptedSecret,
         redirectUrl: config.redirectUrl,
         version: 1
     };
 
     await chrome.storage.local.set({ [storageKey]: secureConfig });
-    console.log('[Crypto] OAuth config saved with encrypted secret');
+    console.log('[Crypto] OAUTH_CONFIG_SAVED');
+}
+
+/**
+ * Checks whether OAuth config is present in the supported encrypted shape.
+ * Does not decrypt or migrate legacy plaintext values.
+ */
+export async function hasSecureOAuthConfig(storageKey: string): Promise<boolean> {
+    const stored = await chrome.storage.local.get(storageKey);
+    const value = stored[storageKey];
+
+    if (!value || typeof value !== 'object') return false;
+
+    const encryptedSecret = (value as Partial<EncryptedOAuthConfig>).encryptedSecret;
+
+    return (
+        typeof (value as Partial<EncryptedOAuthConfig>).clientId === 'string' &&
+        (value as Partial<EncryptedOAuthConfig>).clientId!.trim().length > 0 &&
+        typeof encryptedSecret === 'object' &&
+        encryptedSecret !== null &&
+        typeof encryptedSecret.iv === 'string' &&
+        encryptedSecret.iv.trim().length > 0 &&
+        typeof encryptedSecret.data === 'string' &&
+        encryptedSecret.data.trim().length > 0 &&
+        encryptedSecret.version === 1 &&
+        (value as Partial<EncryptedOAuthConfig>).version === 1
+    );
 }
 
 /**
@@ -229,14 +261,14 @@ export async function getSecureOAuthConfig(storageKey: string): Promise<OAuthCon
                 redirectUrl: value.redirectUrl
             };
         } catch (error) {
-            console.error('[Crypto] Failed to decrypt OAuth config:', error);
+            console.error('[Crypto] OAUTH_CONFIG_DECRYPT_FAILED');
             return null;
         }
     }
 
     // Legacy plain text format - migrate to encrypted
     if (value.clientId && value.clientSecret && typeof value.clientSecret === 'string') {
-        console.log('[Crypto] Migrating legacy OAuth config to encrypted format');
+        console.log('[Crypto] MIGRATE_LEGACY_OAUTH_CONFIG');
         await saveSecureOAuthConfig(storageKey, value);
         return value as OAuthConfig;
     }

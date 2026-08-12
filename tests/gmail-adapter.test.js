@@ -1,185 +1,168 @@
-/**
- * GmailAdapter Unit Tests
- * Tests for Gmail DOM abstraction layer
- */
+const path = require('path');
+const fs = require('fs');
+const ts = require('typescript');
 
-// Mock document for DOM testing
-const mockDocument = {
-    querySelector: jest.fn(),
-    querySelectorAll: jest.fn()
-};
+function source(relativePath) {
+    return fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
+}
 
-// GmailAdapter functions extracted for testing
-const GmailAdapter = {
-    SELECTORS: {
-        THREAD_ID: 'h2[data-thread-perm-id], [data-thread-perm-id], [data-legacy-thread-id]',
-        SUBJECT: 'h2[data-thread-perm-id], .hP, [role="heading"][aria-level="2"]',
-        SENDER_EMAIL: '.gD[email], [email]',
-        EMAIL_BODY: '.a3s.aiL, .ii.gt',
-        EMAIL_CONTAINER: '.gs, .h7',
-    },
-
-    getThreadIdFromElement(element) {
-        if (!element) return null;
-
-        // Try different attributes
-        const permId = element.getAttribute('data-thread-perm-id');
-        if (permId) return permId;
-
-        const legacyId = element.getAttribute('data-legacy-thread-id');
-        if (legacyId) return legacyId;
-
-        return null;
-    },
-
-    normalizeThreadId(rawId) {
-        if (!rawId) return 'email_unknown';
-
-        // Remove URL encoding and special characters
-        let normalized = rawId;
-
-        // If it's a Gmail internal format (#msg-f:123), extract the number
-        if (normalized.includes('#msg-f:')) {
-            const match = normalized.match(/#msg-f:(\d+)/);
-            if (match) normalized = match[1];
+function loadTsModule(relativePath) {
+    const filename = path.join(__dirname, '..', relativePath);
+    const compiled = ts.transpileModule(source(relativePath), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+        fileName: filename,
+    }).outputText;
+    const module = { exports: {} };
+    const localRequire = (request) => {
+        if (request.startsWith('.')) {
+            const resolved = path.normalize(path.join(path.dirname(relativePath), request)) + '.ts';
+            return loadTsModule(resolved);
         }
+        return require(request);
+    };
+    new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
+    return module.exports;
+}
 
-        // If it starts with 'thread-', extract ID
-        if (normalized.startsWith('thread-')) {
-            normalized = normalized.replace('thread-', '');
-        }
+const { GmailAdapter } = loadTsModule('src/gmail-adapter.ts');
+const { ensureThreadBar } = loadTsModule('src/gmail-render-utils.ts');
 
-        return `email_${normalized}`;
-    },
+describe('GmailAdapter production selectors', () => {
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
 
-    extractEmailFromString(str) {
-        if (!str) return '';
-        const match = str.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-        return match ? match[0] : '';
-    },
+    test('imports production TypeScript adapter', () => {
+        expect(GmailAdapter.SELECTORS.emailBody).toContain('.a3s.aiL');
+    });
 
-    sanitizeHtml(html) {
-        if (!html) return '';
+    test('prefers nested .a3s.aiL and excludes duplicate .ii.gt ancestor', () => {
+        document.body.innerHTML = `
+            <div class="gs">
+              <div><div class="ii gt"><div class="a3s aiL">primary</div></div></div>
+            </div>
+        `;
 
-        // Remove script tags
-        let sanitized = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+        const bodies = GmailAdapter.getAllEmailBodies();
 
-        // Remove event handlers
-        sanitized = sanitized.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0].className).toContain('a3s');
+        expect(bodies[0].textContent).toBe('primary');
+        expect(GmailAdapter.getEmailBodyElement()).toBe(bodies[0]);
+    });
 
-        return sanitized;
+    test('uses .ii.gt fallback only when no primary body is contained', () => {
+        document.body.innerHTML = '<div class="ii gt">fallback</div>';
+
+        const bodies = GmailAdapter.getAllEmailBodies();
+
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0].className).toContain('ii');
+    });
+
+    test('filters disconnected bodies', () => {
+        document.body.innerHTML = '<div class="a3s aiL">connected</div>';
+        const disconnected = document.createElement('div');
+        disconnected.className = 'a3s aiL';
+        jest.spyOn(document, 'querySelectorAll').mockImplementation((selector) => {
+            if (selector === '.a3s.aiL') return [document.querySelector('.a3s.aiL'), disconnected].filter(Boolean);
+            if (selector === '.ii.gt') return [];
+            return Document.prototype.querySelectorAll.call(document, selector);
+        });
+
+        expect(GmailAdapter.getAllEmailBodies()).toHaveLength(1);
+    });
+
+    test('returns null instead of timestamp fallback when thread id is unconfirmed', () => {
+        window.location.hash = '#inbox';
+        document.body.innerHTML = '<main role="main"></main>';
+
+        expect(GmailAdapter.getThreadId()).toBeNull();
+    });
+});
+
+describe('Gmail thread bar mounting', () => {
+    function createBar(threadId) {
+        const bar = document.createElement('div');
+        bar.className = 'cu-email-bar';
+        bar.dataset.threadId = threadId || '';
+        const button = document.createElement('button');
+        button.className = 'cu-add-btn';
+        button.disabled = !threadId;
+        bar.appendChild(button);
+        return bar;
     }
-};
 
-// ============================================================================
-// Tests
-// ============================================================================
+    test('mounts before body using body.parentElement, even with nested Gmail ancestors', () => {
+        document.body.innerHTML = '<div class="gs"><div class="wrap"><div class="ii gt"><div class="a3s aiL">body</div></div></div></div>';
+        const body = document.querySelector('.a3s.aiL');
+        const host = body.parentElement;
+        const reconcile = jest.fn();
 
-describe('GmailAdapter', () => {
-    describe('getThreadIdFromElement', () => {
-        test('returns thread ID from data-thread-perm-id', () => {
-            const element = {
-                getAttribute: jest.fn((attr) =>
-                    attr === 'data-thread-perm-id' ? '19b95d11476b81db' : null
-                )
-            };
-            expect(GmailAdapter.getThreadIdFromElement(element)).toBe('19b95d11476b81db');
-        });
+        const bar = ensureThreadBar(host, body, '19b95d11476b81db', createBar, reconcile);
 
-        test('returns legacy thread ID as fallback', () => {
-            const element = {
-                getAttribute: jest.fn((attr) =>
-                    attr === 'data-legacy-thread-id' ? 'legacy123' : null
-                )
-            };
-            expect(GmailAdapter.getThreadIdFromElement(element)).toBe('legacy123');
-        });
-
-        test('returns null for element without ID', () => {
-            const element = {
-                getAttribute: jest.fn(() => null)
-            };
-            expect(GmailAdapter.getThreadIdFromElement(element)).toBeNull();
-        });
-
-        test('returns null for null element', () => {
-            expect(GmailAdapter.getThreadIdFromElement(null)).toBeNull();
-        });
+        expect(host.children[0]).toBe(bar);
+        expect(host.children[1]).toBe(body);
+        expect(document.querySelectorAll('.cu-email-bar')).toHaveLength(1);
+        expect(reconcile).toHaveBeenCalledTimes(1);
     });
 
-    describe('normalizeThreadId', () => {
-        test('prefixes ID with email_', () => {
-            expect(GmailAdapter.normalizeThreadId('19b95d11476b81db')).toBe('email_19b95d11476b81db');
+    test('repeated scans reuse one bar and update dataset from pending to confirmed', () => {
+        document.body.innerHTML = '<div class="ii gt"><div class="a3s aiL">body</div></div>';
+        const body = document.querySelector('.a3s.aiL');
+        const host = body.parentElement;
+        const reconcile = jest.fn((bar, threadId) => {
+            bar.dataset.threadId = threadId || '';
+            const button = bar.querySelector('.cu-add-btn');
+            button.disabled = !threadId;
         });
 
-        test('extracts ID from #msg-f: format', () => {
-            expect(GmailAdapter.normalizeThreadId('#msg-f:1234567890')).toBe('email_1234567890');
-        });
+        const first = ensureThreadBar(host, body, null, createBar, reconcile);
+        const second = ensureThreadBar(host, body, '19b95d11476b81db', createBar, reconcile);
 
-        test('removes thread- prefix', () => {
-            expect(GmailAdapter.normalizeThreadId('thread-abc123')).toBe('email_abc123');
-        });
-
-        test('returns email_unknown for null', () => {
-            expect(GmailAdapter.normalizeThreadId(null)).toBe('email_unknown');
-        });
-
-        test('returns email_unknown for empty string', () => {
-            expect(GmailAdapter.normalizeThreadId('')).toBe('email_unknown');
-        });
+        expect(second).toBe(first);
+        expect(document.querySelectorAll('.cu-email-bar')).toHaveLength(1);
+        expect(first.dataset.threadId).toBe('19b95d11476b81db');
+        expect(first.querySelector('.cu-add-btn').disabled).toBe(false);
     });
 
-    describe('extractEmailFromString', () => {
-        test('extracts email from plain string', () => {
-            expect(GmailAdapter.extractEmailFromString('user@example.com')).toBe('user@example.com');
+    test('pending to confirmed updates explicit label without residual text', () => {
+        document.body.innerHTML = '<div class="ii gt"><div class="a3s aiL">body</div></div>';
+        const body = document.querySelector('.a3s.aiL');
+        const host = body.parentElement;
+        const createLocalizedBar = (threadId) => {
+            const bar = document.createElement('div');
+            bar.className = 'cu-email-bar';
+            bar.dataset.threadId = threadId || '';
+            const button = document.createElement('button');
+            button.className = 'cu-add-btn';
+            const label = document.createElement('span');
+            label.className = 'cu-add-label';
+            label.textContent = threadId ? 'Agregar a ClickUp' : 'Esperando datos de Gmail…';
+            button.appendChild(label);
+            bar.appendChild(button);
+            return bar;
+        };
+        const reconcile = jest.fn((bar, threadId) => {
+            bar.dataset.threadId = threadId || '';
+            bar.querySelector('.cu-add-label').textContent = threadId ? 'Agregar a ClickUp' : 'Esperando datos de Gmail…';
         });
 
-        test('extracts email from string with other text', () => {
-            expect(GmailAdapter.extractEmailFromString('John Doe <john.doe@company.org>')).toBe('john.doe@company.org');
-        });
+        const bar = ensureThreadBar(host, body, null, createLocalizedBar, reconcile);
+        expect(bar.textContent).toContain('Esperando datos de Gmail…');
+        ensureThreadBar(host, body, '19b95d11476b81db', createLocalizedBar, reconcile);
 
-        test('handles complex email addresses', () => {
-            expect(GmailAdapter.extractEmailFromString('Contact test.user+tag@sub.domain.co.uk here')).toBe('test.user+tag@sub.domain.co.uk');
-        });
-
-        test('returns empty string for no email', () => {
-            expect(GmailAdapter.extractEmailFromString('No email here')).toBe('');
-        });
-
-        test('returns empty string for null input', () => {
-            expect(GmailAdapter.extractEmailFromString(null)).toBe('');
-        });
+        expect(bar.textContent).toContain('Agregar a ClickUp');
+        expect(bar.textContent).not.toContain('Pending Gmail metadata');
+        expect(bar.textContent).not.toContain('Esperando datos de Gmail…');
     });
 
-    describe('sanitizeHtml', () => {
-        test('removes script tags', () => {
-            const html = '<div>Hello</div><script>alert("xss")</script>';
-            expect(GmailAdapter.sanitizeHtml(html)).toBe('<div>Hello</div>');
-        });
+    test('rejects non-direct reference nodes so one body failure can be isolated by caller', () => {
+        document.body.innerHTML = '<div class="gs"><div class="ii gt"><div class="a3s aiL">body</div></div></div>';
+        const body = document.querySelector('.a3s.aiL');
+        const wrongHost = document.querySelector('.gs');
 
-        test('removes event handlers', () => {
-            const html = '<div onclick="alert(1)" onmouseover="hack()">Content</div>';
-            const result = GmailAdapter.sanitizeHtml(html);
-            expect(result).not.toContain('onclick');
-            expect(result).not.toContain('onmouseover');
-        });
-
-        test('preserves safe HTML', () => {
-            const html = '<div class="safe"><p>Hello World</p></div>';
-            expect(GmailAdapter.sanitizeHtml(html)).toBe(html);
-        });
-
-        test('returns empty string for null', () => {
-            expect(GmailAdapter.sanitizeHtml(null)).toBe('');
-        });
-    });
-
-    describe('SELECTORS', () => {
-        test('has required selectors defined', () => {
-            expect(GmailAdapter.SELECTORS.THREAD_ID).toBeDefined();
-            expect(GmailAdapter.SELECTORS.SUBJECT).toBeDefined();
-            expect(GmailAdapter.SELECTORS.SENDER_EMAIL).toBeDefined();
-            expect(GmailAdapter.SELECTORS.EMAIL_BODY).toBeDefined();
-        });
+        expect(() => ensureThreadBar(wrongHost, body, '19b95d11476b81db', createBar, jest.fn())).toThrow(/direct child/);
+        expect(document.querySelectorAll('.cu-email-bar')).toHaveLength(0);
     });
 });

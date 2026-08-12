@@ -3,7 +3,7 @@
  * Handles OAuth flow, token management, and session state
  */
 
-import { saveSecureToken, getSecureToken, hasSecureToken, saveSecureOAuthConfig, getSecureOAuthConfig } from './crypto.service';
+import { saveSecureToken, getSecureToken, hasSecureToken, saveSecureOAuthConfig, hasSecureOAuthConfig, getSecureOAuthConfig, removeSecureToken } from './crypto.service';
 import type { ClickUpUserResponse } from '../types/clickup';
 
 // ============================================================================
@@ -38,6 +38,8 @@ const STORAGE_KEYS = {
     OAUTH_CONFIG: 'oauthConfig',
     USER: 'cachedUser',
     TEAMS: 'cachedTeams',
+    DRAFT_CLIENT_ID: 'draftClientId',
+    DRAFT_CLIENT_SECRET: 'draftClientSecret',
 };
 
 const API_URLS = {
@@ -63,16 +65,14 @@ class AuthService {
      * Get current extension status
      */
     async getStatus(): Promise<ExtensionStatus> {
-        const data = await chrome.storage.local.get([
-            STORAGE_KEYS.OAUTH_CONFIG,
-            STORAGE_KEYS.USER
-        ]);
+        const data = await chrome.storage.local.get(STORAGE_KEYS.USER);
 
         const hasToken = await hasSecureToken(STORAGE_KEYS.TOKEN);
+        const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
 
         return {
             authenticated: hasToken,
-            configured: !!(data[STORAGE_KEYS.OAUTH_CONFIG]?.clientId),
+            configured,
             user: data[STORAGE_KEYS.USER] || null
         };
     }
@@ -83,6 +83,10 @@ class AuthService {
      */
     async saveOAuthConfig(config: OAuthConfig): Promise<{ success: boolean }> {
         await saveSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG, config);
+        await chrome.storage.local.remove([STORAGE_KEYS.DRAFT_CLIENT_ID, STORAGE_KEYS.DRAFT_CLIENT_SECRET]);
+        if (!await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)) {
+            throw new Error('OAuth configuration was not stored securely');
+        }
         return { success: true };
     }
 
@@ -136,7 +140,7 @@ class AuthService {
             });
 
             const tokenData = await tokenResponse.json();
-            console.log('[Auth] OAuth token response received');
+            console.log('[Auth] TOKEN_RESPONSE_RECEIVED');
 
             if (tokenData.access_token) {
                 // Save tokens encrypted
@@ -154,7 +158,7 @@ class AuthService {
             throw new Error(tokenData.error || 'Failed to get token');
 
         } catch (error) {
-            console.error('[Auth] OAuth error:', error);
+            console.error('[Auth] OAUTH_ERROR');
             throw error;
         }
     }
@@ -163,13 +167,13 @@ class AuthService {
      * Refresh the access token using refresh token
      */
     async refreshToken(): Promise<{ success: boolean; token?: string }> {
-        console.log('[Auth] Attempting token refresh...');
+        console.log('[Auth] TOKEN_REFRESH_START');
 
         const oauthConfig = await this.getOAuthConfig();
         const refreshTokenValue = await getSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
 
         if (!refreshTokenValue || !oauthConfig?.clientId) {
-            console.log('[Auth] No refresh token available');
+            console.log('[Auth] TOKEN_REFRESH_SKIPPED');
             return { success: false };
         }
 
@@ -191,7 +195,7 @@ class AuthService {
                 await saveSecureToken(STORAGE_KEYS.TOKEN, tokenData.access_token);
                 await saveSecureToken(STORAGE_KEYS.REFRESH_TOKEN, tokenData.refresh_token || refreshTokenValue);
 
-                console.log('[Auth] Token refreshed successfully');
+                console.log('[Auth] TOKEN_REFRESHED');
 
                 // Notify callback if set
                 if (this.onTokenRefreshed) {
@@ -201,11 +205,11 @@ class AuthService {
                 return { success: true, token: tokenData.access_token };
             }
 
-            console.error('[Auth] Token refresh failed:', tokenData.error);
+            console.error('[Auth] TOKEN_REFRESH_FAILED');
             return { success: false };
 
         } catch (error) {
-            console.error('[Auth] Token refresh error:', error);
+            console.error('[Auth] TOKEN_REFRESH_ERROR');
             return { success: false };
         }
     }
@@ -228,14 +232,17 @@ class AuthService {
      * Logout - clear all auth data
      */
     async logout(): Promise<{ success: boolean }> {
+        await removeSecureToken(STORAGE_KEYS.TOKEN);
+        await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
         await chrome.storage.local.remove([
-            STORAGE_KEYS.TOKEN,
-            STORAGE_KEYS.REFRESH_TOKEN,
+            STORAGE_KEYS.OAUTH_CONFIG,
+            STORAGE_KEYS.DRAFT_CLIENT_ID,
+            STORAGE_KEYS.DRAFT_CLIENT_SECRET,
             STORAGE_KEYS.USER,
             STORAGE_KEYS.TEAMS
         ]);
 
-        console.log('[Auth] Logged out');
+        console.log('[Auth] LOGGED_OUT');
         return { success: true };
     }
 

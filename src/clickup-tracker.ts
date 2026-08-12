@@ -40,7 +40,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (changes.autoStopTimer) {
             settings.autoStopTimer = changes.autoStopTimer.newValue;
         }
-        console.log('[ClickUp Tracker] Settings updated:', settings);
+        console.log('[ClickUp Tracker] SETTINGS_UPDATED');
     }
 });
 
@@ -95,7 +95,7 @@ function sleep(ms: number): Promise<void> {
  */
 function clickElement(selector: string): boolean {
     const element = document.querySelector(selector);
-    console.log('[ClickUp Tracker] clickElement:', selector, 'found:', !!element);
+    console.log('[ClickUp Tracker] CLICK_ELEMENT', !!element);
 
     if (!element) return false;
 
@@ -126,7 +126,7 @@ function clickElement(selector: string): boolean {
 
     // Dedupe candidates
     const uniqueCandidates = [...new Set(candidates)];
-    console.log('[ClickUp Tracker] Click candidates:', uniqueCandidates.length);
+    console.log('[ClickUp Tracker] CLICK_CANDIDATES', uniqueCandidates.length);
 
     // Dispatch click events
     const dispatchClick = (target: HTMLElement) => {
@@ -139,7 +139,7 @@ function clickElement(selector: string): boolean {
             target.dispatchEvent(new MouseEvent('click', init));
             if (typeof target.click === 'function') target.click();
         } catch (e) {
-            console.log('[ClickUp Tracker] Click dispatch error:', e);
+            console.log('[ClickUp Tracker] CLICK_DISPATCH_ERROR');
         }
     };
 
@@ -151,10 +151,10 @@ function clickElement(selector: string): boolean {
 
             // Check if timer state changed
             const isNowRunning = exists(SELECTORS.TIMER_RUNNING);
-            console.log('[ClickUp Tracker] After click, running:', isNowRunning);
+            console.log('[ClickUp Tracker] CLICK_RESULT', isNowRunning);
             return true;
         } catch (e) {
-            console.log('[ClickUp Tracker] Candidate click failed:', e);
+            console.log('[ClickUp Tracker] CANDIDATE_CLICK_FAILED');
         }
     }
 
@@ -206,7 +206,7 @@ async function checkNavigation(): Promise<void> {
     const urlType = getClickupUrlType(currentUrl);
     const previousUrlType = getClickupUrlType(lastLocation);
 
-    console.log('[ClickUp Tracker] Check:', { currentUrl, urlType, previousUrlType, settings });
+    console.log('[ClickUp Tracker] CHECK_STATE');
 
     // Auto-start logic
     if (settings.autoStartTimer && (urlType === 'task' || urlType === 'inbox')) {
@@ -215,7 +215,7 @@ async function checkNavigation(): Promise<void> {
             await sleep(500);
 
             if (!isTimerRunning() && exists(SELECTORS.TIMER_NOT_RUNNING)) {
-                console.log('[ClickUp Tracker] Auto-starting timer for:', urlType);
+                console.log('[ClickUp Tracker] AUTO_START_TIMER');
                 startTimer();
             }
         }
@@ -244,7 +244,7 @@ async function initTracker(): Promise<void> {
     console.log('[ClickUp Tracker] Initializing...');
 
     await loadSettings();
-    console.log('[ClickUp Tracker] Settings loaded:', settings);
+    console.log('[ClickUp Tracker] SETTINGS_LOADED');
 
     // Watch for DOM changes (SPA navigation)
     const observer = new MutationObserver(debouncedCheck);
@@ -256,7 +256,7 @@ async function initTracker(): Promise<void> {
 
     // Initial check after a delay to let the page load
     setTimeout(() => {
-        console.log('[ClickUp Tracker] Running initial check for URL:', location.href);
+        console.log('[ClickUp Tracker] INITIAL_CHECK');
         checkNavigation();
     }, 1000);
 

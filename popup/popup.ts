@@ -7,6 +7,20 @@
 import { tasksTab } from './tabs/tasks.tab';
 import { trackingTab } from './tabs/tracking.tab';
 import { configTab } from './tabs/config.tab';
+import { escapeHTML, safeAvatarUrl, safeClickUpUrl } from '../src/utils/sanitize.utils';
+import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from '../src/data-management';
+import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
+import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
+import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
+import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
+import {
+    getTimeEntryDurationMs,
+    getTimeEntryTaskUrl,
+    isCurrentTimeEntry,
+    prepareRecentTimeEntries,
+    toTimeEntryTimestamp,
+} from '../src/time-entry-history';
+import type { TimeEntry } from '../src/types/clickup';
 
 // ============================================================================
 // Types
@@ -48,6 +62,28 @@ interface TestResult {
     error?: string;
 }
 
+function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.MessageSender): void {
+    if (sender.id !== chrome.runtime.id || !isSyncProgressMessage(message)) return;
+
+    const text = formatSyncProgress(message);
+    console.log(`[Sincronización] ${text}`);
+
+    const statusId = message.scope === 'hierarchy' ? 'syncStatus' : 'emailSyncStatus';
+    const status = document.getElementById(statusId);
+    if (!status) return;
+
+    status.textContent = text;
+    status.style.color = message.phase === 'error'
+        ? '#ff5252'
+        : message.phase === 'complete'
+            ? '#00c853'
+            : '#666';
+}
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+    handleSyncProgressMessage(message, sender);
+});
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -69,7 +105,9 @@ function initTabNavigation(): void {
 
             // Update button states
             tabButtons.forEach(b => b.classList.remove('active'));
+            tabButtons.forEach(b => b.setAttribute('aria-selected', 'false'));
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
 
             // Update tab content
             tabContents.forEach(content => {
@@ -87,22 +125,34 @@ function initTabNavigation(): void {
 
 async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
-    const loginRequired = document.getElementById('login-required') as HTMLElement;
-    const loggedIn = document.getElementById('logged-in') as HTMLElement;
+    const standaloneSetup = isSetupStandalone();
+
+    chrome.storage.local.remove('draftClientSecret');
 
     try {
         const status = await sendMessage<ExtensionStatus>({ action: 'getStatus' });
+
+        if (shouldLaunchDurableSetup(status, standaloneSetup)) {
+            try {
+                if (await openOrFocusSetupWindow()) {
+                    window.close();
+                    return;
+                }
+            } catch (_error) {
+                // Fall through to inline setup if Chrome cannot create/focus the durable window.
+            }
+        }
 
         loading.classList.add('hidden');
 
         if (status.authenticated) {
             showLoggedIn(status);
         } else {
-            showLoginRequired(status.configured);
+            showLoginRequired(status.configured, standaloneSetup);
         }
     } catch (error: any) {
-        console.error('Init error:', error);
-        loading.innerHTML = `<p style="color: #ff5252;">Error: ${error.message}</p>`;
+        console.error('INIT_ERROR');
+        loading.innerHTML = '<p style="color: #ff5252;">No se pudo cargar la extensión</p>';
     }
 }
 
@@ -110,7 +160,7 @@ async function init(): Promise<void> {
 // Login Required View
 // ============================================================================
 
-function showLoginRequired(configured: boolean): void {
+function showLoginRequired(configured: boolean, standaloneSetup = isSetupStandalone()): void {
     const loginRequired = document.getElementById('login-required') as HTMLElement;
     const signInBtn = document.getElementById('signIn') as HTMLButtonElement;
     const saveConfigBtn = document.getElementById('saveConfig') as HTMLButtonElement;
@@ -119,40 +169,130 @@ function showLoginRequired(configured: boolean): void {
     const redirectUrlInput = document.getElementById('redirectUrl') as HTMLInputElement;
     const copyUrlBtn = document.getElementById('copyUrl') as HTMLButtonElement;
     const openWindowBtn = document.getElementById('openWindow') as HTMLButtonElement;
+    const discardChangesBtn = document.getElementById('discardOAuthChanges') as HTMLButtonElement;
+    const configStatus = document.getElementById('oauthConfigStatus') as HTMLElement | null;
+
+    let hasStoredConfig = configured;
+    let isDirty = false;
+
+    const currentState = (): OAuthConfigState => evaluateOAuthConfigState({
+        hasStoredConfig,
+        isDirty,
+        clientId: clientIdInput.value,
+        clientSecret: clientSecretInput.value,
+    });
+
+    const setConfigStatus = (message: string, color = ''): void => {
+        if (!configStatus) return;
+        configStatus.textContent = message;
+        configStatus.style.color = color;
+    };
+
+    const updateOAuthButtons = (): OAuthConfigState => {
+        const state = currentState();
+        signInBtn.disabled = !state.canSignIn;
+        saveConfigBtn.disabled = !state.canSave;
+        return state;
+    };
+
+    const markDirty = (): void => {
+        isDirty = true;
+        setConfigStatus('Hay cambios OAuth pendientes. Completá ambos campos para guardarlos de forma segura.', '#ff9800');
+        updateOAuthButtons();
+    };
+
+    const saveCurrentOAuthConfig = async (): Promise<void> => {
+        const state = currentState();
+        if (!state.canSave) {
+            throw new Error('OAUTH_CONFIG_INCOMPLETE');
+        }
+
+        const originalSaveLabel = saveConfigBtn.textContent || 'Guardar configuración';
+        saveConfigBtn.disabled = true;
+        saveConfigBtn.textContent = 'Guardando…';
+
+        try {
+            const result = await sendMessage<{ success?: boolean }>({
+                action: 'saveOAuthConfig',
+                data: {
+                    clientId: clientIdInput.value.trim(),
+                    clientSecret: clientSecretInput.value.trim(),
+                }
+            });
+
+            if (result?.success !== true) {
+                throw new Error('OAUTH_CONFIG_SAVE_FAILED');
+            }
+
+            hasStoredConfig = true;
+            isDirty = false;
+            clientSecretInput.value = '';
+            await chrome.storage.local.remove(['draftClientId', 'draftClientSecret']);
+            saveConfigBtn.textContent = 'Configuración guardada ✓';
+            saveConfigBtn.style.background = 'rgba(0, 200, 83, 0.2)';
+            saveConfigBtn.style.borderColor = '#00c853';
+            setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
+            updateOAuthButtons();
+        } catch (error) {
+            saveConfigBtn.textContent = originalSaveLabel;
+            setConfigStatus('No se pudo guardar la configuración. Revisá ambos campos e intentá de nuevo.', '#ff5252');
+            updateOAuthButtons();
+            throw error;
+        }
+    };
 
     loginRequired.classList.remove('hidden');
+    if (standaloneSetup) {
+        openWindowBtn.classList.add('hidden');
+    }
+
+    if (configured) {
+        setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
+    }
 
     // Show the Redirect URL (Chrome identity API format)
     const redirectUrl = chrome.identity.getRedirectURL();
     redirectUrlInput.value = redirectUrl;
 
     // Restore previously entered values (auto-save feature)
-    chrome.storage.local.get(['draftClientId', 'draftClientSecret'], (data) => {
-        if (data.draftClientId) {
-            clientIdInput.value = data.draftClientId;
+    chrome.storage.local.get(['draftClientId'], (data) => {
+        if (!shouldApplyInitialOAuthDraft({
+            isDirty,
+            clientId: clientIdInput.value,
+            clientSecret: clientSecretInput.value,
+        })) {
+            isDirty = true;
+            updateOAuthButtons();
+            return;
         }
-        if (data.draftClientSecret) {
-            clientSecretInput.value = data.draftClientSecret;
+
+        const draftResolution = resolveInitialOAuthDraft({
+            hasStoredConfig,
+            draftClientId: data.draftClientId,
+        });
+
+        if (draftResolution.shouldClearDraftClientId) {
+            chrome.storage.local.remove('draftClientId');
         }
-        if (data.draftClientId && data.draftClientSecret) {
-            signInBtn.disabled = false;
+
+        if (draftResolution.clientId) {
+            clientIdInput.value = draftResolution.clientId;
         }
+
+        isDirty = draftResolution.isDirty;
+        updateOAuthButtons();
     });
 
     // Auto-save Client ID as user types
     clientIdInput.addEventListener('input', () => {
         chrome.storage.local.set({ draftClientId: clientIdInput.value });
-        if (clientIdInput.value && clientSecretInput.value) {
-            signInBtn.disabled = false;
-        }
+        markDirty();
     });
 
     // Auto-save Client Secret as user types
     clientSecretInput.addEventListener('input', () => {
-        chrome.storage.local.set({ draftClientSecret: clientSecretInput.value });
-        if (clientIdInput.value && clientSecretInput.value) {
-            signInBtn.disabled = false;
-        }
+        chrome.storage.local.remove('draftClientSecret');
+        markDirty();
     });
 
     // Copy URL to clipboard
@@ -173,58 +313,75 @@ function showLoginRequired(configured: boolean): void {
     });
 
     // Open in separate window
-    openWindowBtn.addEventListener('click', () => {
-        chrome.windows.create({
-            url: chrome.runtime.getURL('popup/popup.html'),
-            type: 'popup',
-            width: 400,
-            height: 650,
-            focused: true
-        });
-        window.close();
+    openWindowBtn.addEventListener('click', async () => {
+        openWindowBtn.disabled = true;
+        try {
+            if (await openOrFocusSetupWindow()) {
+                window.close();
+                return;
+            }
+            setConfigStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
+        } catch (_error) {
+            setConfigStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
+        } finally {
+            openWindowBtn.disabled = false;
+        }
     });
 
-    if (configured) {
-        signInBtn.disabled = false;
-    }
+    updateOAuthButtons();
+
+    discardChangesBtn?.addEventListener('click', async () => {
+        clientIdInput.value = '';
+        clientSecretInput.value = '';
+        isDirty = false;
+        await chrome.storage.local.remove(['draftClientId', 'draftClientSecret']);
+        setConfigStatus(hasStoredConfig
+            ? 'Cambios descartados. Podés usar la configuración guardada.'
+            : 'Cambios descartados. Ingresá ambos campos para guardar una configuración nueva.', '#00c853');
+        updateOAuthButtons();
+    });
 
     // Save config handler
     saveConfigBtn.addEventListener('click', async () => {
-        const clientId = clientIdInput.value.trim();
-        const clientSecret = clientSecretInput.value.trim();
-
-        if (!clientId || !clientSecret) {
-            alert('Please enter both Client ID and Client Secret');
-            return;
+        try {
+            await saveCurrentOAuthConfig();
+        } catch (error) {
+            setConfigStatus('Ingresá el ID de cliente (Client ID) y el Secreto de cliente (Client Secret).', '#ff9800');
         }
-
-        await sendMessage({
-            action: 'saveOAuthConfig',
-            data: { clientId, clientSecret }
-        });
-
-        signInBtn.disabled = false;
-        saveConfigBtn.textContent = 'Configuration Saved ✓';
-        saveConfigBtn.style.background = 'rgba(0, 200, 83, 0.2)';
-        saveConfigBtn.style.borderColor = '#00c853';
     });
 
     // Sign in handler
     signInBtn.addEventListener('click', async () => {
+        const state = currentState();
+        if (state.isBlockedByIncompleteChanges) {
+            setConfigStatus('Completá ambos campos OAuth o descartá los cambios antes de iniciar sesión.', '#ff9800');
+            updateOAuthButtons();
+            return;
+        }
+
+        const originalSignInLabel = signInBtn.textContent || 'Iniciar sesión con ClickUp';
         signInBtn.disabled = true;
-        signInBtn.textContent = 'Signing in...';
+        signInBtn.textContent = 'Iniciando sesión…';
 
         try {
+            if (state.shouldSaveBeforeSignIn) {
+                await saveCurrentOAuthConfig();
+                signInBtn.disabled = true;
+                signInBtn.textContent = 'Iniciando sesión…';
+            }
+
             const result = await sendMessage<{ success: boolean; user?: any }>({ action: 'authenticate' });
 
             if (result.success) {
                 loginRequired.classList.add('hidden');
                 showLoggedIn({ authenticated: true, configured: true, user: result.user });
+            } else {
+                throw new Error('AUTHENTICATION_FAILED');
             }
         } catch (error: any) {
-            signInBtn.disabled = false;
-            signInBtn.textContent = 'Sign in with ClickUp';
-            alert('Sign in failed: ' + error.message);
+            signInBtn.textContent = originalSignInLabel;
+            updateOAuthButtons();
+            setConfigStatus('No se pudo iniciar sesión. Intentá de nuevo.', '#ff5252');
         }
     });
 }
@@ -244,10 +401,11 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // Set user info
     if (status.user) {
         const user = (status.user as any).user || status.user;
-        userName.textContent = user.username || 'User';
+        userName.textContent = user.username || 'Usuario';
         userEmail.textContent = user.email || '';
-        if (user.profilePicture) {
-            userAvatar.src = user.profilePicture;
+        const avatarUrl = safeAvatarUrl(user.profilePicture);
+        if (avatarUrl) {
+            userAvatar.src = avatarUrl;
         } else {
             userAvatar.style.display = 'none';
         }
@@ -258,6 +416,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
     // DBA-H1 & DM-H1: Initialize data management buttons
     initDataManagement();
+
+    let timeTrackingRefreshInFlight: Promise<void> | null = null;
+    let recentRunningStart: number | null = null;
 
     // ========== TASKS TAB HANDLERS ==========
 
@@ -275,7 +436,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             return;
         }
 
-        searchResults.innerHTML = '<p class="hint">Searching...</p>';
+        searchResults.innerHTML = '<p class="hint">Buscando…</p>';
         searchTimeout = setTimeout(async () => {
             try {
                 const result = await sendMessage<{ tasks: any[] }>({
@@ -285,22 +446,22 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
                 if (result?.tasks?.length > 0) {
                     searchResults.innerHTML = result.tasks.slice(0, 5).map(task => `
-                        <div class="search-result-item" data-url="${task.url}">
-                            <span class="task-name">${task.name}</span>
-                            <span class="task-id">${task.id}</span>
+                        <div class="search-result-item" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
+                            <span class="task-name">${escapeHTML(task.name || '')}</span>
+                            <span class="task-id">${escapeHTML(task.id || '')}</span>
                         </div>
                     `).join('');
 
-                    searchResults.querySelectorAll('.search-result').forEach(el => {
+                    searchResults.querySelectorAll('.search-result-item').forEach(el => {
                         el.addEventListener('click', () => {
-                            window.open((el as HTMLElement).dataset.url, '_blank');
+                            window.open(safeClickUpUrl((el as HTMLElement).dataset.url || ''), '_blank', 'noopener,noreferrer');
                         });
                     });
                 } else {
-                    searchResults.innerHTML = '<p class="hint">No tasks found</p>';
+                    searchResults.innerHTML = '<p class="hint">No se encontraron tareas</p>';
                 }
             } catch (e) {
-                searchResults.innerHTML = '<p class="hint">Search error</p>';
+                searchResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
         }, 300);
     });
@@ -333,12 +494,13 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             return;
         }
 
-        listSearchResults.innerHTML = '<p class="hint">Searching...</p>';
+        listSearchResults.innerHTML = '<p class="hint">Buscando…</p>';
         listSearchTimeout = setTimeout(async () => {
             try {
-                // Get cached lists from storage
-                const storage = await chrome.storage.local.get(['hierarchyCache']);
-                const lists = storage.hierarchyCache?.lists || [];
+                const storage = await chrome.storage.local.get(['hierarchyCache', 'preferredTeamId']);
+                const teamId = storage.preferredTeamId || await getTeamId();
+                const teamCache = getTeamHierarchyCache(storage.hierarchyCache, teamId);
+                const lists = flattenHierarchySpaces(teamCache?.data?.spaces);
 
                 const filtered = lists.filter((list: any) =>
                     list.name.toLowerCase().includes(query) ||
@@ -347,9 +509,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
                 if (filtered.length > 0) {
                     listSearchResults.innerHTML = filtered.map((list: any) => `
-                        <div class="search-result-item" data-id="${list.id}" data-name="${list.name}">
-                            <span class="task-name">${list.name}</span>
-                            <span class="task-id" style="font-size: 10px; color: #888;">${list.path || list.spaceName}</span>
+                        <div class="search-result-item" data-id="${escapeHTML(list.id || '')}" data-name="${escapeHTML(list.name || '')}">
+                            <span class="task-name">${escapeHTML(list.name || '')}</span>
+                            <span class="task-id" style="font-size: 10px; color: #888;">${escapeHTML(list.path || list.spaceName || '')}</span>
                         </div>
                     `).join('');
 
@@ -369,11 +531,11 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                         });
                     });
                 } else {
-                    listSearchResults.innerHTML = '<p class="hint">No lists found</p>';
+                    listSearchResults.innerHTML = '<p class="hint">No se encontraron listas</p>';
                 }
             } catch (e) {
-                console.error('List search error:', e);
-                listSearchResults.innerHTML = '<p class="hint">Search error</p>';
+                console.error('LIST_SEARCH_ERROR');
+                listSearchResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
         }, 300);
     });
@@ -381,7 +543,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // Auto-refresh search when hierarchy is loaded in background
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local' && changes.hierarchyCache) {
-            console.log('[Popup] Hierarchy updated, refreshing search...');
+            console.log('[Popup] HIERARCHY_UPDATED');
             // If user has typed something, re-trigger search
             if (listSearch && listSearch.value.trim().length >= 1) {
                 listSearch.dispatchEvent(new Event('input'));
@@ -396,12 +558,13 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const descInput = document.getElementById('newTaskDescription') as HTMLTextAreaElement;
 
         if (!selectedListId) {
-            alert('Please select a destination list');
+            createTaskBtn.textContent = 'Seleccioná una lista';
+            setTimeout(() => { createTaskBtn.textContent = 'Crear tarea'; }, 1600);
             return;
         }
 
         createTaskBtn.disabled = true;
-        createTaskBtn.textContent = 'Creating...';
+        createTaskBtn.textContent = 'Creando…';
 
         try {
             await sendMessage({
@@ -414,20 +577,21 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             });
 
             // Success feedback
-            createTaskBtn.textContent = '✅ Created!';
+            createTaskBtn.textContent = '✅ Creada';
             setTimeout(() => {
                 quickCreateForm?.classList.add('hidden');
                 nameInput.value = '';
                 descInput.value = '';
                 listSearch.value = '';
                 selectedListId = null;
-                createTaskBtn.textContent = 'Create Task';
+                createTaskBtn.textContent = 'Crear tarea';
             }, 1000);
 
         } catch (e: any) {
-            alert('Error creating task: ' + e.message);
+            console.error('QUICK_CREATE_TASK_ERROR');
             createTaskBtn.disabled = false;
-            createTaskBtn.textContent = 'Create Task';
+            createTaskBtn.textContent = 'No se pudo crear';
+            setTimeout(() => { createTaskBtn.textContent = 'Crear tarea'; }, 1800);
         }
     });
 
@@ -461,7 +625,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             if (tabs[0]?.id && tabs[0].url?.includes('mail.google.com')) {
                 chrome.tabs.sendMessage(tabs[0].id, { action: 'openTaskModal' }, (response) => {
                     if (chrome.runtime.lastError || !response) {
-                        console.log('Failed to open in Gmail, opening standalone window');
+                        console.log('OPEN_MODAL_FALLBACK');
                         openStandalone();
                     } else {
                         setTimeout(() => window.close(), 100);
@@ -471,7 +635,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 openStandalone();
             }
         } catch (e) {
-            console.error('Error opening modal:', e);
+            console.error('OPEN_MODAL_ERROR');
             // Fallback
             chrome.windows.create({
                 url: 'task-modal.html',
@@ -500,7 +664,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             return;
         }
 
-        trackResults.innerHTML = '<p class="hint">Searching...</p>';
+        trackResults.innerHTML = '<p class="hint">Buscando…</p>';
         trackSearchTimeout = setTimeout(async () => {
             try {
                 const result = await sendMessage<{ tasks: any[] }>({
@@ -510,8 +674,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
                 if (result?.tasks?.length > 0) {
                     trackResults.innerHTML = result.tasks.slice(0, 5).map(task => `
-                        <div class="search-result-item" data-id="${task.id}" data-name="${task.name}">
-                            <span class="task-name">${task.name}</span>
+                        <div class="search-result-item" data-id="${escapeHTML(task.id || '')}" data-name="${escapeHTML(task.name || '')}">
+                            <span class="task-name">${escapeHTML(task.name || '')}</span>
                         </div>
                     `).join('');
 
@@ -528,10 +692,10 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                         });
                     });
                 } else {
-                    trackResults.innerHTML = '<p class="hint">No tasks found</p>';
+                    trackResults.innerHTML = '<p class="hint">No se encontraron tareas</p>';
                 }
             } catch (e) {
-                trackResults.innerHTML = '<p class="hint">Search error</p>';
+                trackResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
         }, 300);
     });
@@ -543,12 +707,13 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         try {
             const teamId = await getTeamId();
             if (!teamId) {
-                alert('No workspace selected. Please check Config.');
+                startTimerBtn.textContent = 'Elegí un espacio en Configuración';
+                setTimeout(() => { startTimerBtn.textContent = '▶️ Iniciar temporizador'; }, 1800);
                 return;
             }
 
             startTimerBtn.disabled = true;
-            startTimerBtn.textContent = '⏳ Starting...';
+            startTimerBtn.textContent = '⏳ Iniciando…';
 
             await sendMessage({
                 action: 'startTimer',
@@ -558,9 +723,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 }
             });
 
-            startTimerBtn.textContent = '✅ Started!';
+            startTimerBtn.textContent = '✅ Iniciado';
             setTimeout(() => {
-                startTimerBtn.textContent = '▶️ Start Timer';
+                startTimerBtn.textContent = '▶️ Iniciar temporizador';
                 selectedTrackTask = null;
                 trackSearch.value = '';
             }, 2000);
@@ -569,7 +734,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             startTimerBtn.disabled = false;
         } finally {
             // Refresh timer display to show running timer
-            await loadRunningTimer();
+            await refreshTimeTracking();
         }
     });
 
@@ -580,10 +745,10 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const teamId = await getTeamId();
             if (teamId) {
                 await sendMessage({ action: 'stopTimer', data: { teamId } });
-                await loadRunningTimer();
+                await refreshTimeTracking();
             }
         } catch (e) {
-            console.error('Stop timer error:', e);
+            console.error('STOP_TIMER_ERROR');
         }
     });
 
@@ -622,7 +787,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             return;
         }
 
-        manualResults.innerHTML = '<p class="hint">Searching...</p>';
+        manualResults.innerHTML = '<p class="hint">Buscando…</p>';
         manualSearchTimeout = setTimeout(async () => {
             try {
                 const result = await sendMessage<{ tasks: any[] }>({
@@ -632,8 +797,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
                 if (result?.tasks?.length > 0) {
                     manualResults.innerHTML = result.tasks.slice(0, 5).map(task => `
-                        <div class="search-result-item" data-id="${task.id}" data-name="${task.name}">
-                            <span class="task-name">${task.name}</span>
+                        <div class="search-result-item" data-id="${escapeHTML(task.id || '')}" data-name="${escapeHTML(task.name || '')}">
+                            <span class="task-name">${escapeHTML(task.name || '')}</span>
                         </div>
                     `).join('');
 
@@ -650,10 +815,10 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                         });
                     });
                 } else {
-                    manualResults.innerHTML = '<p class="hint">No tasks found</p>';
+                    manualResults.innerHTML = '<p class="hint">No se encontraron tareas</p>';
                 }
             } catch (e) {
-                manualResults.innerHTML = '<p class="hint">Search error</p>';
+                manualResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
         }, 300);
     });
@@ -671,16 +836,17 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
         const duration = parseDuration(durationInput.value);
         if (duration <= 0) {
-            alert('Invalid duration format. Use: 1h, 30m, 1h30m, or 1:30');
+            addManualTimeBtn.textContent = 'Formato inválido';
+            setTimeout(() => { addManualTimeBtn.textContent = 'Agregar tiempo'; }, 1800);
             return;
         }
 
         try {
             const teamId = await getTeamId();
-            if (!teamId) throw new Error('No team ID');
+            if (!teamId) throw new Error('NO_TEAM_ID');
 
             addManualTimeBtn.disabled = true;
-            addManualTimeBtn.textContent = '⏳ Adding...';
+            addManualTimeBtn.textContent = '⏳ Agregando…';
 
             await sendMessage({
                 action: 'addTimeEntry',
@@ -691,13 +857,14 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 }
             });
 
-            addManualTimeBtn.textContent = '✅ Added!';
+            await refreshTimeTracking();
+
+            addManualTimeBtn.textContent = '✅ Agregado';
             setTimeout(() => {
-                addManualTimeBtn.textContent = 'Add Time Entry';
+                addManualTimeBtn.textContent = 'Agregar tiempo';
                 selectedManualTask = null;
                 manualSearch.value = '';
                 durationInput.value = '';
-                loadTimeHistory();
             }, 2000);
         } catch (e) {
             addManualTimeBtn.textContent = '❌ Error';
@@ -707,7 +874,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
 
     // ========== RECENT ENTRIES ==========
-    async function loadTimeHistory() {
+    async function loadTimeHistory(runningTimer: TimeEntry | null): Promise<void> {
         const container = document.getElementById('timeHistory');
         if (!container) return;
 
@@ -715,37 +882,47 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const teamId = await getTeamId();
 
             if (!teamId) {
-                const storage = await chrome.storage.local.get(null); // Get everything for debug
-                console.warn('[Popup] No teamId found. Full storage:', storage);
-                // Force JSON stringify for user copy-paste
-                const storageStr = JSON.stringify(storage, null, 2);
-                container.innerHTML = `<p class="hint">Select a workspace in Config first.<br><small style="opacity:0.7">Debug: ${storageStr.slice(0, 100)}...</small></p>`;
-                console.log('[Popup] FULL STORAGE JSON:', storageStr);
+                console.warn('[Popup] NO_TEAM_ID');
+                container.innerHTML = '<p class="hint">Seleccioná primero un espacio de trabajo en Configuración.</p>';
                 return;
             }
 
-            // BUG FIX: Request entries only for today
-            const startOfToday = new Date();
-            startOfToday.setHours(0, 0, 0, 0);
-
-            const result = await sendMessage<any[]>({
+            const result = await sendMessage<TimeEntry[]>({
                 action: 'getTimeEntries',
-                data: { teamId, start_date: startOfToday.getTime() }
+                data: { teamId }
             });
+            const entries = prepareRecentTimeEntries(result || [], runningTimer, 10);
+            recentRunningStart = runningTimer ? toTimeEntryTimestamp(runningTimer.start) : null;
 
-            if (result?.length > 0) {
-                container.innerHTML = result.slice(0, 10).map(entry => `
-                    <div class="time-entry-item">
-                        <span class="entry-task">${entry.task?.name || 'Unknown Task'}</span>
-                        <span class="entry-duration">${formatDuration(entry.duration)}</span>
+            if (entries.length > 0) {
+                container.innerHTML = entries.map(entry => {
+                    const isRunning = isCurrentTimeEntry(entry, runningTimer);
+                    const duration = getTimeEntryDurationMs(entry, runningTimer);
+                    const taskUrl = getTimeEntryTaskUrl(entry);
+                    const taskName = escapeHTML(entry.task?.name || 'Tarea sin nombre');
+                    const taskLabel = taskUrl
+                        ? `<a class="entry-task-link" href="${escapeHTML(taskUrl)}" target="_blank" rel="noopener noreferrer" title="Abrir tarea en ClickUp">${taskName}</a>`
+                        : taskName;
+                    return `
+                    <div class="time-entry-item${isRunning ? ' time-entry-running' : ''}">
+                        <span class="entry-task">${taskLabel}${isRunning ? ' <span class="entry-state">En curso</span>' : ''}</span>
+                        <span class="entry-duration"${isRunning ? ' id="recentRunningDuration"' : ''}>${formatDuration(duration)}</span>
                     </div>
-                `).join('');
+                `;
+                }).join('');
+
+                container.querySelectorAll<HTMLAnchorElement>('.entry-task-link').forEach(link => {
+                    link.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        window.open(safeClickUpUrl(link.href), '_blank', 'noopener,noreferrer');
+                    });
+                });
             } else {
-                container.innerHTML = '<p class="hint">No recent entries</p>';
+                container.innerHTML = '<p class="hint">No hay entradas recientes</p>';
             }
         } catch (e) {
-            console.error('[Popup] Error loading history:', e);
-            container.innerHTML = '<p class="hint">Could not load entries</p>';
+            console.error('[Popup] LOAD_HISTORY_ERROR');
+            container.innerHTML = '<p class="hint">No se pudieron cargar las entradas</p>';
         }
     }
 
@@ -778,8 +955,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // loadTimeHistory();
 
     // ========== LOAD RUNNING TIMER ==========
-    async function loadRunningTimer() {
-        console.log('[Timer] loadRunningTimer called at', new Date().toISOString());
+    async function loadRunningTimer(): Promise<TimeEntry | null> {
+        console.log('[Timer] LOAD_RUNNING_TIMER');
         // console.trace('[Timer] Caller Trace');
 
         const runningTimerEl = document.getElementById('runningTimer');
@@ -787,46 +964,51 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const timerTaskName = document.getElementById('timerTaskName');
         const timerDisplay = document.getElementById('timerDisplay');
 
-        console.log('[Timer] Checking elements...', { runningTimerEl: !!runningTimerEl, noTimerEl: !!noTimerEl });
+        console.log('[Timer] CHECK_ELEMENTS');
 
-        if (!runningTimerEl || !noTimerEl) return;
+        if (!runningTimerEl || !noTimerEl) return null;
 
         try {
             const teamId = await getTeamId();
 
             if (!teamId) {
-                console.log('[Timer] No teamId available (loadRunningTimer)');
-                return;
+                console.log('[Timer] NO_TEAM_ID');
+                return null;
             }
 
-            console.log('[Timer] Fetching running timer for team:', teamId);
+            console.log('[Timer] FETCH_RUNNING_TIMER');
 
             // API returns TimeEntry or null directly
-            const timer = await sendMessage<any>({
+            const timer = await sendMessage<TimeEntry | null>({
                 action: 'getRunningTimer',
                 data: { teamId }
             });
 
-            console.log('[Timer] API result:', JSON.stringify(timer));
+            console.log('[Timer] API_RESULT_RECEIVED');
 
             // Check for timer with start timestamp (could be 'start' or 'at' field)
-            const startTime = timer?.start || timer?.at;
+            const startTime = timer?.start || (timer as any)?.at;
             if (timer && startTime) {
+                const normalizedTimer = { ...timer, start: startTime } as TimeEntry;
                 noTimerEl.classList.add('hidden');
                 runningTimerEl.classList.remove('hidden');
 
                 if (timerTaskName) {
-                    timerTaskName.textContent = timer.task?.name || 'Running...';
+                    timerTaskName.textContent = timer.task?.name || 'En curso…';
                 }
 
-                // Start updating display - startTime is a timestamp string
-                updateTimerDisplay(parseInt(startTime));
+                updateTimerDisplay(toTimeEntryTimestamp(startTime));
+                return normalizedTimer;
             } else {
                 runningTimerEl.classList.add('hidden');
                 noTimerEl.classList.remove('hidden');
+                recentRunningStart = null;
+                if (timerInterval) clearInterval(timerInterval);
+                return null;
             }
         } catch (e) {
-            console.error('[Timer] Error loading running timer:', e);
+            console.error('[Timer] LOAD_RUNNING_TIMER_ERROR');
+            return null;
         }
     }
 
@@ -844,20 +1026,52 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const seconds = Math.floor((elapsed % (1000 * 60)) / 1000);
 
             timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const recentDuration = document.getElementById('recentRunningDuration');
+            if (recentDuration && recentRunningStart) {
+                recentDuration.textContent = formatDuration(Date.now() - recentRunningStart);
+            }
         };
 
         update();
         timerInterval = setInterval(update, 1000);
     }
 
-    // Load teams FIRST to ensure teamId is available
-    console.log('[Popup] Calling loadTeams... at', new Date().toISOString());
-    await loadTeams();
-    console.log('[Popup] loadTeams finished at', new Date().toISOString());
+    async function refreshTimeTracking(): Promise<void> {
+        if (timeTrackingRefreshInFlight) return timeTrackingRefreshInFlight;
 
-    // THEN load timer and history
-    loadRunningTimer();
-    loadTimeHistory();
+        const refresh = (async () => {
+            const runningTimer = await loadRunningTimer();
+            await loadTimeHistory(runningTimer);
+        })();
+        timeTrackingRefreshInFlight = refresh;
+
+        try {
+            await refresh;
+        } finally {
+            if (timeTrackingRefreshInFlight === refresh) timeTrackingRefreshInFlight = null;
+        }
+    }
+
+    // Load teams FIRST to ensure teamId is available
+    console.log('[Popup] LOAD_TEAMS_INIT');
+    await loadTeams();
+    console.log('[Popup] LOAD_TEAMS_DONE');
+
+    // THEN load timer and history as one coherent snapshot.
+    await refreshTimeTracking();
+
+    const timeTrackingPoll = window.setInterval(() => {
+        if (document.visibilityState === 'visible') void refreshTimeTracking();
+    }, 30_000);
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void refreshTimeTracking();
+    });
+
+    window.addEventListener('pagehide', () => {
+        clearInterval(timeTrackingPoll);
+        if (timerInterval) clearInterval(timerInterval);
+    }, { once: true });
 
     // Load cache status (last sync time)
     await loadCacheStatus();
@@ -893,7 +1107,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const toggleLabel = customFieldToggle.closest('.toggle-row')?.querySelector('.toggle-label');
             if (toggleLabel) {
                 const originalText = toggleLabel.textContent || '';
-                toggleLabel.innerHTML = `${originalText} <span style="color: #00c853; font-weight: bold;">✓ Saved</span>`;
+                toggleLabel.innerHTML = `${originalText} <span style="color: #00c853; font-weight: bold;">✓ Guardado</span>`;
                 setTimeout(() => {
                     toggleLabel.textContent = originalText;
                 }, 2000);
@@ -909,9 +1123,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const name = customFieldNameInput.value.trim();
         if (name) {
             chrome.storage.local.set({ threadIdField: name }, () => {
-                saveCustomFieldBtn.textContent = 'Saved ✓';
+                saveCustomFieldBtn.textContent = 'Guardado ✓';
                 setTimeout(() => {
-                    saveCustomFieldBtn.textContent = 'Save Field Name';
+                    saveCustomFieldBtn.textContent = 'Guardar nombre del campo';
                 }, 2000);
             });
         }
@@ -929,8 +1143,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const result = document.getElementById('testResult') as HTMLElement;
 
         btn.disabled = true;
-        btn.textContent = '⏳ Testing...';
-        result.textContent = 'Corrupting token and testing refresh...';
+        btn.textContent = '⏳ Probando…';
+        result.textContent = 'Probando renovación del token…';
         result.style.color = '#666';
 
         try {
@@ -940,16 +1154,17 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 result.textContent = '✅ ' + testResult.message;
                 result.style.color = '#00c853';
             } else {
-                result.textContent = '❌ ' + (testResult.error || 'Test failed');
+                result.textContent = '❌ La prueba falló';
                 result.style.color = '#ff5252';
             }
         } catch (error: any) {
-            result.textContent = '❌ Error: ' + error.message;
+            console.error('TOKEN_REFRESH_TEST_ERROR');
+            result.textContent = '❌ No se pudo completar la prueba';
             result.style.color = '#ff5252';
         }
 
         btn.disabled = false;
-        btn.textContent = '🧪 Test Token Refresh';
+        btn.textContent = '🧪 Probar renovación de token';
     });
 
     // Sync Lists button handler
@@ -960,9 +1175,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const spinner = btn.querySelector('.spinner') as HTMLElement;
 
         btn.disabled = true;
-        btnText.textContent = 'Syncing...';
+        btnText.textContent = 'Sincronizando…';
         spinner?.classList.remove('hidden');
-        status.textContent = 'Loading all spaces and lists...';
+        status.textContent = 'Cargando espacios y listas…';
         status.style.color = '#666';
 
         try {
@@ -973,19 +1188,20 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
             if (result.success) {
-                status.textContent = `✅ Synced ${result.listCount} lists in ${elapsed}s`;
+                status.textContent = `✅ ${result.listCount} listas sincronizadas en ${elapsed}s`;
                 status.style.color = '#00c853';
             } else {
-                status.textContent = '❌ Sync failed';
+                status.textContent = '❌ No se pudo sincronizar';
                 status.style.color = '#ff5252';
             }
         } catch (error: any) {
-            status.textContent = '❌ Error: ' + error.message;
+            console.error('SYNC_LISTS_ERROR');
+            status.textContent = '❌ No se pudo sincronizar';
             status.style.color = '#ff5252';
         }
 
         btn.disabled = false;
-        btnText.textContent = '🔄 Sync Lists';
+        btnText.textContent = '🔄 Sincronizar listas';
         spinner?.classList.add('hidden');
     });
 
@@ -1003,9 +1219,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         const days = parseInt(daysSelect.value);
 
         btn.disabled = true;
-        btnText.textContent = 'Syncing...';
+        btnText.textContent = 'Sincronizando…';
         spinner?.classList.remove('hidden');
-        status.textContent = `Scanning tasks from last ${days} days...`;
+        status.textContent = `Escaneando tareas de los últimos ${days} días…`;
         status.style.color = '#666';
 
         try {
@@ -1017,19 +1233,20 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
             if (result.success) {
-                status.textContent = `✅ Found ${result.foundCount} linked tasks in ${elapsed}s`;
+                status.textContent = `✅ ${result.foundCount} tareas vinculadas encontradas en ${elapsed}s`;
                 status.style.color = '#00c853';
             } else {
-                status.textContent = '❌ Sync failed';
+                status.textContent = '❌ No se pudo sincronizar';
                 status.style.color = '#ff5252';
             }
         } catch (error: any) {
-            status.textContent = '❌ Error: ' + error.message;
+            console.error('SYNC_EMAIL_TASKS_ERROR');
+            status.textContent = '❌ No se pudo sincronizar';
             status.style.color = '#ff5252';
         }
 
         btn.disabled = false;
-        btnText.textContent = '🔄 Sync';
+        btnText.textContent = '🔄 Sincronizar';
         spinner?.classList.add('hidden');
     });
 }
@@ -1043,9 +1260,9 @@ async function loadTeams(): Promise<void> {
     const teamSelect = document.getElementById('teamSelect') as HTMLSelectElement;
 
     try {
-        console.log('[Popup] Loading teams...');
+        console.log('[Popup] LOAD_TEAMS');
         const teams = await sendMessage<{ teams: ClickUpTeam[] }>({ action: 'getTeams' });
-        console.log('[Popup] Teams loaded:', teams);
+        console.log('[Popup] WORKSPACES_LOADED_COUNT', teams?.teams?.length || 0);
 
         // Cache teams to storage to ensure getTeamId can find them later
         if (teams && teams.teams && teams.teams.length > 0) {
@@ -1053,8 +1270,8 @@ async function loadTeams(): Promise<void> {
         }
 
         if (!teams || !teams.teams || teams.teams.length === 0) {
-            console.error('[Popup] No teams found');
-            teamSelect.innerHTML = '<option value="">No workspaces found</option>';
+            console.error('[Popup] NO_TEAMS_FOUND');
+            teamSelect.innerHTML = '<option value="">No se encontraron espacios</option>';
             return;
         }
 
@@ -1073,7 +1290,7 @@ async function loadTeams(): Promise<void> {
         // Auto-select if only one team exists and no preference saved (or preference matches)
         if (teams.teams.length === 1 && !initialTeamId) {
             initialTeamId = teams.teams[0].id;
-            console.log('[Popup] Single workspace detected, auto-selecting:', initialTeamId);
+            console.log('[Popup] SINGLE_WORKSPACE_AUTO_SELECT');
             await sendMessage({ action: 'savePreferredTeam', data: { teamId: initialTeamId } });
         }
 
@@ -1098,8 +1315,8 @@ async function loadTeams(): Promise<void> {
         });
 
     } catch (error) {
-        console.error('[Popup] Load teams error:', error);
-        teamSelect.innerHTML = '<option value="">Error loading workspaces</option>';
+        console.error('[Popup] LOAD_TEAMS_ERROR');
+        teamSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
     }
 }
 
@@ -1107,7 +1324,7 @@ async function loadSpaces(teamId: string, selectSpaceId?: string, selectListId?:
     const spaceSelect = document.getElementById('spaceSelect') as HTMLSelectElement;
     const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
 
-    spaceSelect.innerHTML = '<option value="">Loading...</option>';
+    spaceSelect.innerHTML = '<option value="">Cargando…</option>';
     spaceSelect.classList.remove('hidden');
     listSelect.classList.add('hidden');
 
@@ -1117,7 +1334,7 @@ async function loadSpaces(teamId: string, selectSpaceId?: string, selectListId?:
             data: { teamId }
         });
 
-        spaceSelect.innerHTML = '<option value="">Select Space...</option>';
+        spaceSelect.innerHTML = '<option value="">Seleccionar espacio…</option>';
         spaces.spaces.forEach(space => {
             const option = document.createElement('option');
             option.value = space.id;
@@ -1130,15 +1347,15 @@ async function loadSpaces(teamId: string, selectSpaceId?: string, selectListId?:
             await loadLists(selectSpaceId, selectListId);
         }
     } catch (error) {
-        console.error('[Popup] Load spaces error:', error);
-        spaceSelect.innerHTML = '<option value="">Error loading spaces</option>';
+        console.error('[Popup] LOAD_SPACES_ERROR');
+        spaceSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
     }
 }
 
 async function loadLists(spaceId: string, selectListId?: string): Promise<void> {
     const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
 
-    listSelect.innerHTML = '<option value="">Loading...</option>';
+    listSelect.innerHTML = '<option value="">Cargando…</option>';
     listSelect.classList.remove('hidden');
 
     try {
@@ -1147,7 +1364,7 @@ async function loadLists(spaceId: string, selectListId?: string): Promise<void> 
             data: { spaceId }
         });
 
-        listSelect.innerHTML = '<option value="">Select List...</option>';
+        listSelect.innerHTML = '<option value="">Seleccionar lista…</option>';
         lists.lists.forEach(list => {
             const option = document.createElement('option');
             option.value = list.id;
@@ -1160,15 +1377,15 @@ async function loadLists(spaceId: string, selectListId?: string): Promise<void> 
             listSelect.style.borderColor = '#00c853';
         }
     } catch (error) {
-        console.error('[Popup] Load lists error:', error);
-        listSelect.innerHTML = '<option value="">Error loading lists</option>';
+        console.error('[Popup] LOAD_LISTS_ERROR');
+        listSelect.innerHTML = '<option value="">No se pudieron cargar las listas</option>';
     }
 }
 
 function showSavedIndicator(): void {
     const indicator = document.createElement('div');
     indicator.className = 'saved-indicator';
-    indicator.textContent = '✓ Saved';
+    indicator.textContent = '✓ Guardado';
     indicator.style.cssText = 'color:#00c853;font-size:12px;margin-top:5px;text-align:center;font-weight:bold;display:block;';
 
     const existing = document.querySelector('.saved-indicator');
@@ -1203,7 +1420,7 @@ async function getTeamId(): Promise<string | null> {
 
         return null;
     } catch (e) {
-        console.error('[Popup] Error getting teamId:', e);
+        console.error('[Popup] GET_TEAM_ID_ERROR');
         return null;
     }
 }
@@ -1219,7 +1436,7 @@ async function loadCacheStatus(): Promise<void> {
     try {
         const teamId = await getTeamId();
         if (!teamId) {
-            status.textContent = '⚠️ Select workspace first';
+            status.textContent = '⚠️ Seleccioná primero un espacio de trabajo';
             status.style.color = '#ff9800';
             return;
         }
@@ -1238,13 +1455,13 @@ async function loadCacheStatus(): Promise<void> {
             let timeAgo = '';
             if (hours > 24) {
                 const days = Math.floor(hours / 24);
-                timeAgo = `${days} day${days > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${days} día${days > 1 ? 's' : ''}`;
             } else if (hours > 0) {
-                timeAgo = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${hours} hora${hours > 1 ? 's' : ''}`;
             } else if (minutes > 0) {
-                timeAgo = `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${minutes} min`;
             } else {
-                timeAgo = 'just now';
+                timeAgo = 'recién';
             }
 
             // Count lists from hierarchy: spaces → folders → lists + folderless lists
@@ -1258,14 +1475,14 @@ async function loadCacheStatus(): Promise<void> {
                 }
             }
 
-            status.textContent = `✅ ${listCount} lists synced ${timeAgo}`;
+            status.textContent = `✅ ${listCount} listas sincronizadas ${timeAgo}`;
             status.style.color = '#00c853';
         } else {
-            status.textContent = '⚠️ Not synced yet - click to sync';
+            status.textContent = '⚠️ Todavía no sincronizado; hacé clic para sincronizar';
             status.style.color = '#ff9800';
         }
     } catch (e) {
-        status.textContent = 'Pre-load lists for faster task creation';
+        status.textContent = 'Precargar listas para crear tareas más rápido';
     }
 }
 
@@ -1285,23 +1502,23 @@ async function loadEmailTasksSyncStatus(): Promise<void> {
             let timeAgo = '';
             if (hours > 24) {
                 const days = Math.floor(hours / 24);
-                timeAgo = `${days} day${days > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${days} día${days > 1 ? 's' : ''}`;
             } else if (hours > 0) {
-                timeAgo = `${hours} hour${hours > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${hours} hora${hours > 1 ? 's' : ''}`;
             } else if (minutes > 0) {
-                timeAgo = `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+                timeAgo = `hace ${minutes} min`;
             } else {
-                timeAgo = 'just now';
+                timeAgo = 'recién';
             }
 
-            status.textContent = `✅ ${syncData.foundCount || 0} links found ${timeAgo}`;
+            status.textContent = `✅ ${syncData.foundCount || 0} vínculos encontrados ${timeAgo}`;
             status.style.color = '#00c853';
         } else {
-            status.textContent = '⚠️ Not synced - for migrating to new PC';
+            status.textContent = '⚠️ No sincronizado; útil para migrar a otra PC';
             status.style.color = '#ff9800';
         }
     } catch (e) {
-        status.textContent = 'Sync tasks linked to emails';
+        status.textContent = 'Sincronizar tareas vinculadas a emails';
     }
 }
 
@@ -1317,17 +1534,16 @@ function initDataManagement(): void {
     if (exportBtn) {
         exportBtn.addEventListener('click', async () => {
             try {
-                // Get all stored data
-                const data = await chrome.storage.local.get(null);
-
-                // Filter out sensitive data
-                const exportData = {
-                    emailTaskMappings: data.emailTaskMappings || {},
-                    hierarchyCache: data.hierarchyCache || {},
-                    preferredTeamId: data.preferredTeamId,
-                    exportDate: new Date().toISOString(),
-                    version: '1.0'
-                };
+                const data = await chrome.storage.local.get([
+                    'emailTaskMappings',
+                    'emailTaskMappingsV2',
+                    'preferredTeamId',
+                    'threadIdField',
+                    'useCustomFieldForThreadId',
+                    'autoStartTimer',
+                    'autoStopTimer'
+                ]);
+                const exportData = await createSafeExportPayload(data, chrome.runtime.getManifest().version);
 
                 // Create download
                 const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -1337,14 +1553,15 @@ function initDataManagement(): void {
                 a.download = `clickup-gmail-backup-${new Date().toISOString().split('T')[0]}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
+                await chrome.storage.local.set({ [LAST_SAFE_BACKUP_KEY]: Date.now() });
 
                 if (dataStatus) {
-                    dataStatus.textContent = '✅ Data exported successfully';
+                    dataStatus.textContent = '✅ Datos exportados correctamente';
                     dataStatus.style.color = '#00c853';
                 }
             } catch (e) {
                 if (dataStatus) {
-                    dataStatus.textContent = '❌ Export failed: ' + (e instanceof Error ? e.message : String(e));
+                    dataStatus.textContent = '❌ No se pudo exportar. Intentá de nuevo.';
                     dataStatus.style.color = '#ff5252';
                 }
             }
@@ -1353,27 +1570,30 @@ function initDataManagement(): void {
 
     if (clearBtn) {
         clearBtn.addEventListener('click', async () => {
-            const confirmed = confirm('⚠️ This will delete all email-task mappings and cached data.\n\nYour OAuth credentials will NOT be deleted.\n\nContinue?');
-
-            if (confirmed) {
-                try {
-                    // Only remove non-auth data
-                    await chrome.storage.local.remove([
-                        'emailTaskMappings',
-                        'hierarchyCache',
-                        'cachedTeams',
-                        'cachedUser'
-                    ]);
-
+            try {
+                const backupState = await chrome.storage.local.get(LAST_SAFE_BACKUP_KEY);
+                const confirmation = prompt('Escribí BORRAR DATOS para eliminar vínculos locales y cachés sin autenticación. Exportá primero si no hiciste backup en los últimos 15 minutos.');
+                const decision = canClearLocalData(backupState[LAST_SAFE_BACKUP_KEY], Date.now(), confirmation || '');
+                if (!decision.ok) {
                     if (dataStatus) {
-                        dataStatus.textContent = '✅ Data cleared successfully';
-                        dataStatus.style.color = '#00c853';
+                        dataStatus.textContent = decision.code === 'BACKUP_REQUIRED'
+                            ? '⚠️ Exportá los datos primero. Se requiere un backup seguro reciente.'
+                            : '⚠️ Borrado cancelado. La confirmación no coincide.';
+                        dataStatus.style.color = '#ff9800';
                     }
-                } catch (e) {
-                    if (dataStatus) {
-                        dataStatus.textContent = '❌ Clear failed: ' + (e instanceof Error ? e.message : String(e));
-                        dataStatus.style.color = '#ff5252';
-                    }
+                    return;
+                }
+
+                await sendMessage({ action: 'clearLocalData' });
+
+                if (dataStatus) {
+                    dataStatus.textContent = '✅ Vínculos locales y caché sin autenticación borrados';
+                    dataStatus.style.color = '#00c853';
+                }
+            } catch (e) {
+                if (dataStatus) {
+                    dataStatus.textContent = '❌ No se pudo borrar. Intentá de nuevo.';
+                    dataStatus.style.color = '#ff5252';
                 }
             }
         });
