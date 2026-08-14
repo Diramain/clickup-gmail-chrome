@@ -1,10 +1,12 @@
 {
     "manifest_version": 3,
+    "minimum_chrome_version": "102",
     "name": "ClickUp Gmail Tracker",
-    "version": "1.2.0",
+    "version": "1.2.3",
     "description": "Crea tareas de ClickUp directamente desde emails de Gmail",
     "author": "Leandro Iramain",
     "homepage_url": "https://leandroiramain.com.ar",
+    "incognito": "not_allowed",
     "permissions": [
         "storage",
         "identity",
@@ -14,7 +16,8 @@
     "host_permissions": [
         "https://api.clickup.com/*",
         "https://mail.google.com/*",
-        "https://app.clickup.com/*"
+        "https://app.clickup.com/*",
+        "https://meet.google.com/*"
     ],
     "background": {
         "service_worker": "background.js",
@@ -44,6 +47,15 @@
                 "src/clickup-tracker.js"
             ],
             "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "https://meet.google.com/*"
+            ],
+            "js": [
+                "src/meet/meet-tracker.js"
+            ],
+            "run_at": "document_idle"
         }
     ],
     "action": {

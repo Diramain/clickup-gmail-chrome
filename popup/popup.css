@@ -89,6 +89,19 @@ body {
     margin-bottom: 8px;
 }
 
+.diagnostic-card {
+    border-color: rgba(73, 204, 249, 0.25);
+}
+
+.diagnostic-actions .btn {
+    flex: 1 1 0;
+}
+
+.diagnostic-card .help-text {
+    margin-top: 8px;
+    margin-bottom: 0;
+}
+
 .help-text {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
@@ -534,6 +547,109 @@ select option {
     margin-top: 8px;
 }
 
+/* Google Meet priority */
+.meet-card {
+    border-color: rgba(73, 204, 249, 0.22);
+}
+
+.meet-status {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.meet-status strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+.meet-status p {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.meet-label {
+    display: block;
+    margin: 12px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.meet-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.meet-actions .btn,
+.meet-chooser .btn {
+    width: 100%;
+}
+
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.checkbox-row input {
+    width: auto;
+    accent-color: #8930FD;
+}
+
+.meet-mappings {
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+}
+
+.meet-mappings summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: #49CCF9;
+}
+
+.meet-mapping-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.meet-mapping-name {
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.meet-mapping-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.meet-mapping-actions .btn {
+    width: auto;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
+.meet-task-result {
+    width: 100%;
+    color: inherit;
+    text-align: left;
+}
+
 /* ============================================================================
    Search Results
    ============================================================================ */
@@ -806,6 +922,9 @@ textarea::placeholder {
 }
 
 .toggle-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-right: 12px;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.8);
 }
@@ -813,14 +932,23 @@ textarea::placeholder {
 .toggle-switch {
     position: relative;
     display: inline-block;
+    flex: 0 0 48px;
     width: 48px;
+    min-width: 48px;
+    max-width: 48px;
     height: 26px;
 }
 
 .toggle-switch input {
+    position: absolute;
+    inset: 0;
     opacity: 0;
-    width: 0;
-    height: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    z-index: 1;
 }
 
 .toggle-slider {
@@ -857,7 +985,7 @@ textarea::placeholder {
     background-color: #fff;
 }
 
-.toggle-switch input:focus+.toggle-slider {
+.toggle-switch input:focus-visible+.toggle-slider {
     box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
 }
 

@@ -14,6 +14,7 @@ const RELEASE_FILES = [
     'src/gmail-adapter.js',
     'src/gmail-native.js',
     'src/logger.js',
+    'src/meet/meet-tracker.js',
     'styles/gmail-native.css',
     'styles/modal.css',
     'task-modal-entry.js',

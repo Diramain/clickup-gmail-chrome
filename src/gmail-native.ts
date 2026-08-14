@@ -8,9 +8,8 @@
 import type { ILogger } from './logger';
 import type { IGmailAdapter } from './gmail-adapter';
 import { TaskModal } from './modal';
-import { ensureThreadBar } from './gmail-render-utils';
+import { ensureThreadBar, reconcileLinkedTaskAnchors, reconcileThreadBarState } from './gmail-render-utils';
 import {
-    EMAIL_TASK_MAPPINGS_V2_KEY,
     applyValidationToTask,
     isConfirmedThreadId,
     readMappingsWithFallback,
@@ -19,7 +18,7 @@ import {
     type EmailTaskMappingV2,
     type LinkValidationResult,
 } from './link-hardening';
-import { escapeHTML, safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
+import { safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
@@ -101,11 +100,8 @@ function initialize(): void {
 
 async function loadLinkedTasks(): Promise<void> {
     try {
-        const result = await chrome.storage.local.get(['emailTaskMappings', EMAIL_TASK_MAPPINGS_V2_KEY]);
-        const allTasks = readMappingsWithFallback(
-            result[EMAIL_TASK_MAPPINGS_V2_KEY] || {},
-            result.emailTaskMappings || {}
-        ) as Record<string, TaskMapping[]>;
+        const result = await chrome.runtime.sendMessage({ action: 'getEmailTaskMappings' });
+        const allTasks = readMappingsWithFallback(result || {}, {}) as Record<string, TaskMapping[]>;
 
         const keys = Object.keys(allTasks);
         if (keys.length > 0) {
@@ -288,7 +284,6 @@ function createClickUpBar(threadId: string | null): HTMLElement {
 
     Logger.debug(` Injecting bar with tasks: ${isConfirmedThreadId(threadId) ? (linkedTasks[threadId] || []).length : 0}`);
 
-    const existingTasks = isConfirmedThreadId(threadId) ? linkedTasks[threadId] || [] : [];
     const pending = !isConfirmedThreadId(threadId);
 
     bar.innerHTML = `
@@ -300,9 +295,7 @@ function createClickUpBar(threadId: string | null): HTMLElement {
         </svg>
         <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Agregar a ClickUp'}</span>
       </button>
-      <div class="cu-linked-tasks">
-        ${getLinkedTasksHtml(existingTasks)}
-      </div>
+      <div class="cu-linked-tasks"></div>
     </div>
     `;
 
@@ -318,48 +311,13 @@ function createClickUpBar(threadId: string | null): HTMLElement {
 }
 
 function reconcileClickUpBar(bar: HTMLElement, threadId: string | null): void {
-    const confirmed = isConfirmedThreadId(threadId);
-    const button = bar.querySelector('.cu-add-btn') as HTMLButtonElement | null;
-    const label = bar.querySelector('.cu-add-label') as HTMLElement | null;
-
-    if (confirmed) {
-        bar.dataset.threadId = threadId;
-        delete bar.dataset.threadPending;
-        if (button) {
-            button.disabled = false;
-            button.setAttribute('aria-disabled', 'false');
-            button.title = 'Crear tarea de ClickUp desde este email';
-        }
-        if (label) label.textContent = 'Agregar a ClickUp';
-    } else {
-        bar.dataset.threadId = '';
-        bar.dataset.threadPending = 'true';
-        if (button) {
-            button.disabled = true;
-            button.setAttribute('aria-disabled', 'true');
-            button.title = 'Esperando datos de Gmail';
-        }
-        if (label) label.textContent = 'Esperando datos de Gmail…';
-    }
+    const confirmedThreadId = isConfirmedThreadId(threadId) ? threadId : null;
+    reconcileThreadBarState(bar, confirmedThreadId);
 
     const container = bar.querySelector('.cu-linked-tasks');
-    if (container) {
-        container.innerHTML = confirmed ? getLinkedTasksHtml(toVisibleLinkedTasks(linkedTasks[threadId] || [])) : '';
-    }
+    if (container) reconcileLinkedTaskAnchors(container, confirmedThreadId ? toVisibleLinkedTasks(linkedTasks[confirmedThreadId] || []) : []);
 
-    if (confirmed) verifyThreadTasks(threadId, bar);
-}
-
-function getLinkedTasksHtml(tasks: TaskMapping[]): string {
-    if (!tasks || tasks.length === 0) return '';
-    return tasks.map(t => `
-        <a href="${escapeHTML(safeClickUpUrl(t.url))}" target="_blank" rel="noopener noreferrer" class="cu-task-link">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="#7B68EE">
-            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-          </svg>
-          ${escapeHTML(t.name)}
-        </a>
-    `).join('');
+    if (confirmedThreadId) verifyThreadTasks(confirmedThreadId, bar);
 }
 
 // ============================================================================
@@ -420,9 +378,7 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
         const nextTasks = currentTasks.map(task => updates.get(task.id) || task);
         linkedTasks[threadId] = nextTasks;
         const container = barElement.querySelector('.cu-linked-tasks');
-        if (container) {
-            container.innerHTML = getLinkedTasksHtml(toVisibleLinkedTasks(nextTasks));
-        }
+        if (container) reconcileLinkedTaskAnchors(container, toVisibleLinkedTasks(nextTasks));
     }
 }
 
@@ -457,23 +413,9 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
     const bar = document.querySelector(`.cu-email-bar[data-thread-id="${threadId}"]`);
     if (!bar) return;
 
-    const tasksContainer = bar.querySelector('.cu-linked-tasks');
-    const taskLink = document.createElement('a');
-    taskLink.href = safeClickUpUrl(task.url);
-    taskLink.target = '_blank';
-    taskLink.rel = 'noopener noreferrer';
-    taskLink.className = 'cu-task-link cu-task-new';
-    taskLink.innerHTML = `
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="#7B68EE">
-      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-    </svg>
-    ${escapeHtml(task.name)}
-    `;
-    tasksContainer?.appendChild(taskLink);
-
     if (!isConfirmedThreadId(threadId)) return;
     if (!linkedTasks[threadId]) linkedTasks[threadId] = [];
-    linkedTasks[threadId].push({
+    const nextTask: TaskMapping = {
         id: task.id,
         name: task.name,
         url: task.url,
@@ -483,13 +425,12 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         failureCount: 0,
-    });
-}
-
-function escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    };
+    const existingIndex = linkedTasks[threadId].findIndex(candidate => candidate.id === task.id);
+    if (existingIndex >= 0) linkedTasks[threadId][existingIndex] = nextTask;
+    else linkedTasks[threadId].push(nextTask);
+    const tasksContainer = bar.querySelector('.cu-linked-tasks');
+    if (tasksContainer) reconcileLinkedTaskAnchors(tasksContainer, toVisibleLinkedTasks(linkedTasks[threadId]));
 }
 
 function showNotification(message: string, type: 'success' | 'error'): void {

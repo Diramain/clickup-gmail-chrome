@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-08-13
+
+### Changed
+- Automatic tracking now represents a task work session: Gmail, Chatwoot, Inbox, documentation, and other non-task tabs no longer stop the running task.
+- Opening another recognized ClickUp task still uses the serialized validate → stop → start transition when both automatic controls are enabled.
+- With Auto-Stop enabled, closing the last direct or task-specific ClickUp Inbox tab for the running task stops it; duplicate tabs across windows preserve it.
+- A confirmed Meet without a linked task stops the current timer and waits for a task selection; a Meet linked to the same or another task keeps or switches tracking accordingly.
+- Logout attempts to stop a verifiable running timer before removing local authentication.
+
+### Fixed
+- Repeated Gmail scans now preserve unchanged linked-task anchor nodes instead of replacing `innerHTML`, keeping links stable under pointer hover and keyboard focus.
+- Manual stop now stores a session-only task ID guard so focus/URL events cannot immediately restart the same task.
+- Direct ClickUp task pages using `/t/{workspaceId}/{taskId}` now validate the task segment instead of incorrectly sending the Workspace ID as a Task ID; historical alphanumeric `/t/{taskId}` URLs remain supported.
+
+### Added
+- Opt-in Safe Diagnostics with a 200-event `chrome.storage.session` buffer, separate JSON export, clear control, and categorical instrumentation for auth mode, workspace selection, task validation, timer polling, and timer transitions.
+- A bounded session-only task-tab index records only `tabId → taskId` pairs so tab closure can be evaluated without retaining URLs or Inbox payloads.
+
+### Security and privacy
+- Across v1.2.1–v1.2.3, the permission delta is limited to the exact `https://meet.google.com/*` host introduced for the opt-in Meet detector; no audio, video, microphone, camera, capture, participant, chat, captions, history, notification, or Calendar permission was added.
+- The manual-stop guard is session-only and contains only a ClickUp task ID; it is cleared on extension/browser lifecycle boundaries.
+- The task-tab index exists only while Auto-Stop is enabled, is restricted to trusted extension contexts, capped at 256 entries, and cleared when disabled or at logout, confirmed authentication invalidation, and clear-local-data boundaries.
+- Safe Diagnostics is off by default, extension-page-only, and rejects tokens, headers, URLs, workspace/task IDs, names, emails, payloads, and Gmail/Meet content through closed field/value allowlists.
+
+### Validation
+- TypeScript typecheck, 26 Jest suites / 310 tests, release build, exact 18-file allowlist preflight, `git diff --check`, and structured Senior Developer/CISO/QA checklist pass locally.
+- Direct ClickUp URLs, A→B switching, and last-task-tab stop passed operator QA. Logout/reconnection and Meet Priority remain `No verificado` after an explicit owner waiver; Chrome Web Store distribution requires a separate gate.
+
+### Not included
+- No Chrome Web Store publication, signing, Calendar integration, credential handling, or agent-run real-service QA is included in this source release.
+
+## 1.2.2 - 2026-08-13
+
+### Added
+- Opt-in Google Meet Priority on the exact `https://meet.google.com/*` origin, off by default.
+- Synthetic home/prejoin/join/left detection, popup task selection, previous-task reuse, ignore/change/end controls, and a four-hour confirmation pause.
+- Local recurring room-to-task mappings using `SHA-256("cgc-meet-v1:" + roomCode)` instead of storing room codes, full URLs, titles, or meeting content.
+- Mapping enable/delete controls and explicit deletion through the existing clear-local-data flow.
+
+### Changed
+- Confirmed Meet sessions temporarily suspend the normal focused-ClickUp coordinator; finishing stops the Meet timer and reevaluates focus without restoring an old task automatically.
+- Gmail and modal reads now cross the origin-validated background message boundary so all host content scripts can be denied direct `chrome.storage.local` access.
+- Minimum supported Chrome version is 102 and incognito use is explicitly disabled.
+- OAuth API requests negotiate compatibility between the previously working raw token header and the documented `Bearer` scheme for safe reads only. A confirmed rejected token requires explicit reconnection instead of an unsupported refresh-token request.
+
+### Fixed
+- Fixed automatic time tracking silently treating a ClickUp `401` as an invalid task while the popup still appeared authenticated from cached user data.
+- `getStatus` now validates the current user against ClickUp before showing an authenticated session; transient availability failures remain distinct from rejected credentials.
+- Fixed automatic-tracking switches shrinking beside wrapped labels and placing the checked thumb outside its track.
+- Reduced false ClickUp reconnections by negotiating raw/Bearer authorization only for safe reads, confirming `/user` before invalidation, caching recent validation, and ignoring stale failures from replaced tokens/wrappers.
+
+### Security and privacy
+- Meet messages use a closed schema containing only `event` and a 64-character room hash; task and mapping actions remain extension-page-only.
+- No permissions or APIs for audio, video, microphone, camera, captions, chat, participants, desktop/tab capture, notifications, history, or Calendar were added.
+- Meet mappings remain local, are excluded from the safe backup export, and use a pseudonymous stable hash rather than claiming anonymity.
+
+### Validation
+- TypeScript typecheck, 24 Jest suites / 273 tests, release build, and the exact 18-file allowlist preflight pass locally.
+- Real Google Meet DOM behavior and real ClickUp writes remain pending operator-only manual QA before any distribution.
+
+### Not included
+- No Google Calendar OAuth/API, activity ledger, dashboard, publication, signing, commit, or push.
+
+## 1.2.1 - 2026-08-12
+
+### Fixed
+- Automatic time tracking now follows only the active tab of the focused Chrome window, including multi-window and multi-monitor use.
+- The general ClickUp Inbox and other focused Chrome tabs are treated as no-task views instead of reusing the last task.
+- Task notification detail URLs resolve their task ID from the encoded Inbox bundle without persisting or logging the URL or payload.
+- Timer transitions are serialized and debounced; switching tasks validates the destination and confirms focus before starting it.
+
+### Changed
+- Automatic timer authority moved from per-tab DOM clicking to the background service worker and official ClickUp API wrapper.
+- Popup copy now explains focused-window behavior and recommends enabling both automatic controls.
+
+### Not included
+- No contextual activity ledger, idle permission, daily JSON export, new host permissions, or publication action.
+
 ## [1.2.0] - 2026-08-11
 
 ### Added
@@ -121,7 +199,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[1.2.0]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.4...main
+[1.2.3]: https://github.com/Diramain/clickup-gmail-chrome/compare/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd...main
+[1.2.0]: https://github.com/Diramain/clickup-gmail-chrome/commit/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd
 [1.1.4]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.0...v1.1.2

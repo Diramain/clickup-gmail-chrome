@@ -9,6 +9,7 @@ background.js
 task-modal-entry.js
 popup/popup.js
 src/*.js
+src/**/*.js
 
 # Distribution packages
 *.zip

@@ -8,16 +8,26 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails with time 
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
 ![Tests](https://img.shields.io/badge/Tests-local%20suite-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-1.2.3-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🆕 What's New in v1.2.0
+## 🆕 What's New in v1.2.3
+
+- **Task Work Sessions** - A running task continues while you work in Gmail, Chatwoot, documentation, or another non-task tab.
+- **Atomic Task Switching** - Opening another valid ClickUp task validates the destination before stopping the previous timer and starting the new one.
+- **Last Task-Tab Stop** - With Auto-Stop enabled, closing the last direct or ClickUp Inbox detail tab for the running task stops that timer; another tab for the same task keeps it running.
+- **Manual Stop Guard** - Stopping manually prevents the same focused task from immediately restarting; another task or an explicit start clears the guard.
+- **Stable Gmail Task Links** - Repeated Gmail scans preserve unchanged linked-task anchor nodes, so hover, keyboard focus, and clicks remain stable.
+- **Meet-Aware Stops** - A confirmed Meet without a linked task stops the current task and waits for selection; a linked Meet keeps or switches to its mapped task.
+
+Meet Priority remains opt-in and off by default. The v1.2.x delta adds only the exact `https://meet.google.com/*` host needed by its minimal detector; it adds no audio, video, microphone, camera, capture, participant, chat, captions, history, notification, or Calendar permission.
 
 - ✅ **Link reliability:** Gmail thread links now use a safer V2 state model with validation, retries, and less accidental unlinking.
 - 🔐 **Message and render hardening:** Runtime messages are origin/schema checked; Gmail HTML and high-risk UI sinks are sanitized before use.
 - 💾 **Safer local data tools:** Exports are versioned and limited to link/settings data; clear requires a recent export and explicit confirmation.
+- 🩺 **Safe Diagnostics:** An off-by-default, 200-event browser-session log can be exported or cleared separately; closed allowlists exclude tokens, headers, URLs, account/task identifiers, names, emails, payloads, and Gmail/Meet content.
 - 📦 **Release preflight:** Added local release build/validation scripts with an explicit allowlist and blocked-file checks. No ZIP/signing is performed by default.
 - ✍️ **Author metadata:** Extension metadata and popup footer now identify Leandro Iramain as author.
 
@@ -40,8 +50,9 @@ A Chrome extension to create ClickUp tasks directly from Gmail emails with time 
 - **Manual Entry** - Log time with ClickUp format (1h, 30m, 1:30)
 - **Recent Entries** - View 7-day time history
 - **Auto-Start** - Automatically start timer when opening a task on ClickUp.com
-- **Auto-Stop** - Automatically stop timer when leaving task view
+- **Auto-Stop** - Stop when another ClickUp task is opened or the last tab representing the running task is closed
 - **Toggle Settings** - Enable/disable auto-tracking per preference
+- **Google Meet Priority** - Optionally link a confirmed Meet session to a ClickUp task without capturing meeting content
 
 ### Performance
 - **List Cache** - Pre-load all spaces/folders/lists for instant modal loading
@@ -64,7 +75,9 @@ This extension reduces common local-extension risks but is not a security bounda
 | **Production-safe logger** | Debug and sensitive payload logging is suppressed in normal builds |
 | **Message validation** | Runtime messages are checked by sender origin and expected shape |
 | **Sanitized Gmail HTML** | Email HTML is sanitized before being attached or rendered through extension flows |
-| **Narrower permissions** | Runtime host permissions are limited to Gmail, ClickUp API, and app.clickup.com |
+| **Narrower permissions** | Runtime host permissions are limited to Gmail, ClickUp API/app, and the exact `meet.google.com` origin |
+| **Meet data minimization** | Only a namespaced SHA-256 room hash and ClickUp mapping metadata are stored; multimedia and meeting content are not captured |
+| **Trusted local storage** | Host content scripts cannot read extension local storage directly |
 | **No analytics** | No telemetry or analytics code is included |
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.
@@ -85,8 +98,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 | Document | Description |
 |----------|-------------|
-| [User Guide](USER_GUIDE.md) | Legacy v1.1.3 usage snapshot; see this README and the changelog for v1.2.0 changes |
-| [Technical Docs](TECHNICAL_DOCS.md) | Legacy v1.1.4 architecture snapshot; implementation and release docs are authoritative for v1.2.0 |
+| [User Guide](USER_GUIDE.md) | Usage guide; this README and the changelog are authoritative for v1.2.3 changes |
+| [Technical Docs](TECHNICAL_DOCS.md) | Architecture reference; implementation and release docs are authoritative for v1.2.3 |
 | [Changelog](CHANGELOG.md) | Version history and changes |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
 | [Security](SECURITY.md) | Security policy |
@@ -132,7 +145,7 @@ npm test
 # 4. Select this folder
 ```
 
-Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are intentionally ignored and are not part of the v1.2.0 release process.
+Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are intentionally ignored and are not part of the v1.2.3 release process.
 
 ---
 
@@ -143,6 +156,9 @@ Only `npm run build:release` plus `npm run validate:release` is supported for th
 3. Enter **Client ID** and **Client Secret**
 4. Click **Sign in with ClickUp**
 5. Select your preferred workspace (optional)
+6. To use Meet Priority, enable **Detectar sesiones Google Meet** in the Tracking tab and choose a test task when a confirmed session is detected
+
+Chrome 102 or newer is required. Meet Priority is off by default and the extension is not allowed in incognito mode.
 
 ---
 
@@ -155,6 +171,7 @@ clickup-gmail-chrome/
 ├── src/
 │   ├── services/          # API, Auth, Crypto, Storage, Timer
 │   ├── clickup-tracker.ts # Auto time tracking on ClickUp.com
+│   ├── meet/              # Minimal Meet detector, private room identity, and priority state
 │   ├── gmail-native.ts    # Gmail DOM integration
 │   ├── gmail-adapter.ts   # DOM abstraction layer
 │   ├── modal.ts           # Task creation modal (59KB)

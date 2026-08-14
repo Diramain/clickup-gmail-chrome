@@ -115,9 +115,8 @@ security:
     key_storage: chrome.storage.local (base64)
     iv_size: 96 bits (random per encryption)
 
-  encrypted_keys[3]:
+  encrypted_keys[2]:
     secure_accessToken: OAuth access token
-    secure_refreshToken: OAuth refresh token
     secure_oauthConfig: Client ID + encrypted secret
 
   functions:
@@ -219,14 +218,14 @@ oauth:
     2: Extension opens OAuth popup via chrome.identity
     3: User authorizes on ClickUp
     4: ClickUp redirects with authorization code
-    5: Extension exchanges code for access+refresh tokens
-    6: Tokens encrypted and stored
+    5: Extension exchanges code for an access token
+    6: Access token encrypted and stored
     7: Popup refreshes to show authenticated state
 
-  token_refresh:
+  reauthentication:
     trigger: 401 response
-    method: POST /oauth/token with refresh_token
-    auto_retry: yes (request retried after refresh)
+    method: Safe GET may try alternate raw/Bearer header once; endpoint denial probes /user; invalidate only the still-current token after confirmed rejection
+    auto_retry: safe_read_header_fallback_only
 
 // ============================================================================
 // SECTION 9: MESSAGE ACTIONS (chrome.runtime.sendMessage)
@@ -278,8 +277,8 @@ types:
 storage:
   tokens:
     secure_accessToken: EncryptedData
-    secure_refreshToken: EncryptedData
     secure_oauthConfig: EncryptedData
+    clickupReauthRequired: boolean
 
   user_data:
     cachedUser: ClickUpUser
@@ -498,7 +497,7 @@ popup:
       - List cache sync
       - Email tasks sync
       - Data export/clear
-      - Dev tools (token refresh test)
+      - Explicit ClickUp reconnection after 401
 
 // ============================================================================
 // SECTION 21: MODAL FEATURES

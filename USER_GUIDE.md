@@ -1,8 +1,8 @@
 # ClickUp Gmail Chrome Extension
 ## User Guide
 
-**Version:** 1.1.3  
-**Last Updated:** January 2026
+**Version:** 1.2.3
+**Last Updated:** August 2026
 
 ---
 
@@ -120,8 +120,14 @@ Enable auto-tracking in **Config** tab:
 
 | Setting | Description |
 |---------|-------------|
-| **Auto-start when opening task** | Timer starts when you view a task |
-| **Auto-stop when closing task** | Timer stops when you leave the task |
+| **Auto-start when opening task** | Timer starts when you view a recognized ClickUp task |
+| **Stop when changing task or closing its last tab** | Stops A before starting B. Gmail and other non-task pages keep A running, but closing its last direct or task-specific ClickUp Inbox tab stops it |
+
+A manual stop prevents the same still-focused task from restarting automatically. Opening another task or starting a timer explicitly clears that guard.
+
+If the same task remains open in another Chrome window, another direct task tab,
+or a task-specific ClickUp Inbox notification detail, closing one copy does not
+stop the timer. The general ClickUp Inbox does not represent a specific task.
 
 ---
 
@@ -157,6 +163,8 @@ Select your default workspace for:
 | **Export Data** | Download email-task mappings as JSON |
 | **Clear Data** | Remove cached data (keeps auth) |
 
+Safe Diagnostics uses separate controls and is not included in the regular data backup.
+
 ---
 
 # Keyboard Shortcuts
@@ -190,6 +198,17 @@ Check:
 2. You're viewing a task URL (e.g., `app.clickup.com/t/xxxxx`)
 3. Refresh the ClickUp page
 
+### Exportar un diagnóstico seguro
+
+Si el timer sigue sin iniciar y necesitás evidencia para soporte:
+
+1. Abrí el popup y activá **Diagnóstico seguro**.
+2. Reproducí el problema una sola vez.
+3. Volvé al popup y elegí **Exportar JSON**.
+4. Desactivá el diagnóstico y elegí **Borrar registro** cuando termines.
+
+El diagnóstico está apagado por defecto y conserva como máximo 200 eventos técnicos durante la sesión actual del navegador. No incluye tokens, headers, URLs, IDs de workspace/tarea, nombres, emails, payloads ni contenido de Gmail o Meet. Revisá igualmente el archivo antes de compartirlo.
+
 ## Export Data Before Switching PC
 
 1. Go to **Config** tab
@@ -206,10 +225,10 @@ Check:
 | Data | Location | Encryption |
 |------|----------|------------|
 | Access Token | Local | AES-256-GCM |
-| Refresh Token | Local | AES-256-GCM |
 | Client Secret | Local | AES-256-GCM |
 | Email-Task Links | Local | No |
 | User Info | Local | No |
+| Safe Diagnostics (opt-in) | Browser session memory | Allowlisted fields only |
 
 ## What Data is Sent
 
@@ -222,8 +241,8 @@ Check:
 |------------|------------|
 | storage | Store settings and tokens |
 | identity | OAuth authentication flow |
-| contextMenus | Right-click menu integration |
-| tabs | Communicate with Gmail/ClickUp tabs |
+| tabs | Coordinate active Gmail, ClickUp, and exact Meet tabs without browsing-history access |
+| host access | Gmail, ClickUp API/app, and `https://meet.google.com/*` for the opt-in minimal Meet detector |
 
 ---
 

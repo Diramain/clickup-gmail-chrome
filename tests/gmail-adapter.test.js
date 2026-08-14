@@ -25,7 +25,7 @@ function loadTsModule(relativePath) {
 }
 
 const { GmailAdapter } = loadTsModule('src/gmail-adapter.ts');
-const { ensureThreadBar } = loadTsModule('src/gmail-render-utils.ts');
+const { ensureThreadBar, reconcileLinkedTaskAnchors, reconcileThreadBarState } = loadTsModule('src/gmail-render-utils.ts');
 
 describe('GmailAdapter production selectors', () => {
     beforeEach(() => {
@@ -164,5 +164,64 @@ describe('Gmail thread bar mounting', () => {
 
         expect(() => ensureThreadBar(wrongHost, body, '19b95d11476b81db', createBar, jest.fn())).toThrow(/direct child/);
         expect(document.querySelectorAll('.cu-email-bar')).toHaveLength(0);
+    });
+
+    test('identical linked-task reconciliation preserves the anchor node and click target', async () => {
+        const container = document.createElement('div');
+        const task = { id: '86bbcpf38', name: 'Incidente', url: 'https://app.clickup.com/t/86bbcpf38' };
+
+        reconcileLinkedTaskAnchors(container, [task]);
+        const first = container.querySelector('.cu-task-link');
+        const click = jest.fn();
+        first.addEventListener('click', click);
+        const mutations = [];
+        const observer = new MutationObserver(records => mutations.push(...records));
+        observer.observe(container, { attributes: true, childList: true, characterData: true, subtree: true });
+
+        reconcileLinkedTaskAnchors(container, [{ ...task, lastValidatedAt: Date.now(), updatedAt: Date.now() }]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const second = container.querySelector('.cu-task-link');
+        second.dispatchEvent(new MouseEvent('click'));
+        observer.disconnect();
+
+        expect(second).toBe(first);
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(mutations).toHaveLength(0);
+    });
+
+    test('linked-task reconciliation updates only materially changed anchors', () => {
+        const container = document.createElement('div');
+        reconcileLinkedTaskAnchors(container, [
+            { id: 'A', name: 'Task A', url: 'https://app.clickup.com/t/A' },
+            { id: 'B', name: 'Task B', url: 'https://app.clickup.com/t/B' },
+        ]);
+        const firstA = container.querySelector('[data-task-id="A"]');
+        const firstB = container.querySelector('[data-task-id="B"]');
+
+        reconcileLinkedTaskAnchors(container, [
+            { id: 'A', name: 'Task A', url: 'https://app.clickup.com/t/A', lastValidatedAt: 999 },
+            { id: 'B', name: 'Task B renamed', url: 'https://app.clickup.com/t/B' },
+        ]);
+
+        expect(container.querySelector('[data-task-id="A"]')).toBe(firstA);
+        expect(container.querySelector('[data-task-id="B"]')).not.toBe(firstB);
+        expect(container.textContent).toContain('Task B renamed');
+    });
+
+    test('identical production bar-state reconciliation emits no self-triggering mutations', async () => {
+        const bar = document.createElement('div');
+        bar.className = 'cu-email-bar';
+        bar.innerHTML = '<button class="cu-add-btn"><span class="cu-add-label"></span></button><div class="cu-linked-tasks"></div>';
+        reconcileThreadBarState(bar, 'thread-1');
+        const mutations = [];
+        const observer = new MutationObserver(records => mutations.push(...records));
+        observer.observe(bar, { attributes: true, childList: true, characterData: true, subtree: true });
+
+        reconcileThreadBarState(bar, 'thread-1');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        observer.disconnect();
+
+        expect(mutations).toHaveLength(0);
+        expect(bar.querySelector('.cu-add-label').textContent).toBe('Agregar a ClickUp');
     });
 });

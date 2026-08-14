@@ -9,14 +9,19 @@ export interface MessageValidationResult {
 const GMAIL_ACTIONS = new Set([
     'openTaskModal', 'getStatus', 'getHierarchy', 'getHierarchyCache', 'getPreferredTeam', 'getTeams', 'getSpaces',
     'getFolders', 'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'searchTasks', 'getTaskById',
-    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'validateTaskLink'
+    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig'
 ]);
-const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', 'createTimeEntry', 'addTimeEntry', 'updateTimerBadge']);
+const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', 'createTimeEntry', 'addTimeEntry', 'updateTimerBadge', 'focusedClickUpNavigation']);
+const MEET_ACTIONS = new Set(['meetSessionEvent', 'getMeetDetectionEnabled']);
+const DIAGNOSTIC_ACTIONS = new Set(['getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics']);
 const EXTENSION_ACTIONS = new Set([
     'authenticate', 'logout', 'checkAuth', 'getStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
     'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'createTaskSimple', 'saveOAuthConfig', 'savePreferredTeam',
     'getPreferredTeam', 'getTaskById', 'preloadFullHierarchy', 'getHierarchyCache', 'getEmailTasksSyncStatus', 'findLinkedTasks',
-    'searchTasks', 'syncEmailTasks', 'clearLocalData', 'testTokenRefresh', 'getTimeEntries'
+    'searchTasks', 'syncEmailTasks', 'clearLocalData', 'getTimeEntries',
+    'getMeetPriorityStatus', 'getMeetMappings', 'assignMeetTask', 'ignoreMeetSession', 'endMeetSession', 'resumeMeetSession',
+    'deleteMeetMapping', 'setMeetMappingEnabled', 'setMeetPriorityEnabled',
+    'getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics'
 ]);
 
 const MAX_SUBJECT = 500;
@@ -37,8 +42,10 @@ export function validateExtensionMessage(message: ExtensionMessage, sender: chro
 
 export function isAllowedOriginForAction(action: string, origin: string): boolean {
     if (origin.startsWith('chrome-extension://')) return EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action);
+    if (DIAGNOSTIC_ACTIONS.has(action)) return false;
     if (origin.startsWith('https://mail.google.com/')) return GMAIL_ACTIONS.has(action);
     if (origin.startsWith('https://app.clickup.com/')) return CLICKUP_ACTIONS.has(action);
+    if (origin.startsWith('https://meet.google.com/')) return MEET_ACTIONS.has(action);
     return false;
 }
 
@@ -94,9 +101,61 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
                 && data.startDate === undefined
                 && data.endDate === undefined
                 && data.assignee === undefined;
+        case 'focusedClickUpNavigation':
+            return data === message || data === undefined || Object.keys(data).length === 0;
+        case 'getMeetDetectionEnabled':
+        case 'getEmailTaskMappings':
+        case 'getDefaultListConfig':
+            return hasOnlyRootKeys(message, ['action']);
+        case 'meetSessionEvent':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && ['candidate', 'joined', 'left', 'heartbeat'].includes(data.event)
+                && isHexRoomKey(data.roomKey)
+                && Object.keys(data).every((key) => ['event', 'roomKey'].includes(key));
+        case 'getMeetPriorityStatus':
+        case 'getMeetMappings':
+        case 'endMeetSession':
+        case 'resumeMeetSession':
+        case 'ignoreMeetSession':
+            return hasOnlyRootKeys(message, ['action']);
+        case 'assignMeetTask':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isShortString(data.taskId, 100)
+                && isShortString(data.teamId, 100)
+                && typeof data.remember === 'boolean'
+                && Object.keys(data).every((key) => ['taskId', 'teamId', 'remember'].includes(key));
+        case 'setMeetPriorityEnabled':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && typeof data.enabled === 'boolean'
+                && Object.keys(data).every((key) => key === 'enabled');
+        case 'setDiagnosticEnabled':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && typeof data.enabled === 'boolean'
+                && Object.keys(data).every((key) => key === 'enabled');
+        case 'getDiagnosticStatus':
+        case 'exportDiagnostics':
+        case 'clearDiagnostics':
+            return hasOnlyRootKeys(message, ['action']);
+        case 'deleteMeetMapping':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.roomKey)
+                && Object.keys(data).every((key) => key === 'roomKey');
+        case 'setMeetMappingEnabled':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.roomKey)
+                && typeof data.enabled === 'boolean'
+                && Object.keys(data).every((key) => ['roomKey', 'enabled'].includes(key));
         default:
             return true;
     }
+}
+
+function isHexRoomKey(value: unknown): value is string {
+    return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function hasOnlyRootKeys(message: ExtensionMessage, allowed: string[]): boolean {
+    return Object.keys(message).every((key) => allowed.includes(key));
 }
 
 function isValidTimeEntryTaskAndDuration(data: any): boolean {

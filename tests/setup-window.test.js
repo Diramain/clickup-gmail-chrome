@@ -31,6 +31,7 @@ describe('OAuth durable setup window helpers', () => {
         expect(shouldLaunchDurableSetup({ authenticated: false }, false)).toBe(true);
         expect(shouldLaunchDurableSetup({ authenticated: false }, true)).toBe(false);
         expect(shouldLaunchDurableSetup({ authenticated: true }, false)).toBe(false);
+        expect(shouldLaunchDurableSetup({ authenticated: false, authUnavailable: true }, false)).toBe(false);
     });
 
     test('focuses stored setup window id', async () => {

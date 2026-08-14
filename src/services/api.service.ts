@@ -1,6 +1,6 @@
 /**
  * ClickUp API Service
- * Wrapper for ClickUp API v2 with retry logic and token refresh handling
+ * Wrapper for ClickUp API v2 with retry logic and explicit reauthentication handling
  */
 
 import type {
@@ -31,16 +31,25 @@ const MAX_RESTORED_BLOCK_MS = 15 * 60 * 1000;
 // Types
 // ============================================================================
 
-interface ApiError extends Error {
+export interface ApiError extends Error {
     status?: number;
     requiresReauth?: boolean;
+    clickupCode?: string;
 }
 
 interface TimeEntryResponse {
     data: TimeEntry[];
 }
 
-export type TokenRefreshCallback = () => Promise<{ success: boolean; token?: string }>;
+export type ClickUpAuthorizationMode = 'raw' | 'bearer';
+export type AuthenticationFailureCallback = (rejectedToken: string) => Promise<boolean>;
+export type AuthorizationModeChangeCallback = (mode: ClickUpAuthorizationMode) => void | Promise<void>;
+export type ApiDiagnosticEvent = {
+    event: 'api_request' | 'api_response' | 'authorization_mode';
+    details: Record<string, string | number | boolean>;
+};
+export type ApiDiagnosticCallback = (event: ApiDiagnosticEvent) => void | Promise<void>;
+type AuthenticationProbeResult = 'valid' | 'invalid' | 'unavailable';
 
 export interface RateGovernorState {
     intervalMs?: unknown;
@@ -53,6 +62,22 @@ export interface TaskPageProgress {
     page: number;
     pageSize: number;
     totalFetched: number;
+}
+
+export function isReauthenticationRequired(error: unknown): error is ApiError {
+    return error instanceof Error && (error as ApiError).requiresReauth === true;
+}
+
+export function isClickUpWorkspaceAuthorizationError(error: unknown): error is ApiError {
+    return error instanceof Error
+        && typeof (error as ApiError).clickupCode === 'string'
+        && CLICKUP_TEAM_NOT_AUTHORIZED_CODES.has((error as ApiError).clickupCode!);
+}
+
+export function formatClickUpAuthorization(token: string, mode: ClickUpAuthorizationMode = 'bearer'): string {
+    const normalized = token.trim();
+    const withoutBearer = normalized.replace(/^Bearer\s+/i, '');
+    return mode === 'bearer' ? `Bearer ${withoutBearer}` : withoutBearer;
 }
 
 function sanitizeRateGovernorState(state?: RateGovernorState | null, now = Date.now()): { intervalMs?: number; blockedUntil?: number } {
@@ -154,59 +179,105 @@ export class ClickUpRateGovernor {
 
 export class ClickUpAPIWrapper {
     private token: string;
-    private onTokenRefresh: TokenRefreshCallback | null = null;
+    private onAuthenticationFailure: AuthenticationFailureCallback | null = null;
+    private onAuthorizationModeChange: AuthorizationModeChangeCallback | null = null;
+    private authorizationMode: ClickUpAuthorizationMode;
+    private authenticationProbeInFlight: Promise<AuthenticationProbeResult> | null = null;
     private governor: ClickUpRateGovernor;
+    private onDiagnosticEvent: ApiDiagnosticCallback | null = null;
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_STATUS_CODES = [429, 500, 502, 503, 504];
 
-    constructor(token: string, governor: ClickUpRateGovernor = new ClickUpRateGovernor()) {
+    constructor(
+        token: string,
+        governor: ClickUpRateGovernor = new ClickUpRateGovernor(),
+        authorizationMode: ClickUpAuthorizationMode = 'raw',
+    ) {
         this.token = token;
         this.governor = governor;
+        this.authorizationMode = authorizationMode;
     }
 
     /**
-     * Set callback for token refresh (injected to avoid circular dependency)
+     * Set callback that invalidates local auth state after ClickUp rejects a token.
      */
-    setTokenRefreshCallback(callback: TokenRefreshCallback): void {
-        this.onTokenRefresh = callback;
+    setAuthenticationFailureCallback(callback: AuthenticationFailureCallback): void {
+        this.onAuthenticationFailure = callback;
     }
 
-    /**
-     * Update the token (called after refresh)
-     */
-    updateToken(newToken: string): void {
-        this.token = newToken;
+    setAuthorizationModeChangeCallback(callback: AuthorizationModeChangeCallback): void {
+        this.onAuthorizationModeChange = callback;
+    }
+
+    setDiagnosticCallback(callback: ApiDiagnosticCallback): void {
+        this.onDiagnosticEvent = callback;
     }
 
     /**
      * Generic API request with retry and 401 handling
      */
-    async request<T = any>(endpoint: string, options: RequestInit = {}, retryCount = 0): Promise<T> {
+    async request<T = any>(
+        endpoint: string,
+        options: RequestInit = {},
+        retryCount = 0,
+        authorizationFallbackUsed = false,
+    ): Promise<T> {
+        const method = normalizeRequestMethod(options.method);
+        const diagnosticBase = {
+            route: classifyDiagnosticRoute(endpoint),
+            method: isSafeReadMethod(method) ? 'read' : 'write',
+            authorizationMode: this.authorizationMode,
+            attempt: Math.min(retryCount + 1, 4),
+            fallback: authorizationFallbackUsed,
+        };
+        this.emitDiagnostic('api_request', diagnosticBase);
         try {
-            const method = normalizeRequestMethod(options.method);
             const response = await this.fetchWithGovernor(`${CLICKUP_API_BASE}${endpoint}`, {
                 ...options,
                 headers: {
-                    'Authorization': this.token,
+                    'Authorization': formatClickUpAuthorization(this.token, this.authorizationMode),
                     'Content-Type': 'application/json',
                     ...options.headers
                 }
             });
 
-            // Handle 401 Unauthorized - try to refresh token once
-            if (response.status === 401 && retryCount === 0 && this.onTokenRefresh) {
-                console.log('[API] AUTH_RETRY');
-                const result = await this.onTokenRefresh();
-                if (result.success && result.token) {
-                    this.token = result.token;
-                    return this.request(endpoint, options, 1);
+            if (response.status === 401) {
+                const clickupCode = await readAllowlistedClickUpErrorCode(response);
+                this.emitDiagnostic('api_response', {
+                    ...diagnosticBase,
+                    outcome: 'failure',
+                    failureClass: clickupCode ? 'workspace-not-authorized' : 'unauthorized',
+                    ...(clickupCode ? { clickupCode } : {}),
+                });
+                const alternateMode = nextAuthorizationMode(this.authorizationMode);
+                if (isSafeReadMethod(method) && !authorizationFallbackUsed) {
+                    this.authorizationMode = alternateMode;
+                    this.emitDiagnostic('authorization_mode', {
+                        stage: 'request',
+                        outcome: 'attempted',
+                        authorizationMode: alternateMode,
+                    });
+                    return this.request(endpoint, options, retryCount, true);
                 }
-                const err: ApiError = new Error('Authentication failed. Please sign out and sign in again.');
-                err.status = 401;
-                err.requiresReauth = true;
-                throw err;
+                if (endpoint !== '/user') {
+                    const probe = await this.confirmAuthentication();
+                    if (probe === 'valid') {
+                        await this.persistAuthorizationMode();
+                        throw this.createApiError('API Error: 401', 401, clickupCode);
+                    }
+                    if (probe === 'unavailable') throw this.createApiError('Authentication status unavailable', 503);
+                }
+                throw await this.createReauthenticationError();
             }
+
+            if (authorizationFallbackUsed) await this.persistAuthorizationMode();
+
+            this.emitDiagnostic('api_response', {
+                ...diagnosticBase,
+                outcome: response.ok ? 'success' : 'failure',
+                failureClass: classifyDiagnosticStatus(response.status),
+            });
 
             // Handle rate limiting and server errors with exponential backoff
             if (this.shouldRetryResponse(response.status, method) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
@@ -216,25 +287,29 @@ export class ClickUpAPIWrapper {
                 if (response.status === 429) this.governor.deferFor(delay);
                 console.log('[API] RETRY_STATUS');
                 await this.sleep(delay);
-                return this.request(endpoint, options, retryCount + 1);
+                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed);
             }
 
             if (!response.ok) {
                 const error = await response.json().catch(() => ({}));
-                const err: ApiError = new Error(error.err || `API Error: ${response.status}`);
-                err.status = response.status;
-                throw err;
+                throw this.createApiError(error.err || `API Error: ${response.status}`, response.status);
             }
 
             return response.json();
         } catch (error: any) {
             // Handle network errors with retry
-            const method = normalizeRequestMethod(options.method);
+            if (error?.name === 'TypeError') {
+                this.emitDiagnostic('api_response', {
+                    ...diagnosticBase,
+                    outcome: 'failure',
+                    failureClass: 'network',
+                });
+            }
             if (this.shouldRetryNetworkError(error, method) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
                 const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
                 console.log('[API] RETRY_NETWORK');
                 await this.sleep(delay);
-                return this.request(endpoint, options, retryCount + 1);
+                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed);
             }
             throw error;
         }
@@ -261,25 +336,116 @@ export class ClickUpAPIWrapper {
         return response;
     }
 
+    private async createReauthenticationError(): Promise<ApiError> {
+        let requiresReauth = true;
+        try {
+            const invalidated = await this.onAuthenticationFailure?.(this.token);
+            if (invalidated === false) requiresReauth = false;
+        } catch {
+            // The caller still needs the canonical auth error even if local cleanup fails.
+        }
+        const error = this.createApiError('Authentication failed. Reconnect ClickUp.', 401);
+        error.requiresReauth = requiresReauth;
+        return error;
+    }
+
+    private createApiError(message: string, status: number, clickupCode?: string): ApiError {
+        const error: ApiError = new Error(message);
+        error.status = status;
+        if (clickupCode) error.clickupCode = clickupCode;
+        return error;
+    }
+
+    private async persistAuthorizationMode(): Promise<void> {
+        await this.onAuthorizationModeChange?.(this.authorizationMode);
+        this.emitDiagnostic('authorization_mode', {
+            stage: 'persist',
+            outcome: 'success',
+            authorizationMode: this.authorizationMode,
+        });
+    }
+
+    private async confirmAuthentication(): Promise<AuthenticationProbeResult> {
+        if (this.authenticationProbeInFlight) return this.authenticationProbeInFlight;
+        const probe = (async (): Promise<AuthenticationProbeResult> => {
+            const modes = uniqueAuthorizationModes(this.authorizationMode);
+            for (let index = 0; index < modes.length; index += 1) {
+                const mode = modes[index];
+                const diagnosticBase = {
+                    route: 'user-probe',
+                    method: 'read',
+                    authorizationMode: mode,
+                    attempt: index + 1,
+                    fallback: index > 0,
+                };
+                try {
+                    this.emitDiagnostic('api_request', diagnosticBase);
+                    const response = await this.fetchWithGovernor(`${CLICKUP_API_BASE}/user`, {
+                        headers: {
+                            'Authorization': formatClickUpAuthorization(this.token, mode),
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    if (response.ok) {
+                        this.emitDiagnostic('api_response', {
+                            ...diagnosticBase,
+                            outcome: 'success',
+                            failureClass: 'none',
+                        });
+                        this.authorizationMode = mode;
+                        this.emitDiagnostic('authorization_mode', {
+                            stage: 'probe',
+                            outcome: 'valid',
+                            authorizationMode: mode,
+                        });
+                        return 'valid';
+                    }
+                    this.emitDiagnostic('api_response', {
+                        ...diagnosticBase,
+                        outcome: 'failure',
+                        failureClass: classifyDiagnosticStatus(response.status),
+                    });
+                    if (response.status !== 401) return 'unavailable';
+                } catch {
+                    this.emitDiagnostic('api_response', {
+                        ...diagnosticBase,
+                        outcome: 'failure',
+                        failureClass: 'network',
+                    });
+                    return 'unavailable';
+                }
+            }
+            return 'invalid';
+        })();
+        this.authenticationProbeInFlight = probe;
+        try {
+            return await probe;
+        } finally {
+            if (this.authenticationProbeInFlight === probe) this.authenticationProbeInFlight = null;
+        }
+    }
+
+    private emitDiagnostic(event: ApiDiagnosticEvent['event'], details: ApiDiagnosticEvent['details']): void {
+        if (!this.onDiagnosticEvent) return;
+        void Promise.resolve(this.onDiagnosticEvent({ event, details })).catch(() => undefined);
+    }
+
     private async requestFormData<T = any>(endpoint: string, formData: FormData, retryCount = 0): Promise<T> {
         try {
             const response = await this.fetchWithGovernor(`${CLICKUP_API_BASE}${endpoint}`, {
                 method: 'POST',
-                headers: { 'Authorization': this.token },
+                headers: { 'Authorization': formatClickUpAuthorization(this.token, this.authorizationMode) },
                 body: formData
             });
 
-            if (response.status === 401 && retryCount === 0 && this.onTokenRefresh) {
-                console.log('[API] AUTH_RETRY');
-                const result = await this.onTokenRefresh();
-                if (result.success && result.token) {
-                    this.token = result.token;
-                    return this.requestFormData(endpoint, formData, 1);
+            if (response.status === 401) {
+                const probe = await this.confirmAuthentication();
+                if (probe === 'valid') {
+                    await this.persistAuthorizationMode();
+                    throw this.createApiError('API Error: 401', 401);
                 }
-                const err: ApiError = new Error('Authentication failed. Please sign out and sign in again.');
-                err.status = 401;
-                err.requiresReauth = true;
-                throw err;
+                if (probe === 'unavailable') throw this.createApiError('Authentication status unavailable', 503);
+                throw await this.createReauthenticationError();
             }
 
             if (this.shouldRetryResponse(response.status, 'POST') && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
@@ -294,9 +460,7 @@ export class ClickUpAPIWrapper {
 
             if (!response.ok) {
                 const error = await response.json().catch(() => ({}));
-                const err: ApiError = new Error(error.err || `API Error: ${response.status}`);
-                err.status = response.status;
-                throw err;
+                throw this.createApiError(error.err || `API Error: ${response.status}`, response.status);
             }
 
             return response.json();
@@ -401,6 +565,17 @@ export class ClickUpAPIWrapper {
     async getWorkspaceTasksPage(teamId: string, page: number): Promise<ClickUpTasksResponse> {
         const safePage = Number.isInteger(page) && page >= 0 ? page : 0;
         return this.request(`/team/${teamId}/task?include_closed=true&subtasks=true&page=${safePage}`);
+    }
+
+    async getWorkspaceTaskById(teamId: string, taskId: string): Promise<ClickUpTask | null> {
+        const params = new URLSearchParams({
+            include_closed: 'true',
+            subtasks: 'true',
+            page: '0',
+        });
+        params.append('task_ids[]', taskId);
+        const response = await this.request<ClickUpTasksResponse>(`/team/${teamId}/task?${params.toString()}`);
+        return (response.tasks || []).find(task => task.id === taskId) || null;
     }
 
     async getTasks(listId: string): Promise<ClickUpTasksResponse> {
@@ -584,10 +759,69 @@ export class ClickUpAPIWrapper {
     }
 }
 
+const CLICKUP_TEAM_NOT_AUTHORIZED_CODES = new Set([
+    'OAUTH_023',
+    'OAUTH_026',
+    'OAUTH_027',
+    ...Array.from({ length: 17 }, (_, index) => `OAUTH_${String(index + 29).padStart(3, '0')}`),
+]);
+
+export function sanitizeClickUpErrorCode(value: unknown): string | undefined {
+    return typeof value === 'string' && CLICKUP_TEAM_NOT_AUTHORIZED_CODES.has(value)
+        ? value
+        : undefined;
+}
+
+async function readAllowlistedClickUpErrorCode(response: Response): Promise<string | undefined> {
+    try {
+        const body = await response.clone().json() as { ECODE?: unknown };
+        return sanitizeClickUpErrorCode(body?.ECODE);
+    } catch {
+        return undefined;
+    }
+}
+
 function normalizeRequestMethod(method: RequestInit['method']): string {
     return String(method || 'GET').toUpperCase();
 }
 
 function isSafeReadMethod(method: string): boolean {
     return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+}
+
+function nextAuthorizationMode(mode: ClickUpAuthorizationMode): ClickUpAuthorizationMode {
+    return mode === 'raw' ? 'bearer' : 'raw';
+}
+
+function uniqueAuthorizationModes(preferred: ClickUpAuthorizationMode): ClickUpAuthorizationMode[] {
+    return [preferred, nextAuthorizationMode(preferred)];
+}
+
+function classifyDiagnosticRoute(endpoint: string): string {
+    if (endpoint === '/user') return 'user';
+    if (endpoint === '/team') return 'teams';
+    if (/^\/task\/[^/?]+$/.test(endpoint)) return 'task-direct';
+    if (/^\/team\/[^/]+\/task\?/.test(endpoint)) {
+        return endpoint.includes('task_ids%5B%5D=') || endpoint.includes('task_ids[]=')
+            ? 'task-workspace-fallback'
+            : 'tasks-query';
+    }
+    if (/^\/team\/[^/]+\/time_entries\/current$/.test(endpoint)) return 'timer-current';
+    if (/^\/team\/[^/]+\/time_entries\/start$/.test(endpoint)) return 'timer-start';
+    if (/^\/team\/[^/]+\/time_entries\/stop$/.test(endpoint)) return 'timer-stop';
+    if (/^\/team\/[^/]+\/time_entries(?:\?|$)/.test(endpoint)) return 'time-entries';
+    if (/^\/(?:team\/[^/]+\/space|space\/[^/]+\/(?:folder|list)|folder\/[^/]+\/list|list\/[^/]+(?:\/member|\/field)?)(?:\?|$)/.test(endpoint)) {
+        return 'hierarchy';
+    }
+    return 'other';
+}
+
+function classifyDiagnosticStatus(status: number): string {
+    if (status >= 200 && status < 300) return 'none';
+    if (status === 401) return 'unauthorized';
+    if (status === 403) return 'forbidden';
+    if (status === 404) return 'not-found';
+    if (status === 429) return 'rate-limited';
+    if (status >= 500 && status <= 599) return 'server-error';
+    return 'unknown';
 }

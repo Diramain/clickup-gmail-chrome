@@ -92,8 +92,8 @@ describe('Attach-to-existing modal search', () => {
         expect(results.textContent).not.toContain('Agregar Captcha');
     });
 
-    test('uses the canonical preferred workspace key for hierarchy and task search coherence', () => {
-        expect(source('src/modal.ts')).toContain("chrome.storage.local.get(['preferredTeamId', 'cachedTeams'])");
-        expect(source('src/modal.ts')).not.toContain("chrome.storage.local.get(['preferredTeam', 'cachedTeams'])");
+    test('resolves the preferred workspace through the background-owned message boundary', () => {
+        expect(source('src/modal.ts')).toContain("chrome.runtime.sendMessage({ action: 'getPreferredTeam' })");
+        expect(source('src/modal.ts')).not.toContain('chrome.storage.local');
     });
 });

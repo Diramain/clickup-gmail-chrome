@@ -268,15 +268,19 @@ describe('OAuth popup/background integration safeguards', () => {
     test('getStatus uses secure OAuth shape instead of preferredTeamId for configured', () => {
         const background = source('background.ts');
         const getStatusCase = background.match(/case 'getStatus':[\s\S]*?case 'getTeams':/)[0];
+        const getStatusHelper = background.match(/async function getAuthenticationStatus[\s\S]*?function runTimerWrite/)[0];
 
-        expect(getStatusCase).toContain('hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)');
+        expect(getStatusCase).toContain('getAuthenticationStatus()');
+        expect(getStatusHelper).toContain('hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)');
+        expect(getStatusHelper).toContain('getFreshAuthenticatedUser()');
+        expect(getStatusHelper).not.toContain('getCachedUser()');
         expect(getStatusCase).not.toContain('STORAGE_KEYS.PREFERRED_TEAM');
-        expect(getStatusCase).not.toContain('getSecureOAuthConfig');
+        expect(getStatusHelper).not.toContain('getSecureOAuthConfig');
     });
 
     test('saveOAuthConfig verifies secure presence before success', () => {
         const background = source('background.ts');
-        const saveCase = background.match(/case 'saveOAuthConfig':[\s\S]*?case 'testTokenRefresh':/)[0];
+        const saveCase = background.match(/case 'saveOAuthConfig':[\s\S]*?case 'logout':/)[0];
 
         expect(saveCase).toContain('saveSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG, data)');
         expect(saveCase).toContain('hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)');

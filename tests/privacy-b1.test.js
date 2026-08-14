@@ -55,7 +55,8 @@ describe('B1 privacy hardening', () => {
         const background = source('background.ts');
 
         expect(background).toMatch(/saveSecureToken\(STORAGE_KEYS\.AUTH_TOKEN/);
-        expect(background).toMatch(/saveSecureToken\(STORAGE_KEYS\.REFRESH_TOKEN/);
+        expect(background).toMatch(/removeSecureToken\(STORAGE_KEYS\.REFRESH_TOKEN/);
+        expect(background).not.toMatch(/saveSecureToken\(STORAGE_KEYS\.REFRESH_TOKEN/);
         expect(background).toMatch(/getSecureToken\(STORAGE_KEYS\.AUTH_TOKEN/);
         expect(background).not.toMatch(/chrome\.storage\.local\.set\(\{\s*\[STORAGE_KEYS\.AUTH_TOKEN\]/);
         expect(background).not.toMatch(/response\.text\(\)/);
@@ -86,20 +87,38 @@ describe('B1 privacy hardening', () => {
         expect(result.draftClientSecret).toBeUndefined();
     });
 
-    test('privacy policy matches v1.2.0 local data, transfer, export, and retention claims', () => {
+    test('privacy policy matches v1.2.3 local data, work-session tracking, Meet minimization, export, and retention claims', () => {
         const policy = source('PRIVACY_POLICY.md');
 
-        expect(policy).toContain('**Last Updated:** 2026-08-11');
+        expect(policy).toContain('**Last Updated:** 2026-08-13');
         expect(policy).toMatch(/reads Gmail data only when you initiate a create or attach action/i);
         expect(policy).toMatch(/subject[\s\S]*sender[\s\S]*Gmail thread ID[\s\S]*Gmail URL/i);
         expect(policy).toMatch(/sanitized HTML representation of the email as a ClickUp task attachment/i);
         expect(policy).toMatch(/checkbox is enabled by default/i);
         expect(policy).toMatch(/Original Gmail file attachments are disabled/i);
+        expect(policy).toMatch(/Gmail, Chatwoot, Inbox, or another non-task page does not by itself stop that timer/i);
+        expect(policy).toMatch(/closing the last direct or task-specific ClickUp Inbox tab for the running task stops that timer/i);
+        expect(policy).toMatch(/bounded in-memory browser-session index stores only `tabId → taskId` pairs/i);
+        expect(policy).toMatch(/index is cleared when Auto-Stop is disabled/i);
+        expect(policy).toMatch(/does not store full ClickUp URLs, external browsing URLs, query strings, fragments, or encoded notification payloads/i);
+        expect(policy).toMatch(/manual stop suppression/i);
         expect(policy).toMatch(/does not operate its own servers or analytics service/i);
         expect(policy).toMatch(/email body is not retained as a local mapping/i);
-        expect(policy).toMatch(/Mappings persist until you clear local data or uninstall the extension/i);
+        expect(policy).toMatch(/Mappings persist until you delete them, clear local data, or uninstall the extension/i);
         expect(policy).toMatch(/safe export[\s\S]*does not include OAuth tokens, OAuth client configuration, or email HTML/i);
+        expect(policy).toMatch(/does not rely on an undocumented refresh-token grant/i);
+        expect(policy).toMatch(/off by default[\s\S]*SHA-256\(\"cgc-meet-v1:/i);
+        expect(policy).toMatch(/does not access or capture audio, microphone, video, camera, chat, captions/i);
+        expect(policy).toMatch(/stable room hash is pseudonymous metadata, not anonymous data/i);
+        expect(policy).toMatch(/excludes Meet room keys and Meet task mappings/i);
+        expect(policy).toMatch(/denied direct access to `chrome\.storage\.local`/i);
+        expect(policy).toMatch(/not allowed to run in incognito mode/i);
         expect(policy).toMatch(/clear local data[\s\S]*does not delete or modify data already sent to ClickUp/i);
+        expect(policy).toMatch(/Safe Diagnostics is off by default/i);
+        expect(policy).toMatch(/up to 200 allowlisted technical events/i);
+        expect(policy).toMatch(/`chrome\.storage\.session` with access restricted to trusted extension contexts/i);
+        expect(policy).toMatch(/do not include tokens, authorization headers, URLs, workspace or task IDs, names, email addresses, API payloads, or Gmail\/Meet content/i);
+        expect(policy).toMatch(/separate export control/i);
         expect(policy).toContain('https://leandroiramain.com.ar');
         expect(policy).not.toMatch(/automatic 90[- ]day purge|purged? automatically after 90 days/i);
     });
@@ -113,6 +132,12 @@ describe('B1 privacy hardening', () => {
         expect(security).toMatch(/does not protect against a compromised host or compromised browser profile/i);
         expect(security).toMatch(/decrypted only when needed for OAuth or token exchange with ClickUp/i);
         expect(security).toMatch(/backend OAuth proxy remains recommended/i);
+        expect(security).toMatch(/Google Meet Priority Boundary/);
+        expect(security).toMatch(/Safe Diagnostics Boundary/);
+        expect(security).toMatch(/at most 200 events in `chrome\.storage\.session`/i);
+        expect(security).toMatch(/Diagnostic runtime actions are extension-page-only/i);
+        expect(security).toMatch(/writes are never replayed automatically/i);
+        expect(security).toMatch(/`TRUSTED_CONTEXTS`/);
         expect(security).not.toMatch(/client secret is NOT encrypted/i);
     });
 

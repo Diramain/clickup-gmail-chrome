@@ -312,13 +312,14 @@ export type MessageAction =
     | 'validateTaskLink'
     | 'findLinkedTasks'
     | 'searchTasks'
-    | 'testTokenRefresh'
     | 'saveOAuthConfig'
     | 'savePreferredTeam'
     | 'getPreferredTeam'
     | 'getTaskById'
     | 'preloadFullHierarchy'
     | 'getHierarchyCache'
+    | 'getEmailTaskMappings'
+    | 'getDefaultListConfig'
     | 'syncEmailTasks'
     | 'clearLocalData'
     | 'getEmailTasksSyncStatus'
@@ -329,7 +330,24 @@ export type MessageAction =
     | 'createTimeEntry'
     | 'addTimeEntry'
     | 'getTimeEntries'
-    | 'updateTimerBadge';
+    | 'updateTimerBadge'
+    | 'focusedClickUpNavigation'
+    | 'meetSessionEvent'
+    | 'getMeetDetectionEnabled'
+    | 'getMeetPriorityStatus'
+    | 'getMeetMappings'
+    | 'assignMeetTask'
+    | 'ignoreMeetSession'
+    | 'endMeetSession'
+    | 'resumeMeetSession'
+    | 'deleteMeetMapping'
+    | 'setMeetMappingEnabled'
+    | 'setMeetPriorityEnabled'
+    // Safe session diagnostics (extension pages only)
+    | 'getDiagnosticStatus'
+    | 'setDiagnosticEnabled'
+    | 'exportDiagnostics'
+    | 'clearDiagnostics';
 
 export interface ExtensionMessage {
     action: MessageAction;
@@ -369,14 +387,9 @@ export interface CachedListItem {
 export interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    requiresReauth?: boolean;
+    authUnavailable?: boolean;
     user?: ClickUpUserResponse | ClickUpUser;
-}
-
-/** Test result for token refresh test */
-export interface TestResult {
-    success: boolean;
-    message?: string;
-    error?: string;
 }
 
 /** Task mapping for email-to-task linking */

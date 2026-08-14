@@ -16,7 +16,7 @@ import {
     TimeEntry,
     ClickUpCustomField
 } from './src/types/clickup';
-import { ClickUpAPIWrapper, ClickUpRateGovernor, TokenRefreshCallback, type RateGovernorState } from './src/services/api.service';
+import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
@@ -52,6 +52,29 @@ import {
     rankTaskSearchResults,
 } from './src/task-search';
 import { extractCurrentUserId } from './src/time-entry-history';
+import {
+    applyManualStopSuppression,
+    decideLastTaskTabCloseAction,
+    decideFocusedTimerAction,
+    executeFocusedTimerAction,
+    removeClickUpTaskTabIndexEntry,
+    resolveClickUpFocusContext,
+    updateClickUpTaskTabIndex,
+    type FocusedTabSnapshot,
+    type TimerAutoSettings,
+} from './src/clickup-focus';
+import {
+    decideMeetJoinAuthority,
+    sanitizeMeetMappingStore,
+    sanitizeMeetPrioritySession,
+    selectMeetMapping,
+    type MeetMappingStoreV1,
+    type MeetPrioritySession,
+    type MeetTaskMappingV1,
+} from './src/meet/meet-priority';
+import { createMeetRoomKey, resolveMeetPageContext } from './src/meet/meet-room';
+import { isAuthorizedTeamId, selectAuthorizedTeamId } from './src/team-selection';
+import { SafeDiagnosticLog, type DiagnosticEventName } from './src/diagnostic-log';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -69,7 +92,7 @@ interface AttachEmailMessage {
 
 const STORAGE_KEYS = {
     AUTH_TOKEN: 'clickupToken',
-    REFRESH_TOKEN: 'clickupRefreshToken', // New key for refresh token
+    REFRESH_TOKEN: 'clickupRefreshToken', // Legacy cleanup key; ClickUp does not document refresh grants
     OAUTH_CONFIG: 'oauthConfig', // New key for storing OAuth credentials
     PREFERRED_TEAM: 'preferredTeamId', // Replaces defaultList
     EMAIL_TASK_MAPPINGS: 'emailTaskMappings',
@@ -79,6 +102,9 @@ const STORAGE_KEYS = {
     CACHED_HIERARCHY: 'hierarchyCache', // Unified cache key
     HIERARCHY_PRELOAD_STATUS: 'hierarchyPreloadStatus',
     RATE_GOVERNOR_STATE: 'clickupRateGovernorState',
+    REAUTH_REQUIRED: 'clickupReauthRequired',
+    AUTHORIZATION_MODE: 'clickupAuthorizationMode',
+    CURRENT_USER_VALIDATED_AT: 'clickupCurrentUserValidatedAt',
     DRAFT_CLIENT_ID: 'draftClientId',
     DRAFT_CLIENT_SECRET: 'draftClientSecret'
 };
@@ -90,6 +116,23 @@ const TASK_SEARCH_PAGE_SIZE = 100;
 const TASK_SEARCH_RESULT_LIMIT = 10;
 const CURRENT_USER_VALIDATION_TTL_MS = 5 * 60 * 1000;
 const RECENT_TIME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const FOCUSED_TIMER_DEBOUNCE_MS = 1_200;
+const FOCUSED_TIMER_SESSION_KEY = 'focusedClickUpTimerState';
+const AUTO_START_SUPPRESSED_TASK_SESSION_KEY = 'autoStartSuppressedTaskId';
+const CLICKUP_TASK_TAB_INDEX_SESSION_KEY = 'clickUpTaskTabIndexV1';
+const MEET_PRIORITY_ENABLED_KEY = 'meetPriorityEnabled';
+const MEET_MAPPINGS_KEY = 'meetTaskMappingsV1';
+const MEET_SESSION_KEY = 'meetPrioritySessionV1';
+const MEET_CONFLICT_KEY = 'meetPriorityConflictV1';
+const MEET_MAX_DURATION_MS = 4 * 60 * 60 * 1000;
+const MEET_HEARTBEAT_STALE_MS = 3 * 60 * 1000;
+const storageLocalTrustedReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const storageSessionTrustedReady = chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const diagnosticLog = new SafeDiagnosticLog(chrome.storage.session);
+
+function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
+    void diagnosticLog.record(event, details).catch(() => undefined);
+}
 
 function emitSyncProgress(message: SyncProgressMessage): void {
     if (!isSyncProgressMessage(message)) return;
@@ -165,10 +208,18 @@ interface HierarchyData {
 }
 
 let clickupAPI: ClickUpAPIWrapper | null = null;
+let authenticationStateQueue: Promise<void> = Promise.resolve();
 let currentUserValidatedAt = 0;
 let hierarchyCache: Record<string, CacheEntry<HierarchyData>> = {};
 const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
 let mappingWriteQueue: Promise<void> = Promise.resolve();
+let focusedTimerQueue: Promise<void> = Promise.resolve();
+let timerWriteQueue: Promise<void> = Promise.resolve();
+let clickUpTaskTabIndexQueue: Promise<void> = Promise.resolve();
+let focusedTimerDebounce: ReturnType<typeof setTimeout> | null = null;
+let focusedTimerRevision = 0;
+let meetPrioritySession: MeetPrioritySession | null = null;
+let logoutInProgress = false;
 const customFieldUpdateQueues = new Map<string, Promise<void>>();
 const HIERARCHY_FOLDER_CONCURRENCY = 3;
 
@@ -176,7 +227,9 @@ const HIERARCHY_FOLDER_CONCURRENCY = 3;
 const BADGE_STATES = {
     playing: { text: "▶", color: "#4CAF50" }, // Green
     stopped: { text: "", color: "#00000000" }, // Transparent/None
-    paused: { text: "II", color: "#FF9800" }  // Orange
+    paused: { text: "II", color: "#FF9800" }, // Orange
+    meeting: { text: "M", color: "#4CAF50" },
+    attention: { text: "!", color: "#FF9800" },
 };
 
 // Initialize
@@ -188,20 +241,95 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.alarms.create('timer-poll', { periodInMinutes: 1 });
 });
 
+const meetPriorityReady = restoreMeetPrioritySession();
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    void requestMeetAuthorityRefreshForWindow(windowId);
+    scheduleFocusedTimerEvaluation('window-focus');
+});
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+    void requestMeetAuthorityRefresh(activeInfo.tabId);
+    scheduleFocusedTimerEvaluation('tab-activated');
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url
+        || (changeInfo.status === 'complete' && tab.url?.startsWith('https://app.clickup.com/'))) {
+        void updateTrackedClickUpTaskTab(tabId, changeInfo.url || tab.url)
+            .catch((error) => Logger.error('CLICKUP_TASK_TAB_INDEX_UPDATE_FAILED', error));
+    }
+    if (meetPrioritySession?.tabId === tabId && (changeInfo.url || changeInfo.status === 'complete')) {
+        void runTimerWrite(async () => {
+            if (meetPrioritySession && !await isMeetSessionTabAlive(meetPrioritySession)) {
+                await endMeetSession('navigation');
+            }
+        });
+    }
+    if (!tab.active || (!changeInfo.url && changeInfo.status !== 'complete')) return;
+    scheduleFocusedTimerEvaluation('tab-url');
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if (meetPrioritySession?.tabId === tabId) {
+        void runTimerWrite(() => endMeetSession('tab-closed'));
+    }
+    void handleTrackedClickUpTaskTabRemoved(tabId)
+        .catch((error) => Logger.error('CLICKUP_TASK_TAB_CLOSE_EVALUATION_FAILED', error));
+    scheduleFocusedTimerEvaluation('tab-removed');
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+    if (meetPrioritySession?.windowId === windowId) {
+        void runTimerWrite(() => endMeetSession('window-closed'));
+    }
+    scheduleFocusedTimerEvaluation('window-removed');
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.autoStopTimer) {
+        const operation = changes.autoStopTimer.newValue === true
+            ? hydrateTrackedClickUpTaskTabs()
+            : clearTrackedClickUpTaskTabIndex();
+        void operation.catch((error) => Logger.error('CLICKUP_TASK_TAB_INDEX_SETTING_SYNC_FAILED', error));
+    }
+    if (changes.autoStartTimer || changes.autoStopTimer || changes[STORAGE_KEYS.PREFERRED_TEAM]) {
+        scheduleFocusedTimerEvaluation('settings');
+    }
+});
+
+scheduleFocusedTimerEvaluation('service-worker-start');
+
 // Alarm listener for polling
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === 'timer-poll') {
-        const store = await chrome.storage.local.get([STORAGE_KEYS.PREFERRED_TEAM, STORAGE_KEYS.CACHED_TEAMS]);
-        let teamId = store[STORAGE_KEYS.PREFERRED_TEAM];
-
-        if (!teamId && store[STORAGE_KEYS.CACHED_TEAMS]?.teams?.length > 0) {
-            teamId = store[STORAGE_KEYS.CACHED_TEAMS].teams[0].id;
+        const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+        if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+        await meetPriorityReady;
+        if (meetPrioritySession && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status)
+            && (!await isMeetSessionTabAlive(meetPrioritySession)
+                || Date.now() - meetPrioritySession.lastSeenAt > MEET_HEARTBEAT_STALE_MS)) {
+            await runTimerWrite(() => endMeetSession('stale-session'));
         }
+        if (meetPrioritySession?.status === 'tracking'
+            && Date.now() - (meetPrioritySession.durationConfirmedAt || meetPrioritySession.joinedAt) >= MEET_MAX_DURATION_MS) {
+            await runTimerWrite(() => pauseMeetSessionForLimit());
+        }
+        const teamId = await resolveFocusedTimerTeamId();
 
         if (teamId) {
-            await ensureAPI();
             try {
+                await ensureAPI();
                 const timer = await clickupAPI!.getRunningTimer(teamId);
+                recordDiagnostic('timer_poll', { outcome: timer ? 'running' : 'stopped' });
+                if (meetPrioritySession?.status === 'tracking'
+                    && meetPrioritySession.teamId === teamId
+                    && getRunningTaskId(timer) !== meetPrioritySession.taskId) {
+                    meetPrioritySession.status = 'paused';
+                    await persistMeetPrioritySession();
+                }
                 // Update badge based on timer state
                 if (timer && (timer as any).data) { // Handle wrapped response
                     await updateTimerBadge('playing');
@@ -210,7 +338,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
                 } else {
                     await updateTimerBadge('stopped');
                 }
+                await refreshMeetPriorityBadge();
             } catch (e) {
+                recordDiagnostic('timer_poll', {
+                    outcome: 'failure',
+                    failureClass: classifyDiagnosticFailure(e),
+                });
                 Logger.error('TIMER_POLL_FAILED', e);
             }
         }
@@ -218,69 +351,98 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // Initialize API wrapper
-// Token refresh logic
-async function refreshAccessToken(): Promise<{ success: boolean; token?: string }> {
-    try {
-        // SEC-C1: Use encrypted OAuth config
-        const oauthConfig = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-        const refreshToken = await getSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-
-        if (!refreshToken || !oauthConfig) {
-            Logger.warn('TOKEN_REFRESH_SKIPPED');
-            return { success: false };
-        }
-
-        const response = await fetch('https://api.clickup.com/api/v2/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                client_id: oauthConfig.clientId,
-                client_secret: oauthConfig.clientSecret,
-                refresh_token: refreshToken
-            })
-        });
-
-        if (!response.ok) {
-            Logger.warn(`TOKEN_REFRESH_FAILED_${response.status}`);
-            return { success: false };
-        }
-
-        const result = await response.json();
-        const newToken = result.access_token;
-
-        if (newToken) {
-            Logger.info('TOKEN_REFRESHED');
-            await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, newToken);
-            // Should properly close over clickupAPI if possible, or reliance on wrapper updating itself if we pass callback?
-            // The wrapper calls this, gets the token, and updates itself.
-            return { success: true, token: newToken };
-        }
-
-        return { success: false };
-
-    } catch (e) {
-        Logger.error('TOKEN_REFRESH_ERROR', e);
-        return { success: false };
-    }
-}
-
-// Initialize API wrapper
 async function initializeAPI() {
+    recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'started' });
+    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
+        clickupAPI = null;
+        recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'reauth-required' });
+        return;
+    }
+
     const token = await getSecureToken(STORAGE_KEYS.AUTH_TOKEN);
 
-    if (token) {
-        const store = await chrome.storage.local.get(STORAGE_KEYS.RATE_GOVERNOR_STATE);
-        const governor = new ClickUpRateGovernor(
-            undefined,
-            undefined,
-            store[STORAGE_KEYS.RATE_GOVERNOR_STATE] as RateGovernorState | undefined,
-            async (state) => {
-                await chrome.storage.local.set({ [STORAGE_KEYS.RATE_GOVERNOR_STATE]: state });
-            }
-        );
-        clickupAPI = new ClickUpAPIWrapper(token, governor);
-        clickupAPI.setTokenRefreshCallback(refreshAccessToken);
+    if (!token) {
+        clickupAPI = null;
+        recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'no-token' });
+        return;
     }
+
+    const store = await chrome.storage.local.get([
+        STORAGE_KEYS.RATE_GOVERNOR_STATE,
+        STORAGE_KEYS.AUTHORIZATION_MODE,
+    ]);
+    const authorizationMode = store[STORAGE_KEYS.AUTHORIZATION_MODE] === 'bearer' ? 'bearer' : 'raw';
+    const governor = new ClickUpRateGovernor(
+        undefined,
+        undefined,
+        store[STORAGE_KEYS.RATE_GOVERNOR_STATE] as RateGovernorState | undefined,
+        async (state) => {
+            await chrome.storage.local.set({ [STORAGE_KEYS.RATE_GOVERNOR_STATE]: state });
+        }
+    );
+    const api = new ClickUpAPIWrapper(token, governor, authorizationMode);
+    api.setDiagnosticCallback(({ event, details }) => recordDiagnostic(event, details));
+    api.setAuthenticationFailureCallback(invalidateAuthenticationSession);
+    api.setAuthorizationModeChangeCallback(async (mode) => {
+        const currentToken = await getSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+        if (currentToken === token) {
+            await chrome.storage.local.set({ [STORAGE_KEYS.AUTHORIZATION_MODE]: mode });
+        }
+    });
+    const [latestToken, latestAuthState] = await Promise.all([
+        getSecureToken(STORAGE_KEYS.AUTH_TOKEN),
+        chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED),
+    ]);
+    if (latestToken !== token || latestAuthState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+    clickupAPI = api;
+    recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'ready' });
+    await hydrateTrackedClickUpTaskTabs()
+        .catch((error) => Logger.error('CLICKUP_TASK_TAB_INDEX_HYDRATION_FAILED', error));
+}
+
+async function invalidateAuthenticationSession(rejectedToken: string): Promise<boolean> {
+    return runAuthenticationStateMutation(async () => {
+        const currentToken = await getSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+        if (!currentToken || currentToken !== rejectedToken) {
+            Logger.warn('STALE_AUTH_FAILURE_IGNORED');
+            return false;
+        }
+        clickupAPI = null;
+        currentUserValidatedAt = 0;
+        hierarchyCache = {};
+        taskSearchCaches.clear();
+        await chrome.storage.local.set({ [STORAGE_KEYS.REAUTH_REQUIRED]: true });
+        await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+        await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+        await chrome.storage.local.remove([
+            STORAGE_KEYS.CACHED_USER,
+            STORAGE_KEYS.CACHED_TEAMS,
+            STORAGE_KEYS.CACHED_HIERARCHY,
+            STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+            STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+        ]);
+        if (meetPrioritySession?.status === 'tracking') {
+            meetPrioritySession.status = 'paused';
+            await persistMeetPrioritySession();
+        }
+        await chrome.storage.session.remove([
+            FOCUSED_TIMER_SESSION_KEY,
+            AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
+            CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
+        ]);
+        await clearTrackedClickUpTaskTabIndex();
+        await updateTimerBadge('attention').catch(() => undefined);
+        Logger.warn('AUTHENTICATION_INVALIDATED');
+        recordDiagnostic('auth_state', { stage: 'invalidate', outcome: 'invalidated' });
+        return true;
+    });
+}
+
+function runAuthenticationStateMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = authenticationStateQueue.then(operation, operation);
+    authenticationStateQueue = result.then(() => undefined, () => undefined);
+    return result;
 }
 
 initializeAPI();
@@ -309,7 +471,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
             if (response && response.error && response.error instanceof Error) {
                 sendResponse({
                     success: false,
-                    error: Logger.sanitizeError(response.error)
+                    error: Logger.sanitizeError(response.error),
+                    requiresReauth: isReauthenticationRequired(response.error),
                 });
             } else {
                 sendResponse(response);
@@ -317,7 +480,11 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
         })
         .catch(error => {
             Logger.error('MESSAGE_HANDLER_ERROR', error);
-            sendResponse({ success: false, error: Logger.sanitizeError(error) });
+            sendResponse({
+                success: false,
+                error: Logger.sanitizeError(error),
+                requiresReauth: isReauthenticationRequired(error),
+            });
         });
 
     return true; // Keep channel open for async response
@@ -328,6 +495,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
     switch (action) {
         case 'authenticate':
+            recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'started' });
             try {
                 // SEC-C1: Use encrypted OAuth config retrieval
                 const config = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
@@ -367,24 +535,43 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
                 const result = await tokenResponse.json();
 
-                await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
-
-                if (result.refresh_token) {
-                    await saveSecureToken(STORAGE_KEYS.REFRESH_TOKEN, result.refresh_token);
+                if (typeof result.access_token !== 'string' || result.access_token.length === 0) {
+                    throw new Error('Access token missing from OAuth response');
                 }
-
-                await chrome.storage.local.remove([
-                    STORAGE_KEYS.DRAFT_CLIENT_ID,
-                    STORAGE_KEYS.DRAFT_CLIENT_SECRET,
-                    STORAGE_KEYS.CACHED_USER,
-                ]);
-                currentUserValidatedAt = 0;
-
-                await initializeAPI();
-                const user = await getCachedUser();
+                await runAuthenticationStateMutation(async () => {
+                    await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
+                    await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                    await chrome.storage.local.remove([
+                        STORAGE_KEYS.DRAFT_CLIENT_ID,
+                        STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                        STORAGE_KEYS.CACHED_USER,
+                        STORAGE_KEYS.CACHED_TEAMS,
+                        STORAGE_KEYS.CACHED_HIERARCHY,
+                        STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+                        STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+                        STORAGE_KEYS.REAUTH_REQUIRED,
+                    ]);
+                    currentUserValidatedAt = 0;
+                    await initializeAPI();
+                });
+                const user = await getFreshAuthenticatedUser();
+                await getTeams(true);
+                logoutInProgress = false;
+                if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
+                    await refreshMeetPriorityBadge().catch(() => undefined);
+                } else {
+                    await restoreNormalTimerBadge().catch(() => undefined);
+                }
+                scheduleFocusedTimerEvaluation('authenticated');
+                recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'success' });
 
                 return { success: true, user };
             } catch (e) {
+                recordDiagnostic('auth_state', {
+                    stage: 'oauth',
+                    outcome: 'failure',
+                    failureClass: classifyDiagnosticFailure(e),
+                });
                 Logger.error('AUTH_FAILED', e);
                 return { success: false, error: Logger.sanitizeError(e) };
             }
@@ -398,55 +585,54 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             }
             return { success: true };
 
-        case 'testTokenRefresh': // New action for testing
-            if (!clickupAPI) return { success: false, error: 'API not initialized' };
-            try {
-                // Force a refresh attempt if possible, or just log config
-                // In a real scenario, we might invalidate the current token to force refresh on next call
-                // For now, we'll just check if we have the config
-                const storedConfig = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-                if (!storedConfig) {
-                    return { success: false, error: 'No OAuth config found' };
-                }
-                return { success: true, message: 'OAuth config present' };
-            } catch (e: unknown) {
-                return { success: false, error: e instanceof Error ? e.message : String(e) };
-            }
-
         case 'logout':
-            await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
-            await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-            await chrome.storage.local.remove([
-                STORAGE_KEYS.OAUTH_CONFIG,
-                STORAGE_KEYS.DRAFT_CLIENT_ID,
-                STORAGE_KEYS.DRAFT_CLIENT_SECRET,
-                STORAGE_KEYS.CACHED_USER,
-                STORAGE_KEYS.CACHED_TEAMS,
-            ]);
-            clickupAPI = null;
-            currentUserValidatedAt = 0;
-            hierarchyCache = {};
-            taskSearchCaches.clear();
+            logoutInProgress = true;
+            await runTimerWrite(async () => {
+                try {
+                    await endMeetSession('logout');
+                } catch {
+                    Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
+                }
+                try {
+                    await stopRunningTimerBeforeLogout();
+                } catch {
+                    Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
+                }
+            });
+            await runAuthenticationStateMutation(async () => {
+                meetPrioritySession = null;
+                await chrome.storage.session.remove([
+                    MEET_SESSION_KEY,
+                    MEET_CONFLICT_KEY,
+                    FOCUSED_TIMER_SESSION_KEY,
+                    AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
+                    CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
+                ]);
+                await clearTrackedClickUpTaskTabIndex();
+                await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+                await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                await chrome.storage.local.remove([
+                    STORAGE_KEYS.OAUTH_CONFIG,
+                    STORAGE_KEYS.DRAFT_CLIENT_ID,
+                    STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                    STORAGE_KEYS.CACHED_USER,
+                    STORAGE_KEYS.CACHED_TEAMS,
+                    STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+                    STORAGE_KEYS.REAUTH_REQUIRED,
+                ]);
+                clickupAPI = null;
+                currentUserValidatedAt = 0;
+                hierarchyCache = {};
+                taskSearchCaches.clear();
+            });
             await chrome.action.setBadgeText({ text: '' });
             return { success: true };
 
         case 'checkAuth':
-            await initializeAPI();
-            return { authenticated: !!clickupAPI };
+            return await getAuthenticationStatus();
 
         case 'getStatus': // Combined status check
-            try {
-                await initializeAPI();
-                const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-                const user = clickupAPI ? await getCachedUser().catch(() => null) : null;
-                return {
-                    authenticated: !!clickupAPI && !!user,
-                    configured,
-                    user: user
-                };
-            } catch (e) {
-                return { authenticated: false, configured: false, error: String(e) };
-            }
+            return await getAuthenticationStatus();
 
         // DEV-H1: Functions moved to module level (lines 624+)
 
@@ -476,6 +662,18 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             // Return entire cache for debugging or fast load
             const fullCache = await chrome.storage.local.get(STORAGE_KEYS.CACHED_HIERARCHY);
             return fullCache[STORAGE_KEYS.CACHED_HIERARCHY] || {};
+
+        case 'getEmailTaskMappings':
+            await storageLocalTrustedReady;
+            return await getEmailTaskMappingsForRead();
+
+        case 'getDefaultListConfig':
+            await storageLocalTrustedReady;
+            const defaultListStore = await chrome.storage.local.get(['defaultList', 'defaultListConfig']);
+            return {
+                defaultList: typeof defaultListStore.defaultList === 'string' ? defaultListStore.defaultList : undefined,
+                defaultListConfig: sanitizeDefaultListConfig(defaultListStore.defaultListConfig),
+            };
 
         case 'preloadFullHierarchy':
             // Trigger full hierarchy fetch and wait for result
@@ -535,12 +733,32 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await createTaskFull(message as any);
 
         case 'savePreferredTeam':
+            const authorizedTeams = await getTeams();
+            if (!isAuthorizedTeamId(authorizedTeams.teams, data.teamId)) {
+                throw new Error('TEAM_NOT_AUTHORIZED');
+            }
             await chrome.storage.local.set({ [STORAGE_KEYS.PREFERRED_TEAM]: data.teamId });
             return { success: true };
 
         case 'getPreferredTeam':
             const prefData = await chrome.storage.local.get(STORAGE_KEYS.PREFERRED_TEAM);
             return { teamId: prefData[STORAGE_KEYS.PREFERRED_TEAM] };
+
+        case 'getDiagnosticStatus':
+            await storageSessionTrustedReady;
+            return await diagnosticLog.getStatus();
+
+        case 'setDiagnosticEnabled':
+            await storageSessionTrustedReady;
+            return await diagnosticLog.setEnabled(data.enabled);
+
+        case 'exportDiagnostics':
+            await storageSessionTrustedReady;
+            return await diagnosticLog.createExport(chrome.runtime.getManifest().version);
+
+        case 'clearDiagnostics':
+            await storageSessionTrustedReady;
+            return await diagnosticLog.clear();
 
 
         case 'attachToTask':
@@ -576,7 +794,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             throw new Error('Invalid sync parameters');
 
         case 'clearLocalData':
-            return await clearLocalData(sender);
+            return await runTimerWrite(() => clearLocalData(sender));
 
         case 'searchTasks':
             const sQuery = message.query || (data ? data.query : undefined);
@@ -587,16 +805,93 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             const gTaskId = message.taskId || (data ? data.taskId : undefined);
             return await getTaskById(gTaskId);
 
+        case 'focusedClickUpNavigation':
+            if (typeof sender.tab?.id === 'number') {
+                await updateTrackedClickUpTaskTab(sender.tab.id, sender.tab.url || sender.url);
+            }
+            scheduleFocusedTimerEvaluation('content-navigation');
+            return { success: true };
+
+        case 'meetSessionEvent':
+            return await runTimerWrite(() => handleMeetSessionEvent(data, sender));
+
+        case 'getMeetDetectionEnabled':
+            const meetDetectionSettings = await chrome.storage.local.get(MEET_PRIORITY_ENABLED_KEY);
+            return { enabled: meetDetectionSettings[MEET_PRIORITY_ENABLED_KEY] === true };
+
+        case 'getMeetPriorityStatus':
+            return await getMeetPriorityStatus();
+
+        case 'getMeetMappings':
+            return await getMeetMappings();
+
+        case 'assignMeetTask':
+            return await runTimerWrite(() => assignMeetTask(data.taskId, data.teamId, data.remember));
+
+        case 'ignoreMeetSession':
+            return await runTimerWrite(() => ignoreMeetSession());
+
+        case 'endMeetSession':
+            return await runTimerWrite(() => endMeetSession('manual'));
+
+        case 'resumeMeetSession':
+            return await runTimerWrite(() => resumeMeetSession());
+
+        case 'deleteMeetMapping':
+            return await runTimerWrite(() => deleteMeetMapping(data.roomKey));
+
+        case 'setMeetMappingEnabled':
+            return await runTimerWrite(() => setMeetMappingEnabled(data.roomKey, data.enabled));
+
+        case 'setMeetPriorityEnabled':
+            if (!data.enabled) await runTimerWrite(() => endMeetSession('disabled'));
+            await chrome.storage.local.set({ [MEET_PRIORITY_ENABLED_KEY]: data.enabled });
+            await requestMeetDetectionRefresh(data.enabled);
+            return { success: true };
+
         // Time Tracking
         case 'startTimer':
-            const startRes = await clickupAPI!.startTimer(data.teamId, data.taskId);
-            await updateTimerBadge('playing');
-            return startRes;
+            return await runTimerWrite(async () => {
+                await meetPriorityReady;
+                if (meetPrioritySession
+                    && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status)) {
+                    throw new Error('MEET_PRIORITY_ACTIVE');
+                }
+                if (!await validateFocusedTask(data.taskId, data.teamId)) {
+                    throw new Error('TIMER_TASK_INVALID');
+                }
+                const running = await clickupAPI!.getRunningTimer(data.teamId);
+                const runningTaskId = getRunningTaskId(running);
+                if (running && !runningTaskId) throw new Error('TIMER_RUNNING_TASK_UNKNOWN');
+                if (runningTaskId && runningTaskId !== data.taskId) {
+                    await clickupAPI!.stopTimer(data.teamId);
+                }
+                const startRes = runningTaskId === data.taskId
+                    ? running
+                    : await clickupAPI!.startTimer(data.teamId, data.taskId);
+                await clearManualStopSuppression();
+                await updateTimerBadge('playing');
+                await refreshMeetPriorityBadge();
+                return startRes;
+            });
 
         case 'stopTimer':
-            const stopRes = await clickupAPI!.stopTimer(data.teamId);
-            await updateTimerBadge('stopped');
-            return stopRes;
+            return await runTimerWrite(async () => {
+                const running = await clickupAPI!.getRunningTimer(data.teamId);
+                if (!running) {
+                    await updateTimerBadge('stopped');
+                    return null;
+                }
+                const stopRes = await clickupAPI!.stopTimer(data.teamId);
+                await persistManualStopSuppression(getRunningTaskId(running));
+                if (meetPrioritySession?.status === 'tracking' && meetPrioritySession.teamId === data.teamId) {
+                    meetPrioritySession.status = 'paused';
+                    await persistMeetPrioritySession();
+                }
+                await updateTimerBadge('stopped');
+                await refreshMeetPriorityBadge();
+                return stopRes;
+            });
 
         case 'getRunningTimer':
             const timer = await clickupAPI!.getRunningTimer(data.teamId);
@@ -605,24 +900,31 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             } else {
                 await updateTimerBadge('stopped');
             }
+            if (meetPrioritySession?.status === 'tracking'
+                && meetPrioritySession.teamId === data.teamId
+                && getRunningTaskId(timer) !== meetPrioritySession.taskId) {
+                meetPrioritySession.status = 'paused';
+                await persistMeetPrioritySession();
+            }
+            await refreshMeetPriorityBadge();
             return timer;
 
         case 'createTimeEntry':
             // Kept for backward compatibility if entry object is used
-            return await clickupAPI!.createTimeEntry(
+            return await runTimerWrite(() => clickupAPI!.createTimeEntry(
                 data.teamId,
                 data.entry?.tid || data.taskId,
                 data.entry?.duration || data.duration,
                 data.entry?.start || data.start
-            );
+            ));
 
         case 'addTimeEntry':
-            return await clickupAPI!.createTimeEntry(
+            return await runTimerWrite(() => clickupAPI!.createTimeEntry(
                 data.teamId,
                 data.taskId,
                 data.duration,
                 data.start
-            );
+            ));
 
         case 'getTimeEntries':
             const currentUserId = await getValidatedCurrentUserId();
@@ -647,8 +949,814 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 async function ensureAPI() {
     if (!clickupAPI) {
         await initializeAPI();
-        if (!clickupAPI) throw new Error('Not authenticated');
+        if (!clickupAPI) {
+            const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+            if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
+                const error = new Error('Authentication failed. Reconnect ClickUp.') as Error & { status?: number; requiresReauth?: boolean };
+                error.status = 401;
+                error.requiresReauth = true;
+                throw error;
+            }
+            throw new Error('Not authenticated');
+        }
     }
+}
+
+async function getAuthenticationStatus(): Promise<{
+    authenticated: boolean;
+    configured: boolean;
+    requiresReauth: boolean;
+    authUnavailable?: boolean;
+    user?: ClickUpUserResponse;
+}> {
+    const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
+        recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
+        return { authenticated: false, configured, requiresReauth: true };
+    }
+
+    try {
+        if (!clickupAPI) await initializeAPI();
+        if (!clickupAPI) {
+            recordDiagnostic('auth_state', { stage: 'status', outcome: 'no-token' });
+            return { authenticated: false, configured, requiresReauth: false };
+        }
+        const cache = await chrome.storage.local.get([
+            STORAGE_KEYS.CACHED_USER,
+            STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+        ]);
+        const cachedValidatedAt = Number(cache[STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]);
+        if (cache[STORAGE_KEYS.CACHED_USER]
+            && Number.isFinite(cachedValidatedAt)
+            && Date.now() - cachedValidatedAt < CURRENT_USER_VALIDATION_TTL_MS) {
+            currentUserValidatedAt = Math.max(currentUserValidatedAt, cachedValidatedAt);
+            recordDiagnostic('auth_state', { stage: 'status', outcome: 'cached' });
+            return {
+                authenticated: true,
+                configured,
+                requiresReauth: false,
+                user: cache[STORAGE_KEYS.CACHED_USER] as ClickUpUserResponse,
+            };
+        }
+        const user = await getFreshAuthenticatedUser();
+        recordDiagnostic('auth_state', { stage: 'status', outcome: 'remote' });
+        return { authenticated: true, configured, requiresReauth: false, user };
+    } catch (error) {
+        if (isReauthenticationRequired(error)) {
+            recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
+            return { authenticated: false, configured, requiresReauth: true };
+        }
+        recordDiagnostic('auth_state', {
+            stage: 'status',
+            outcome: 'unavailable',
+            failureClass: classifyDiagnosticFailure(error),
+        });
+        Logger.warn('AUTHENTICATION_STATUS_UNAVAILABLE');
+        return { authenticated: false, configured, requiresReauth: false, authUnavailable: true };
+    }
+}
+
+function runTimerWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const result = timerWriteQueue.then(operation, operation);
+    timerWriteQueue = result.then(() => undefined, () => undefined);
+    return result;
+}
+
+function runClickUpTaskTabIndexMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = clickUpTaskTabIndexQueue.then(operation, operation);
+    clickUpTaskTabIndexQueue = result.then(() => undefined, () => undefined);
+    return result;
+}
+
+async function restoreMeetPrioritySession(): Promise<void> {
+    const stored = await chrome.storage.session.get(MEET_SESSION_KEY);
+    const session = sanitizeMeetPrioritySession(stored[MEET_SESSION_KEY]);
+    if (!session) {
+        await chrome.storage.session.remove(MEET_SESSION_KEY);
+        return;
+    }
+    meetPrioritySession = session;
+    if (!await isMeetSessionTabAlive(session) || !await hasConfirmedMeetSignal(session)) {
+        meetPrioritySession = null;
+        await chrome.storage.session.remove(MEET_SESSION_KEY);
+        return;
+    }
+    await refreshMeetPriorityBadge();
+}
+
+async function handleMeetSessionEvent(
+    data: { event: 'candidate' | 'joined' | 'left' | 'heartbeat'; roomKey: string },
+    sender: chrome.runtime.MessageSender,
+): Promise<{ success: boolean; status?: string }> {
+    await meetPriorityReady;
+    await storageLocalTrustedReady;
+    const settings = await chrome.storage.local.get(MEET_PRIORITY_ENABLED_KEY);
+    if (settings[MEET_PRIORITY_ENABLED_KEY] !== true) return { success: true, status: 'disabled' };
+    if (typeof sender.tab?.id !== 'number' || typeof sender.tab.windowId !== 'number') return { success: false };
+    if (sender.tab.incognito) return { success: true, status: 'incognito-blocked' };
+
+    if (data.event === 'candidate') return { success: true, status: 'candidate' };
+    if (data.event === 'heartbeat' && meetPrioritySession?.roomKey === data.roomKey
+        && meetPrioritySession.tabId === sender.tab.id) {
+        meetPrioritySession.lastSeenAt = Date.now();
+        await persistMeetPrioritySession();
+        return { success: true, status: meetPrioritySession.status };
+    }
+    if (data.event === 'heartbeat') return { success: true, status: 'ignored' };
+    if (data.event === 'left') {
+        if (meetPrioritySession?.roomKey === data.roomKey && meetPrioritySession.tabId === sender.tab.id) {
+            await endMeetSession('left');
+        } else {
+            await chrome.storage.session.remove(MEET_CONFLICT_KEY);
+        }
+        return { success: true, status: 'idle' };
+    }
+
+    const focused = await getFocusedTabSnapshot();
+    const authority = decideMeetJoinAuthority(meetPrioritySession, {
+        roomKey: data.roomKey,
+        tabId: sender.tab.id,
+        windowId: sender.tab.windowId,
+    }, focused ? { tabId: focused.tabId, windowId: focused.windowId } : null);
+    if (authority === 'conflict') {
+        await chrome.storage.session.set({ [MEET_CONFLICT_KEY]: true });
+        return { success: true, status: 'conflict' };
+    }
+    if (authority === 'continue') {
+        meetPrioritySession!.lastSeenAt = Date.now();
+        await persistMeetPrioritySession();
+        return { success: true, status: meetPrioritySession!.status };
+    }
+    if (authority === 'replace') await endMeetSession('priority-replaced');
+
+    const previous = await captureRunningTimerContext();
+
+    meetPrioritySession = {
+        roomKey: data.roomKey,
+        tabId: sender.tab.id,
+        windowId: sender.tab.windowId,
+        status: 'awaiting-task',
+        previousTaskId: previous.taskId || undefined,
+        previousTeamId: previous.teamId || undefined,
+        joinedAt: Date.now(),
+        lastSeenAt: Date.now(),
+    };
+    await chrome.storage.session.remove(MEET_CONFLICT_KEY);
+    await persistMeetPrioritySession();
+    await refreshMeetPriorityBadge();
+
+    const mapping = await getMeetMapping(data.roomKey);
+    if (mapping) {
+        try {
+            await startMeetTracking(mapping.taskId, mapping.teamId);
+        } catch {
+            await stopCurrentTimerForUnassignedMeet();
+            await refreshMeetPriorityBadge();
+            return { success: true, status: meetPrioritySession?.status };
+        }
+        mapping.lastUsedAt = Date.now();
+        await saveMeetMapping(mapping).catch(() => undefined);
+    } else {
+        await stopCurrentTimerForUnassignedMeet();
+    }
+
+    return { success: true, status: meetPrioritySession?.status };
+}
+
+async function assignMeetTask(taskId: string, teamId: string, remember: boolean): Promise<{ success: boolean; mappingSaved: boolean }> {
+    await meetPriorityReady;
+    if (!meetPrioritySession || !['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status)) {
+        throw new Error('MEET_SESSION_UNAVAILABLE');
+    }
+    const roomKey = meetPrioritySession.roomKey;
+    await startMeetTracking(taskId, teamId);
+    let mappingSaved = !remember;
+    if (remember) {
+        try {
+            const now = Date.now();
+            const existing = await readMeetMappings();
+            await saveMeetMapping({
+                roomKey,
+                taskId,
+                teamId,
+                createdAt: existing.mappings[roomKey]?.createdAt || now,
+                lastUsedAt: now,
+                enabled: true,
+            });
+            mappingSaved = true;
+        } catch {
+            mappingSaved = false;
+        }
+    }
+    return { success: true, mappingSaved };
+}
+
+async function ignoreMeetSession(): Promise<{ success: boolean }> {
+    await meetPriorityReady;
+    if (!meetPrioritySession || meetPrioritySession.status !== 'awaiting-task') {
+        throw new Error('MEET_SESSION_UNAVAILABLE');
+    }
+    meetPrioritySession.status = 'ignored';
+    await persistMeetPrioritySession();
+    await restoreNormalTimerBadge();
+    scheduleFocusedTimerEvaluation('meet-ignored');
+    return { success: true };
+}
+
+async function startMeetTracking(taskId: string, teamId: string): Promise<void> {
+    if (!meetPrioritySession || !await isMeetSessionTabAlive(meetPrioritySession)) throw new Error('MEET_SESSION_STALE');
+    const expectedSession = {
+        roomKey: meetPrioritySession.roomKey,
+        tabId: meetPrioritySession.tabId,
+        windowId: meetPrioritySession.windowId,
+    };
+    await ensureAPI();
+    if (!await validateFocusedTask(taskId, teamId)) throw new Error('MEET_TASK_INVALID');
+    const running = await clickupAPI!.getRunningTimer(teamId);
+    const runningTaskId = getRunningTaskId(running);
+
+    if (running && !runningTaskId) throw new Error('MEET_RUNNING_TASK_UNKNOWN');
+    if (runningTaskId && runningTaskId !== taskId) await clickupAPI!.stopTimer(teamId);
+    if (!await isSameMeetSessionAlive(expectedSession)) throw new Error('MEET_SESSION_STALE_AFTER_STOP');
+    const startedMeetTimer = runningTaskId !== taskId;
+    if (startedMeetTimer) await clickupAPI!.startTimer(teamId, taskId);
+    await clearManualStopSuppression();
+
+    const previousState = { ...meetPrioritySession };
+    try {
+        meetPrioritySession.status = 'tracking';
+        meetPrioritySession.taskId = taskId;
+        meetPrioritySession.teamId = teamId;
+        meetPrioritySession.startedAt = meetPrioritySession.startedAt || Date.now();
+        meetPrioritySession.lastSeenAt = Date.now();
+        await persistMeetPrioritySession();
+    } catch (error) {
+        meetPrioritySession = previousState;
+        if (startedMeetTimer) {
+            try {
+                await clickupAPI!.stopTimer(teamId);
+            } catch {
+                Logger.error('MEET_TIMER_COMPENSATION_FAILED');
+            }
+        }
+        throw error;
+    }
+    await refreshMeetPriorityBadge().catch(() => undefined);
+}
+
+async function stopCurrentTimerForUnassignedMeet(): Promise<void> {
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId) return;
+    await ensureAPI();
+    const running = await clickupAPI!.getRunningTimer(teamId);
+    if (running) {
+        await clickupAPI!.stopTimer(teamId);
+        await updateTimerBadge('stopped');
+    }
+}
+
+async function endMeetSession(_reason: string): Promise<{ success: boolean }> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    if (!session) return { success: true };
+
+    if (session.status === 'tracking' && session.teamId) {
+        await ensureAPI();
+        const running = await clickupAPI!.getRunningTimer(session.teamId);
+        if (getRunningTaskId(running) === session.taskId) {
+            await clickupAPI!.stopTimer(session.teamId);
+            if (['manual', 'logout'].includes(_reason) && session.taskId) {
+                await persistManualStopSuppression(session.taskId);
+            }
+            await updateTimerBadge('stopped');
+        }
+    }
+
+    if (_reason === 'manual') {
+        session.status = 'ignored';
+        session.taskId = undefined;
+        session.teamId = undefined;
+        session.startedAt = undefined;
+        await persistMeetPrioritySession();
+    } else {
+        meetPrioritySession = null;
+        await chrome.storage.session.remove([MEET_SESSION_KEY, MEET_CONFLICT_KEY]);
+    }
+    await restoreNormalTimerBadge();
+    scheduleFocusedTimerEvaluation('meet-ended');
+    return { success: true };
+}
+
+async function getMeetPriorityStatus(): Promise<Record<string, unknown>> {
+    await meetPriorityReady;
+    const settings = await chrome.storage.local.get(MEET_PRIORITY_ENABLED_KEY);
+    const conflict = await chrome.storage.session.get(MEET_CONFLICT_KEY);
+    if (!meetPrioritySession) return {
+        enabled: settings[MEET_PRIORITY_ENABLED_KEY] === true,
+        status: 'idle',
+        conflict: false,
+    };
+    return {
+        enabled: settings[MEET_PRIORITY_ENABLED_KEY] === true,
+        status: meetPrioritySession.status,
+        conflict: conflict[MEET_CONFLICT_KEY] === true,
+        taskId: meetPrioritySession.taskId,
+        teamId: meetPrioritySession.teamId,
+        startedAt: meetPrioritySession.startedAt,
+        joinedAt: meetPrioritySession.joinedAt,
+        previousTaskId: meetPrioritySession.previousTaskId,
+        previousTeamId: meetPrioritySession.previousTeamId,
+    };
+}
+
+async function getMeetMappings(): Promise<{ mappings: MeetTaskMappingV1[] }> {
+    const store = await readMeetMappings();
+    return {
+        mappings: Object.values(store.mappings)
+            .sort((left, right) => right.lastUsedAt - left.lastUsedAt)
+            .slice(0, 50),
+    };
+}
+
+async function captureRunningTimerContext(): Promise<{ taskId: string | null; teamId: string | null }> {
+    try {
+        const teamId = await resolveFocusedTimerTeamId();
+        if (!teamId) return { taskId: null, teamId: null };
+        await ensureAPI();
+        const running = await clickupAPI!.getRunningTimer(teamId);
+        return { taskId: getRunningTaskId(running), teamId };
+    } catch {
+        return { taskId: null, teamId: null };
+    }
+}
+
+async function pauseMeetSessionForLimit(): Promise<{ success: boolean }> {
+    const session = meetPrioritySession;
+    if (!session || session.status !== 'tracking' || !session.teamId) return { success: true };
+    await ensureAPI();
+    const running = await clickupAPI!.getRunningTimer(session.teamId);
+    if (getRunningTaskId(running) === session.taskId) await clickupAPI!.stopTimer(session.teamId);
+    session.status = 'paused';
+    await persistMeetPrioritySession();
+    await refreshMeetPriorityBadge();
+    return { success: true };
+}
+
+async function resumeMeetSession(): Promise<{ success: boolean }> {
+    if (!meetPrioritySession || meetPrioritySession.status !== 'paused'
+        || !meetPrioritySession.taskId || !meetPrioritySession.teamId) {
+        throw new Error('MEET_SESSION_NOT_PAUSED');
+    }
+    const taskId = meetPrioritySession.taskId;
+    const teamId = meetPrioritySession.teamId;
+    const previousConfirmedAt = meetPrioritySession.durationConfirmedAt;
+    meetPrioritySession.durationConfirmedAt = Date.now();
+    try {
+        await startMeetTracking(taskId, teamId);
+    } catch (error) {
+        if (meetPrioritySession) meetPrioritySession.durationConfirmedAt = previousConfirmedAt;
+        throw error;
+    }
+    return { success: true };
+}
+
+async function readMeetMappings(): Promise<MeetMappingStoreV1> {
+    const stored = await chrome.storage.local.get(MEET_MAPPINGS_KEY);
+    return sanitizeMeetMappingStore(stored[MEET_MAPPINGS_KEY]);
+}
+
+async function getMeetMapping(roomKey: string): Promise<MeetTaskMappingV1 | null> {
+    return selectMeetMapping(await readMeetMappings(), roomKey);
+}
+
+async function saveMeetMapping(mapping: MeetTaskMappingV1): Promise<void> {
+    const store = await readMeetMappings();
+    store.mappings[mapping.roomKey] = mapping;
+    await chrome.storage.local.set({ [MEET_MAPPINGS_KEY]: store });
+}
+
+async function deleteMeetMapping(roomKey: string): Promise<{ success: boolean }> {
+    const store = await readMeetMappings();
+    delete store.mappings[roomKey];
+    await chrome.storage.local.set({ [MEET_MAPPINGS_KEY]: store });
+    return { success: true };
+}
+
+async function setMeetMappingEnabled(roomKey: string, enabled: boolean): Promise<{ success: boolean }> {
+    const store = await readMeetMappings();
+    const mapping = store.mappings[roomKey];
+    if (!mapping) throw new Error('MEET_MAPPING_NOT_FOUND');
+    mapping.enabled = enabled;
+    await chrome.storage.local.set({ [MEET_MAPPINGS_KEY]: store });
+    return { success: true };
+}
+
+async function requestMeetDetectionRefresh(enabled: boolean): Promise<void> {
+    const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+    await Promise.all(tabs
+        .filter((tab) => typeof tab.id === 'number' && !tab.incognito)
+        .map((tab) => chrome.tabs.sendMessage(tab.id!, {
+            action: 'setMeetDetectionEnabled',
+            data: { enabled },
+        }).catch(() => undefined)));
+}
+
+async function requestMeetAuthorityRefresh(tabId: number): Promise<void> {
+    await chrome.tabs.sendMessage(tabId, { action: 'refreshMeetAuthority' }).catch(() => undefined);
+}
+
+async function requestMeetAuthorityRefreshForWindow(windowId: number): Promise<void> {
+    const tabs = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
+    if (typeof tabs[0]?.id === 'number') await requestMeetAuthorityRefresh(tabs[0].id);
+}
+
+async function isMeetSessionTabAlive(session: MeetPrioritySession): Promise<boolean> {
+    try {
+        const tab = await chrome.tabs.get(session.tabId);
+        if (tab.windowId !== session.windowId || typeof tab.url !== 'string') return false;
+        const context = resolveMeetPageContext(tab.url);
+        if (context.kind !== 'candidate') return false;
+        return await createMeetRoomKey(context.roomCode) === session.roomKey;
+    } catch {
+        return false;
+    }
+}
+
+async function isSameMeetSessionAlive(expected: { roomKey: string; tabId: number; windowId: number }): Promise<boolean> {
+    return !!meetPrioritySession
+        && meetPrioritySession.roomKey === expected.roomKey
+        && meetPrioritySession.tabId === expected.tabId
+        && meetPrioritySession.windowId === expected.windowId
+        && Date.now() - meetPrioritySession.lastSeenAt <= MEET_HEARTBEAT_STALE_MS
+        && await isMeetSessionTabAlive(meetPrioritySession)
+        && await hasConfirmedMeetSignal(expected);
+}
+
+async function hasConfirmedMeetSignal(expected: { roomKey: string; tabId: number; windowId: number }): Promise<boolean> {
+    try {
+        const response = await chrome.tabs.sendMessage(expected.tabId, { action: 'confirmMeetSession' });
+        if (!response || typeof response !== 'object' || Array.isArray(response)) return false;
+        if (!Object.keys(response).every((key) => ['active', 'roomKey'].includes(key))) return false;
+        return response.active === true && response.roomKey === expected.roomKey;
+    } catch {
+        return false;
+    }
+}
+
+async function persistMeetPrioritySession(): Promise<void> {
+    if (!meetPrioritySession) await chrome.storage.session.remove(MEET_SESSION_KEY);
+    else await chrome.storage.session.set({ [MEET_SESSION_KEY]: meetPrioritySession });
+}
+
+async function refreshMeetPriorityBadge(): Promise<void> {
+    if (!meetPrioritySession || meetPrioritySession.status === 'ignored') return;
+    if (meetPrioritySession.status === 'tracking') {
+        await updateTimerBadge('meeting');
+        return;
+    }
+    await updateTimerBadge('attention');
+}
+
+async function restoreNormalTimerBadge(): Promise<void> {
+    try {
+        const teamId = await resolveFocusedTimerTeamId();
+        if (!teamId) {
+            await updateTimerBadge('stopped');
+            return;
+        }
+        await ensureAPI();
+        const running = await clickupAPI!.getRunningTimer(teamId);
+        await updateTimerBadge(running ? 'playing' : 'stopped');
+    } catch {
+        await updateTimerBadge('stopped');
+    }
+}
+
+async function hydrateTrackedClickUpTaskTabs(): Promise<void> {
+    if (!clickupAPI || logoutInProgress) return;
+    const settings = await readFocusedTimerSettings();
+    if (!settings.autoStopTimer) {
+        await clearTrackedClickUpTaskTabIndex();
+        return;
+    }
+    const tabs = await chrome.tabs.query({ url: 'https://app.clickup.com/*' });
+    await Promise.all(tabs.map(async (tab) => {
+        if (typeof tab.id !== 'number') return;
+        await updateTrackedClickUpTaskTab(tab.id, tab.url);
+    }));
+}
+
+async function updateTrackedClickUpTaskTab(tabId: number, rawUrl: string | undefined): Promise<void> {
+    if (!Number.isSafeInteger(tabId) || tabId < 0 || !clickupAPI || logoutInProgress) return;
+    const settings = await readFocusedTimerSettings();
+    if (!settings.autoStopTimer) return;
+    await storageSessionTrustedReady;
+    await runClickUpTaskTabIndexMutation(async () => {
+        const stored = await chrome.storage.session.get(CLICKUP_TASK_TAB_INDEX_SESSION_KEY);
+        const nextIndex = updateClickUpTaskTabIndex(
+            stored[CLICKUP_TASK_TAB_INDEX_SESSION_KEY],
+            tabId,
+            rawUrl,
+        );
+        await chrome.storage.session.set({ [CLICKUP_TASK_TAB_INDEX_SESSION_KEY]: nextIndex });
+    });
+}
+
+async function clearTrackedClickUpTaskTabIndex(): Promise<void> {
+    await storageSessionTrustedReady;
+    await runClickUpTaskTabIndexMutation(async () => {
+        await chrome.storage.session.remove(CLICKUP_TASK_TAB_INDEX_SESSION_KEY);
+    });
+}
+
+async function removeTrackedClickUpTaskTab(tabId: number): Promise<string | null> {
+    if (!Number.isSafeInteger(tabId) || tabId < 0) return null;
+    await storageSessionTrustedReady;
+    return runClickUpTaskTabIndexMutation(async () => {
+        const stored = await chrome.storage.session.get(CLICKUP_TASK_TAB_INDEX_SESSION_KEY);
+        const removed = removeClickUpTaskTabIndexEntry(
+            stored[CLICKUP_TASK_TAB_INDEX_SESSION_KEY],
+            tabId,
+        );
+        await chrome.storage.session.set({ [CLICKUP_TASK_TAB_INDEX_SESSION_KEY]: removed.nextIndex });
+        return removed.taskId;
+    });
+}
+
+async function handleTrackedClickUpTaskTabRemoved(tabId: number): Promise<void> {
+    const closedTaskId = await removeTrackedClickUpTaskTab(tabId);
+    if (!closedTaskId) return;
+    await runTimerWrite(() => stopTimerAfterLastTaskTabClose(closedTaskId));
+}
+
+async function stopTimerAfterLastTaskTabClose(closedTaskId: string): Promise<void> {
+    if (logoutInProgress) return;
+    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+
+    await meetPriorityReady;
+    const meetPriorityActive = !!meetPrioritySession
+        && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status);
+    if (meetPriorityActive) return;
+
+    const settings = await readFocusedTimerSettings();
+    if (!settings.autoStopTimer) return;
+
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId) return;
+    await ensureAPI();
+
+    const runningBeforeTabQuery = await clickupAPI!.getRunningTimer(teamId);
+    const runningTaskId = getRunningTaskId(runningBeforeTabQuery);
+    const remainingTabs = await chrome.tabs.query({ url: 'https://app.clickup.com/*' });
+    const action = decideLastTaskTabCloseAction(
+        settings,
+        closedTaskId,
+        runningTaskId,
+        remainingTabs.map((tab) => tab.url),
+        false,
+    );
+    if (action.type !== 'stop') return;
+
+    const runningBeforeStop = await clickupAPI!.getRunningTimer(teamId);
+    if (getRunningTaskId(runningBeforeStop) !== closedTaskId) return;
+
+    await clickupAPI!.stopTimer(teamId);
+    await updateTimerBadge('stopped');
+    await chrome.storage.session.remove(FOCUSED_TIMER_SESSION_KEY);
+    recordDiagnostic('timer_transition', {
+        action: 'stop',
+        outcome: 'stopped',
+        reason: 'last-task-tab-closed',
+    });
+}
+
+function scheduleFocusedTimerEvaluation(reason: string): void {
+    const revision = ++focusedTimerRevision;
+    if (focusedTimerDebounce) clearTimeout(focusedTimerDebounce);
+    focusedTimerDebounce = setTimeout(() => {
+        focusedTimerDebounce = null;
+        focusedTimerQueue = focusedTimerQueue
+            .then(() => evaluateFocusedTimer(revision, reason))
+            .catch((error) => Logger.error('FOCUSED_TIMER_EVALUATION_FAILED', error));
+    }, FOCUSED_TIMER_DEBOUNCE_MS);
+}
+
+async function evaluateFocusedTimer(revision: number, _reason: string): Promise<void> {
+    if (revision !== focusedTimerRevision || logoutInProgress) return;
+    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+    await meetPriorityReady;
+    if (meetPrioritySession && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status)) return;
+
+    const settings = await readFocusedTimerSettings();
+    if (!settings.autoStartTimer && !settings.autoStopTimer) return;
+
+    const snapshot = await getFocusedTabSnapshot();
+    if (!snapshot || revision !== focusedTimerRevision) return;
+
+    const context = resolveClickUpFocusContext(snapshot.url);
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId || revision !== focusedTimerRevision) return;
+
+    await ensureAPI();
+    await runTimerWrite(async () => {
+        if (revision !== focusedTimerRevision || !await isSnapshotStillFocused(snapshot)) return;
+
+        const running = await clickupAPI!.getRunningTimer(teamId);
+        if (revision !== focusedTimerRevision || !await isSnapshotStillFocused(snapshot)) return;
+
+        const runningTaskId = getRunningTaskId(running);
+        if (running && !runningTaskId) {
+            Logger.warn('FOCUSED_TIMER_RUNNING_TASK_UNKNOWN');
+            return;
+        }
+
+        const proposedAction = decideFocusedTimerAction(settings, context, runningTaskId);
+        const suppressedTaskId = await readManualStopSuppression();
+        const suppression = applyManualStopSuppression(proposedAction, suppressedTaskId);
+        const transitionResult = await executeFocusedTimerAction(suppression.action, {
+            isCurrent: async () => revision === focusedTimerRevision && await isSnapshotStillFocused(snapshot),
+            validateTask: (taskId) => validateFocusedTask(taskId, teamId),
+            stopTimer: async () => {
+                await clickupAPI!.stopTimer(teamId);
+                await updateTimerBadge('stopped');
+                await persistFocusedTimerState(snapshot, null);
+            },
+            startTimer: async (taskId) => {
+                await clickupAPI!.startTimer(teamId, taskId);
+                await clearManualStopSuppression();
+                await updateTimerBadge('playing');
+                await persistFocusedTimerState(snapshot, taskId);
+            },
+        });
+        recordDiagnostic('timer_transition', {
+            action: suppression.action.type,
+            outcome: transitionResult,
+            reason: sanitizeDiagnosticTimerReason(suppression.action.reason),
+        });
+    });
+}
+
+async function readFocusedTimerSettings(): Promise<TimerAutoSettings> {
+    const stored = await chrome.storage.local.get(['autoStartTimer', 'autoStopTimer']);
+    return {
+        autoStartTimer: stored.autoStartTimer === true,
+        autoStopTimer: stored.autoStopTimer === true,
+    };
+}
+
+async function getFocusedTabSnapshot(): Promise<FocusedTabSnapshot | null> {
+    const focusedWindow = await chrome.windows.getLastFocused({ populate: false });
+    if (!focusedWindow.focused || typeof focusedWindow.id !== 'number') return null;
+
+    const tabs = await chrome.tabs.query({ active: true, windowId: focusedWindow.id });
+    const tab = tabs[0];
+    if (!tab?.active || typeof tab.id !== 'number' || typeof tab.url !== 'string') return null;
+
+    return { windowId: focusedWindow.id, tabId: tab.id, url: tab.url };
+}
+
+async function isSnapshotStillFocused(snapshot: FocusedTabSnapshot): Promise<boolean> {
+    const current = await getFocusedTabSnapshot();
+    return !!current
+        && current.windowId === snapshot.windowId
+        && current.tabId === snapshot.tabId
+        && current.url === snapshot.url;
+}
+
+async function resolveFocusedTimerTeamId(): Promise<string | null> {
+    const teams = await getTeams();
+    return reconcilePreferredTeamSelection(teams);
+}
+
+function getRunningTaskId(entry: TimeEntry | null): string | null {
+    const taskId = entry?.task?.id;
+    if (typeof taskId === 'string' && taskId.length > 0) return taskId;
+    const fallback = (entry as any)?.task?.id || (entry as any)?.tid;
+    return typeof fallback === 'string' && fallback.length > 0 ? fallback : null;
+}
+
+async function validateFocusedTask(taskId: string, teamId: string): Promise<boolean> {
+    recordDiagnostic('task_validation', { stage: 'direct', outcome: 'attempted' });
+    try {
+        const task = await clickupAPI!.getTask(taskId);
+        const valid = task.id === taskId && (!task.team_id || task.team_id === teamId);
+        recordDiagnostic('task_validation', { stage: 'direct', outcome: valid ? 'valid' : 'invalid' });
+        return valid;
+    } catch (error) {
+        if (isReauthenticationRequired(error)) throw error;
+        recordDiagnostic('task_validation', {
+            stage: 'direct',
+            outcome: 'failure',
+            failureClass: classifyDiagnosticFailure(error),
+            clickupCode: getDiagnosticClickUpCode(error),
+        });
+        if (isClickUpWorkspaceAuthorizationError(error)) {
+            recordDiagnostic('task_validation', { stage: 'workspace-fallback', outcome: 'attempted' });
+            try {
+                const workspaceTask = await clickupAPI!.getWorkspaceTaskById(teamId, taskId);
+                if (workspaceTask?.id === taskId) {
+                    recordDiagnostic('task_validation', { stage: 'workspace-fallback', outcome: 'valid' });
+                    return true;
+                }
+                recordDiagnostic('task_validation', { stage: 'workspace-fallback', outcome: 'not-found' });
+                Logger.warn('FOCUSED_TIMER_TASK_NOT_IN_AUTHORIZED_WORKSPACE');
+                return false;
+            } catch (workspaceError) {
+                if (isReauthenticationRequired(workspaceError)) throw workspaceError;
+                recordDiagnostic('task_validation', {
+                    stage: 'workspace-fallback',
+                    outcome: 'failure',
+                    failureClass: classifyDiagnosticFailure(workspaceError),
+                    clickupCode: getDiagnosticClickUpCode(workspaceError),
+                });
+                Logger.warn(`FOCUSED_TIMER_WORKSPACE_LOOKUP_FAILED_${classifyFocusedTaskValidationFailure(workspaceError)}`);
+                return false;
+            }
+        }
+        Logger.warn(`FOCUSED_TIMER_TASK_VALIDATION_FAILED_${classifyFocusedTaskValidationFailure(error)}`);
+        return false;
+    }
+}
+
+function classifyFocusedTaskValidationFailure(error: unknown): string {
+    const clickupCode = (error as { clickupCode?: unknown } | null)?.clickupCode;
+    if (typeof clickupCode === 'string' && /^OAUTH_(023|026|027|0(?:29|3[0-9]|4[0-5]))$/.test(clickupCode)) {
+        return 'WORKSPACE_NOT_AUTHORIZED';
+    }
+    const status = Number((error as { status?: unknown } | null)?.status);
+    if (status === 401 || status === 403 || status === 404 || status === 429) return String(status);
+    if (Number.isFinite(status) && status >= 500 && status <= 599) return '5XX';
+    if (error instanceof TypeError) return 'NETWORK';
+    return 'UNKNOWN';
+}
+
+function classifyDiagnosticFailure(error: unknown): string {
+    if (isClickUpWorkspaceAuthorizationError(error)) return 'workspace-not-authorized';
+    const status = Number((error as { status?: unknown } | null)?.status);
+    if (status === 401) return 'unauthorized';
+    if (status === 403) return 'forbidden';
+    if (status === 404) return 'not-found';
+    if (status === 429) return 'rate-limited';
+    if (Number.isFinite(status) && status >= 500 && status <= 599) return 'server-error';
+    if (error instanceof TypeError) return 'network';
+    return 'unknown';
+}
+
+function getDiagnosticClickUpCode(error: unknown): string | undefined {
+    const value = (error as { clickupCode?: unknown } | null)?.clickupCode;
+    return typeof value === 'string' ? value : undefined;
+}
+
+function sanitizeDiagnosticTimerReason(reason: string): string {
+    return [
+        'direct', 'inbox-notification', 'disabled', 'outside-clickup', 'inbox',
+        'clickup-other', 'same-task', 'different-task', 'timer-already-running',
+        'auto-start-disabled', 'manually-stopped', 'manual', 'poll',
+        'last-task-tab-closed',
+    ].includes(reason) ? reason : 'unknown';
+}
+
+async function persistFocusedTimerState(snapshot: FocusedTabSnapshot, taskId: string | null): Promise<void> {
+    await chrome.storage.session.set({
+        [FOCUSED_TIMER_SESSION_KEY]: {
+            windowId: snapshot.windowId,
+            tabId: snapshot.tabId,
+            taskId,
+            updatedAt: Date.now(),
+        },
+    });
+}
+
+async function readManualStopSuppression(): Promise<string | null> {
+    const stored = await chrome.storage.session.get(AUTO_START_SUPPRESSED_TASK_SESSION_KEY);
+    const taskId = stored[AUTO_START_SUPPRESSED_TASK_SESSION_KEY];
+    return typeof taskId === 'string' && taskId.length > 0 ? taskId : null;
+}
+
+async function persistManualStopSuppression(taskId: string | null): Promise<void> {
+    if (!taskId) {
+        await clearManualStopSuppression();
+        return;
+    }
+    await chrome.storage.session.set({ [AUTO_START_SUPPRESSED_TASK_SESSION_KEY]: taskId });
+}
+
+async function clearManualStopSuppression(): Promise<void> {
+    await chrome.storage.session.remove(AUTO_START_SUPPRESSED_TASK_SESSION_KEY);
+}
+
+async function stopRunningTimerBeforeLogout(): Promise<void> {
+    if (!clickupAPI) return;
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId) return;
+    const running = await clickupAPI.getRunningTimer(teamId);
+    if (!running) return;
+    await clickupAPI.stopTimer(teamId);
+    await persistManualStopSuppression(getRunningTaskId(running));
+    await updateTimerBadge('stopped');
 }
 
 // ... (Rest of fetch functions: getTeams, getSpaces, etc. - ensure they use caching or standard calls)
@@ -664,6 +1772,18 @@ async function getCachedUser() {
     return user;
 }
 
+async function getFreshAuthenticatedUser(): Promise<ClickUpUserResponse> {
+    await ensureAPI();
+    const user = await clickupAPI!.getUser();
+    const validatedAt = Date.now();
+    await chrome.storage.local.set({
+        [STORAGE_KEYS.CACHED_USER]: user,
+        [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: validatedAt,
+    });
+    currentUserValidatedAt = validatedAt;
+    return user;
+}
+
 async function getValidatedCurrentUserId(): Promise<number | null> {
     await ensureAPI();
     const now = Date.now();
@@ -672,7 +1792,10 @@ async function getValidatedCurrentUserId(): Promise<number | null> {
         const freshUser = await clickupAPI!.getUser();
         const freshUserId = extractCurrentUserId(freshUser);
         if (!freshUserId) return null;
-        await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_USER]: freshUser });
+        await chrome.storage.local.set({
+            [STORAGE_KEYS.CACHED_USER]: freshUser,
+            [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: now,
+        });
         currentUserValidatedAt = now;
         return freshUserId;
     }
@@ -684,15 +1807,47 @@ async function getUser() {
     return await getCachedUser();
 }
 
-async function getTeams() {
-    const cache = await chrome.storage.local.get(STORAGE_KEYS.CACHED_TEAMS);
-    if (cache[STORAGE_KEYS.CACHED_TEAMS]) {
-        return cache[STORAGE_KEYS.CACHED_TEAMS];
+async function getTeams(forceRefresh = false): Promise<ClickUpTeamsResponse> {
+    if (!forceRefresh) {
+        const cache = await chrome.storage.local.get(STORAGE_KEYS.CACHED_TEAMS);
+        if (cache[STORAGE_KEYS.CACHED_TEAMS]) {
+            const cachedTeams = cache[STORAGE_KEYS.CACHED_TEAMS] as ClickUpTeamsResponse;
+            recordDiagnostic('workspace_selection', {
+                source: 'cache',
+                outcome: 'cached',
+                count: cachedTeams.teams?.length || 0,
+            });
+            await reconcilePreferredTeamSelection(cachedTeams);
+            return cachedTeams;
+        }
     }
     await ensureAPI();
     const teams = await clickupAPI!.getTeams();
+    recordDiagnostic('workspace_selection', {
+        source: 'remote',
+        outcome: 'remote',
+        count: teams.teams?.length || 0,
+    });
     await chrome.storage.local.set({ [STORAGE_KEYS.CACHED_TEAMS]: teams });
+    await reconcilePreferredTeamSelection(teams);
     return teams;
+}
+
+async function reconcilePreferredTeamSelection(teams: ClickUpTeamsResponse): Promise<string | null> {
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.PREFERRED_TEAM);
+    const current = stored[STORAGE_KEYS.PREFERRED_TEAM];
+    const selected = selectAuthorizedTeamId(teams.teams, current);
+    recordDiagnostic('workspace_selection', {
+        source: selected ? (selected === current ? 'preferred' : 'first-authorized') : 'none',
+        outcome: selected ? (selected === current ? 'selected-preferred' : 'selected-first') : 'no-workspace',
+        count: teams.teams?.length || 0,
+    });
+    if (selected && selected !== current) {
+        await chrome.storage.local.set({ [STORAGE_KEYS.PREFERRED_TEAM]: selected });
+    } else if (!selected && current !== undefined) {
+        await chrome.storage.local.remove(STORAGE_KEYS.PREFERRED_TEAM);
+    }
+    return selected;
 }
 
 
@@ -937,6 +2092,17 @@ async function getEmailTaskMappingsForRead(): Promise<EmailTaskMappingsV2> {
     );
 }
 
+function sanitizeDefaultListConfig(value: unknown): { listId: string; path?: string; listName?: string } | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const config = value as { listId?: unknown; path?: unknown; listName?: unknown };
+    if (typeof config.listId !== 'string' || config.listId.length === 0 || config.listId.length > 100) return undefined;
+    return {
+        listId: config.listId,
+        path: typeof config.path === 'string' ? config.path.slice(0, 1000) : undefined,
+        listName: typeof config.listName === 'string' ? config.listName.slice(0, 500) : undefined,
+    };
+}
+
 async function updateEmailTaskMappings(
     mutator: (mappings: EmailTaskMappingsV2) => EmailTaskMappingsV2 | void,
     extraWrites: Record<string, unknown> = {}
@@ -987,6 +2153,7 @@ async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ s
             STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
             STORAGE_KEYS.CACHED_TEAMS,
             STORAGE_KEYS.CACHED_USER,
+            MEET_MAPPINGS_KEY,
         ]);
         await chrome.storage.local.set({
             [STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]: {},
@@ -996,8 +2163,14 @@ async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ s
     });
 
     mappingWriteQueue = next.catch(() => undefined);
-    await next;
-    return { success: true };
+        await next;
+        await chrome.storage.session.remove([
+            FOCUSED_TIMER_SESSION_KEY,
+            AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
+            CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
+        ]);
+        await clearTrackedClickUpTaskTabIndex();
+        return { success: true };
 }
 
 async function syncEmailTasksByTime(days: number): Promise<{ success: boolean; foundCount: number }> {
@@ -1396,7 +2569,7 @@ async function createTaskSimple(data: { listId: string; name: string; descriptio
     return await clickupAPI!.createTask(data.listId, taskData);
 }
 
-async function updateTimerBadge(state: 'playing' | 'stopped' | 'paused'): Promise<void> {
+async function updateTimerBadge(state: 'playing' | 'stopped' | 'paused' | 'meeting' | 'attention'): Promise<void> {
     const badgeState = BADGE_STATES[state];
     await chrome.action.setBadgeText({ text: badgeState.text });
     await chrome.action.setBadgeBackgroundColor({ color: badgeState.color });

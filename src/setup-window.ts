@@ -6,8 +6,8 @@ export function isSetupStandalone(search: string = window.location.search): bool
     return new URLSearchParams(search).get('mode') === 'setup';
 }
 
-export function shouldLaunchDurableSetup(status: { authenticated?: boolean }, standalone: boolean): boolean {
-    return !standalone && status.authenticated !== true;
+export function shouldLaunchDurableSetup(status: { authenticated?: boolean; authUnavailable?: boolean }, standalone: boolean): boolean {
+    return !standalone && status.authenticated !== true && status.authUnavailable !== true;
 }
 
 export async function openOrFocusSetupWindow(): Promise<boolean> {

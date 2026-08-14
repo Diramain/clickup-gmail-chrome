@@ -758,8 +758,8 @@ export class TaskModal {
             Logger.info('MODAL_LOAD_HIERARCHY_START');
 
             // Get preferred team ID first
-            const prefTeam = await chrome.storage.local.get(['preferredTeamId', 'cachedTeams']);
-            let teamId = prefTeam.preferredTeamId || prefTeam.cachedTeams?.teams?.[0]?.id;
+            const prefTeam = await chrome.runtime.sendMessage({ action: 'getPreferredTeam' });
+            let teamId = prefTeam?.teamId;
 
             if (!teamId) {
                 // Fallback: fetch teams
@@ -890,7 +890,7 @@ export class TaskModal {
 
     async loadDefaultList(): Promise<void> {
         try {
-            const storage = await chrome.storage.local.get(['defaultList', 'defaultListConfig']);
+            const storage = await chrome.runtime.sendMessage({ action: 'getDefaultListConfig' });
             Logger.info('MODAL_CHECK_DEFAULT_LIST');
 
             if (storage.defaultListConfig && storage.defaultListConfig.listId) {

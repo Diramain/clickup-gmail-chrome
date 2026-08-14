@@ -104,6 +104,7 @@ Injected into Gmail pages to:
 - Scan inbox for linked tasks
 - Handle task creation modal
 - Display task badges
+- Reconcile unchanged linked-task anchors without replacing their DOM nodes
 
 ### 3. ClickUp Content Script (`clickup-tracker.ts`)
 **Location:** `/src/clickup-tracker.ts`  
@@ -112,7 +113,9 @@ Injected into Gmail pages to:
 Injected into ClickUp.com to:
 
 - Auto-start timers when viewing tasks
-- Auto-stop timers when leaving task views
+- Preserve the running task across non-task tabs and views
+- Stop/switch when another recognized ClickUp task is opened
+- Report payload-free ClickUp SPA navigation so the background can maintain a bounded task-tab index
 - Detect task navigation via URL changes
 
 ### 4. Popup Interface (`popup/`)
@@ -203,8 +206,9 @@ All sensitive tokens are encrypted:
 | Token | Storage Key | Encryption |
 |-------|-------------|------------|
 | Access Token | `secure_accessToken` | AES-256-GCM |
-| Refresh Token | `secure_refreshToken` | AES-256-GCM |
 | Client Secret | `secure_oauthConfig` | AES-256-GCM |
+
+Legacy refresh-token values are removed. ClickUp's documented OAuth flow does not expose a refresh-token grant; a `401` requires explicit reconnection.
 
 ---
 
@@ -287,13 +291,13 @@ Central class for all ClickUp API communication.
 ### Constructor
 
 ```typescript
-constructor(accessToken: string, onTokenRefresh?: () => Promise<string | null>)
+constructor(accessToken: string, governor?: ClickUpRateGovernor)
 ```
 
 | Parameter | Description |
 |-----------|-------------|
 | `accessToken` | Initial OAuth access token |
-| `onTokenRefresh` | Callback for token refresh on 401 |
+| `governor` | Optional shared rate governor |
 
 ### Key Methods
 
@@ -348,12 +352,11 @@ private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
         const response = await fetch(url, options);
         
         if (response.status === 401) {
-            // Try token refresh
-            const newToken = await this.onTokenRefresh?.();
-            if (newToken) {
-                this.accessToken = newToken;
-                continue; // Retry with new token
-            }
+            // Safe GET may negotiate raw/Bearer once. Writes are never replayed.
+            const auth = await confirmCurrentTokenWithUserEndpoint();
+            if (auth === 'valid') throw endpointUnauthorizedError();
+            if (auth === 'invalid') throw createRequiresReauthError();
+            throw authenticationUnavailableError();
         }
         
         if (response.status === 429) {
@@ -386,7 +389,6 @@ Manages OAuth authentication flow.
 | `saveOAuthConfig(config)` | Save encrypted OAuth credentials |
 | `getOAuthConfig()` | Retrieve decrypted OAuth credentials |
 | `startOAuthFlow()` | Initiate OAuth popup flow |
-| `refreshToken()` | Refresh expired access token |
 | `getAccessToken()` | Get current access token |
 | `logout()` | Clear all auth data |
 
@@ -516,8 +518,8 @@ Abstraction layer for `chrome.storage.local` with advanced features:
 interface StorageSchema {
     // Auth
     secure_accessToken: EncryptedData;
-    secure_refreshToken: EncryptedData;
     secure_oauthConfig: EncryptedData;
+    clickupReauthRequired: boolean;
     
     // User Data
     cachedUser: User;
@@ -750,7 +752,7 @@ popup/
 | List Cache | Sync workspace hierarchy |
 | Email Tasks | Sync email-task mappings |
 | Data Management | Export/clear data |
-| Dev Tools | Test token refresh |
+| OAuth recovery | Show explicit ClickUp reconnection after `401` |
 
 ---
 
@@ -1222,8 +1224,8 @@ The extension respects ClickUp's rate limits:
 | Key | Type | Description |
 |-----|------|-------------|
 | `secure_accessToken` | EncryptedData | OAuth access token |
-| `secure_refreshToken` | EncryptedData | OAuth refresh token |
 | `secure_oauthConfig` | EncryptedData | Client ID & encrypted secret |
+| `clickupReauthRequired` | boolean | Rejected session requires explicit reconnection |
 | `cachedUser` | User | Logged-in user info |
 | `cachedTeams` | Object | Teams with timestamp |
 | `preferredTeamId` | string | Selected workspace ID |
@@ -1233,6 +1235,48 @@ The extension respects ClickUp's rate limits:
 | `autoStopTimer` | boolean | Auto-stop setting |
 | `useCustomFieldForThreadId` | boolean | Thread ID storage method |
 | `threadIdField` | string | Custom field name |
+| `safeDiagnosticLogV1` | session-only object | Opt-in bounded diagnostic state and up to 200 allowlisted events |
+| `clickUpTaskTabIndexV1` | session-only object | Bounded `tabId → taskId` index used only to evaluate closure of the last task tab |
+
+## Safe Diagnostics
+
+`src/diagnostic-log.ts` owns the optional diagnostic buffer. It uses only
+`chrome.storage.session`, explicitly restricted to `TRUSTED_CONTEXTS`, and is
+off by default. Event names, fields, and categorical values use closed
+allowlists; the sanitizer runs before every write and again when restoring
+session state. Tokens, authorization headers, URLs, workspace/task IDs, names,
+emails, API payloads, and Gmail/Meet content are not accepted.
+
+The popup communicates through four extension-page-only actions:
+`getDiagnosticStatus`, `setDiagnosticEnabled`, `exportDiagnostics`, and
+`clearDiagnostics`. The diagnostic JSON is separate from the regular safe data
+backup. It contains schema/version metadata, bounded counts, and the sanitized
+events only.
+
+## Focused ClickUp URL shapes
+
+`src/clickup-focus.ts` recognizes both historical alphanumeric direct task URLs
+(`/t/{taskId}`) and current workspace-scoped URLs
+(`/t/{workspaceId}/{taskId}`). For the current shape, the numeric workspace
+segment is validated structurally but never used as the Task ID. Incomplete,
+extra-segment, non-numeric-workspace, or invalid-task forms fail closed as a
+non-task ClickUp page. Query strings and fragments are never retained.
+
+## Last task-tab close
+
+While Auto-Stop is enabled, `background.ts` maintains
+`clickUpTaskTabIndexV1` in
+`chrome.storage.session`, restricted to `TRUSTED_CONTEXTS`. The index is capped
+at 256 entries and contains only browser tab IDs and structurally valid ClickUp
+task IDs; it never stores full URLs or encoded Inbox payloads.
+
+When `chrome.tabs.onRemoved` identifies a closed tab for the running task and
+Auto-Stop is enabled, the service worker queries all remaining ClickUp tabs in
+all windows. A direct URL or a valid task-specific Inbox notification for the
+same task preserves the timer. Before stopping, the worker reads the running
+timer again inside `timerWriteQueue`; a changed or unknown timer cancels the
+operation. Meet Priority retains authority while active, and writes are not
+retried after ambiguous failures. Disabling Auto-Stop clears the index.
 
 ## Data Export Format
 
@@ -1319,6 +1363,7 @@ await esbuild.build({
 | `modal.test.js` | Text parsing, HTML conversion |
 | `api.service.test.js` | API wrapper |
 | `crypto.test.js` | Encryption/decryption |
+| `diagnostic-log.test.js` | Session-only buffer, redaction, bounds, origins, export, API categories |
 
 ## Running Tests
 
@@ -1434,8 +1479,8 @@ export const CONSTANTS = {
     // Storage keys
     STORAGE_KEYS: {
         ACCESS_TOKEN: 'secure_accessToken',
-        REFRESH_TOKEN: 'secure_refreshToken',
         OAUTH_CONFIG: 'secure_oauthConfig',
+        REAUTH_REQUIRED: 'clickupReauthRequired',
         // ... more keys
     }
 };

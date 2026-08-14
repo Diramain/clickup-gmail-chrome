@@ -13,6 +13,7 @@ import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-
 import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
 import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
+import { selectAuthorizedTeamId } from '../src/team-selection';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -29,6 +30,8 @@ import type { TimeEntry } from '../src/types/clickup';
 interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    requiresReauth?: boolean;
+    authUnavailable?: boolean;
     user?: {
         user?: ClickUpUser;
     } | ClickUpUser;
@@ -56,10 +59,32 @@ interface ClickUpList {
     name: string;
 }
 
-interface TestResult {
-    success: boolean;
-    message?: string;
-    error?: string;
+interface MeetPriorityStatus {
+    enabled: boolean;
+    status: 'idle' | 'awaiting-task' | 'tracking' | 'paused' | 'ignored';
+    conflict?: boolean;
+    taskId?: string;
+    teamId?: string;
+    startedAt?: number;
+    joinedAt?: number;
+    previousTaskId?: string;
+    previousTeamId?: string;
+}
+
+interface MeetTaskMappingV1 {
+    roomKey: string;
+    taskId: string;
+    teamId: string;
+    createdAt: number;
+    lastUsedAt: number;
+    enabled: boolean;
+}
+
+interface SafeDiagnosticStatus {
+    enabled: boolean;
+    eventCount: number;
+    droppedCount: number;
+    maxEvents: number;
 }
 
 function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.MessageSender): void {
@@ -131,6 +156,7 @@ async function init(): Promise<void> {
 
     try {
         const status = await sendMessage<ExtensionStatus>({ action: 'getStatus' });
+        void initSafeDiagnostics();
 
         if (shouldLaunchDurableSetup(status, standaloneSetup)) {
             try {
@@ -148,19 +174,113 @@ async function init(): Promise<void> {
         if (status.authenticated) {
             showLoggedIn(status);
         } else {
-            showLoginRequired(status.configured, standaloneSetup);
+            showLoginRequired(
+                status.configured,
+                standaloneSetup,
+                status.requiresReauth === true,
+                status.authUnavailable === true,
+            );
         }
     } catch (error: any) {
+        void initSafeDiagnostics();
         console.error('INIT_ERROR');
         loading.innerHTML = '<p style="color: #ff5252;">No se pudo cargar la extensión</p>';
     }
+}
+
+async function initSafeDiagnostics(): Promise<void> {
+    const container = document.getElementById('safeDiagnostics') as HTMLElement | null;
+    const toggle = document.getElementById('diagnosticToggle') as HTMLInputElement | null;
+    const exportButton = document.getElementById('exportDiagnostics') as HTMLButtonElement | null;
+    const clearButton = document.getElementById('clearDiagnostics') as HTMLButtonElement | null;
+    const status = document.getElementById('diagnosticStatus') as HTMLElement | null;
+    if (!container || !toggle || !exportButton || !clearButton || !status) return;
+
+    container.classList.remove('hidden');
+
+    const render = (state: SafeDiagnosticStatus, message = ''): void => {
+        toggle.checked = state.enabled;
+        exportButton.disabled = state.eventCount === 0;
+        clearButton.disabled = state.eventCount === 0 && state.droppedCount === 0;
+        const dropped = state.droppedCount > 0 ? ` · ${state.droppedCount} descartados por límite` : '';
+        status.textContent = message || `${state.enabled ? 'Diagnóstico activo' : 'Diagnóstico desactivado'} · ${state.eventCount}/${state.maxEvents} eventos${dropped}`;
+        status.style.color = state.enabled ? '#49CCF9' : '';
+    };
+
+    try {
+        render(await sendMessage<SafeDiagnosticStatus>({ action: 'getDiagnosticStatus' }));
+    } catch {
+        toggle.disabled = true;
+        exportButton.disabled = true;
+        clearButton.disabled = true;
+        status.textContent = 'No se pudo consultar el diagnóstico seguro.';
+        status.style.color = '#ff5252';
+        return;
+    }
+
+    toggle.addEventListener('change', async () => {
+        const requested = toggle.checked;
+        toggle.disabled = true;
+        try {
+            const state = await sendMessage<SafeDiagnosticStatus>({
+                action: 'setDiagnosticEnabled',
+                data: { enabled: requested },
+            });
+            render(state);
+        } catch {
+            toggle.checked = !requested;
+            status.textContent = 'No se pudo cambiar el diagnóstico; el estado anterior se conserva.';
+            status.style.color = '#ff5252';
+        } finally {
+            toggle.disabled = false;
+        }
+    });
+
+    exportButton.addEventListener('click', async () => {
+        exportButton.disabled = true;
+        try {
+            const payload = await sendMessage<Record<string, unknown>>({ action: 'exportDiagnostics' });
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `clickup-gmail-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+            const state = await sendMessage<SafeDiagnosticStatus>({ action: 'getDiagnosticStatus' });
+            render(state, `JSON seguro exportado · ${state.eventCount}/${state.maxEvents} eventos`);
+        } catch {
+            status.textContent = 'No se pudo exportar el diagnóstico.';
+            status.style.color = '#ff5252';
+        } finally {
+            const state = await sendMessage<SafeDiagnosticStatus>({ action: 'getDiagnosticStatus' }).catch(() => null);
+            exportButton.disabled = !state || state.eventCount === 0;
+        }
+    });
+
+    clearButton.addEventListener('click', async () => {
+        clearButton.disabled = true;
+        try {
+            const state = await sendMessage<SafeDiagnosticStatus>({ action: 'clearDiagnostics' });
+            render(state, `${state.enabled ? 'Diagnóstico activo' : 'Diagnóstico desactivado'} · registro borrado`);
+        } catch {
+            status.textContent = 'No se pudo borrar el diagnóstico.';
+            status.style.color = '#ff5252';
+            clearButton.disabled = false;
+        }
+    });
 }
 
 // ============================================================================
 // Login Required View
 // ============================================================================
 
-function showLoginRequired(configured: boolean, standaloneSetup = isSetupStandalone()): void {
+function showLoginRequired(
+    configured: boolean,
+    standaloneSetup = isSetupStandalone(),
+    requiresReauth = false,
+    authUnavailable = false,
+): void {
     const loginRequired = document.getElementById('login-required') as HTMLElement;
     const signInBtn = document.getElementById('signIn') as HTMLButtonElement;
     const saveConfigBtn = document.getElementById('saveConfig') as HTMLButtonElement;
@@ -190,7 +310,7 @@ function showLoginRequired(configured: boolean, standaloneSetup = isSetupStandal
 
     const updateOAuthButtons = (): OAuthConfigState => {
         const state = currentState();
-        signInBtn.disabled = !state.canSignIn;
+        signInBtn.disabled = authUnavailable || !state.canSignIn;
         saveConfigBtn.disabled = !state.canSave;
         return state;
     };
@@ -246,7 +366,12 @@ function showLoginRequired(configured: boolean, standaloneSetup = isSetupStandal
         openWindowBtn.classList.add('hidden');
     }
 
-    if (configured) {
+    if (configured && requiresReauth) {
+        signInBtn.textContent = 'Reconectar con ClickUp';
+        setConfigStatus('La sesión de ClickUp dejó de ser válida. Reconectá para reanudar el seguimiento automático.', '#ff9800');
+    } else if (authUnavailable) {
+        setConfigStatus('No se pudo validar la sesión ahora. No cambies la configuración; reintentá cuando ClickUp esté disponible.', '#ff9800');
+    } else if (configured) {
         setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
     }
 
@@ -419,6 +544,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
     let timeTrackingRefreshInFlight: Promise<void> | null = null;
     let recentRunningStart: number | null = null;
+    let stopMeetPriorityUi: (() => void) | null = null;
 
     // ========== TASKS TAB HANDLERS ==========
 
@@ -1059,6 +1185,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
     // THEN load timer and history as one coherent snapshot.
     await refreshTimeTracking();
+    stopMeetPriorityUi = await initMeetPriority(refreshTimeTracking);
 
     const timeTrackingPoll = window.setInterval(() => {
         if (document.visibilityState === 'visible') void refreshTimeTracking();
@@ -1071,6 +1198,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     window.addEventListener('pagehide', () => {
         clearInterval(timeTrackingPoll);
         if (timerInterval) clearInterval(timerInterval);
+        stopMeetPriorityUi?.();
     }, { once: true });
 
     // Load cache status (last sync time)
@@ -1135,36 +1263,6 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     document.getElementById('signOut')!.addEventListener('click', async () => {
         await sendMessage({ action: 'logout' });
         location.reload();
-    });
-
-    // Token refresh test handler
-    document.getElementById('testTokenRefresh')!.addEventListener('click', async () => {
-        const btn = document.getElementById('testTokenRefresh') as HTMLButtonElement;
-        const result = document.getElementById('testResult') as HTMLElement;
-
-        btn.disabled = true;
-        btn.textContent = '⏳ Probando…';
-        result.textContent = 'Probando renovación del token…';
-        result.style.color = '#666';
-
-        try {
-            const testResult = await sendMessage<TestResult>({ action: 'testTokenRefresh' });
-
-            if (testResult.success) {
-                result.textContent = '✅ ' + testResult.message;
-                result.style.color = '#00c853';
-            } else {
-                result.textContent = '❌ La prueba falló';
-                result.style.color = '#ff5252';
-            }
-        } catch (error: any) {
-            console.error('TOKEN_REFRESH_TEST_ERROR');
-            result.textContent = '❌ No se pudo completar la prueba';
-            result.style.color = '#ff5252';
-        }
-
-        btn.disabled = false;
-        btn.textContent = '🧪 Probar renovación de token';
     });
 
     // Sync Lists button handler
@@ -1253,6 +1351,379 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
 
 // ============================================================================
+// Google Meet Priority
+// ============================================================================
+
+async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promise<() => void> {
+    const toggle = document.getElementById('meetPriorityToggle') as HTMLInputElement | null;
+    const statusRoot = document.getElementById('meetPriorityStatus');
+    const chooser = document.getElementById('meetTaskChooser');
+    const searchInput = document.getElementById('meetTaskSearch') as HTMLInputElement | null;
+    const searchResults = document.getElementById('meetTaskResults');
+    const rememberToggle = document.getElementById('meetRememberToggle') as HTMLInputElement | null;
+    const assignButton = document.getElementById('assignMeetTask') as HTMLButtonElement | null;
+    const actions = document.getElementById('meetActions');
+    const previousButton = document.getElementById('usePreviousMeetTask') as HTMLButtonElement | null;
+    const changeButton = document.getElementById('changeMeetTask') as HTMLButtonElement | null;
+    const resumeButton = document.getElementById('resumeMeetSession') as HTMLButtonElement | null;
+    const ignoreButton = document.getElementById('ignoreMeetSession') as HTMLButtonElement | null;
+    const endButton = document.getElementById('endMeetSession') as HTMLButtonElement | null;
+    const mappingsDetails = document.getElementById('meetMappingsDetails');
+    const mappingsList = document.getElementById('meetMappingsList');
+
+    if (!toggle || !statusRoot || !chooser || !searchInput || !searchResults || !rememberToggle
+        || !assignButton || !actions || !previousButton || !changeButton || !resumeButton
+        || !ignoreButton || !endButton || !mappingsDetails || !mappingsList) {
+        return () => undefined;
+    }
+
+    let selectedTask: { id: string; name: string } | null = null;
+    let currentStatus: MeetPriorityStatus = { enabled: false, status: 'idle' };
+    let searchRevision = 0;
+    let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+    let changingTask = false;
+    const taskNames = new Map<string, string>();
+
+    const setVisible = (element: Element, visible: boolean): void => {
+        element.classList.toggle('hidden', !visible);
+    };
+
+    const setStatusCopy = (title: string, detail: string): void => {
+        statusRoot.replaceChildren();
+        const heading = document.createElement('strong');
+        heading.textContent = title;
+        const description = document.createElement('p');
+        description.textContent = detail;
+        statusRoot.append(heading, description);
+    };
+
+    const taskLabel = (taskId: string | undefined): string => {
+        if (!taskId) return 'tarea no disponible';
+        return taskNames.get(taskId) || `tarea ${taskId}`;
+    };
+
+    const resolveTaskName = async (taskId: string | undefined): Promise<void> => {
+        if (!taskId || taskNames.has(taskId)) return;
+        try {
+            const task = await sendMessage<{ id?: string; name?: string }>({
+                action: 'getTaskById',
+                data: { taskId },
+            });
+            if (task?.id === taskId && typeof task.name === 'string' && task.name.length > 0) {
+                taskNames.set(taskId, task.name.slice(0, 500));
+            }
+        } catch {
+            // The task ID remains sufficient for local controls if name lookup is unavailable.
+        }
+    };
+
+    const renderMappings = async (): Promise<void> => {
+        if (!currentStatus.enabled) {
+            setVisible(mappingsDetails, false);
+            return;
+        }
+        const result = await sendMessage<{ mappings: MeetTaskMappingV1[] }>({ action: 'getMeetMappings' });
+        const mappings = Array.isArray(result?.mappings) ? result.mappings.slice(0, 50) : [];
+        setVisible(mappingsDetails, true);
+        mappingsList.replaceChildren();
+
+        if (mappings.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'hint mt-8';
+            empty.textContent = 'Todavía no hay salas vinculadas.';
+            mappingsList.appendChild(empty);
+            return;
+        }
+
+        mappings.forEach((mapping, index) => {
+            const item = document.createElement('div');
+            item.className = 'meet-mapping-item';
+            const label = document.createElement('span');
+            label.className = 'meet-mapping-name';
+            label.textContent = `Reunión vinculada ${index + 1} · tarea ${mapping.taskId}`;
+
+            const buttonGroup = document.createElement('span');
+            buttonGroup.className = 'meet-mapping-actions';
+            const enabledButton = document.createElement('button');
+            enabledButton.type = 'button';
+            enabledButton.className = 'btn btn-secondary';
+            enabledButton.textContent = mapping.enabled ? 'Desactivar' : 'Activar';
+            enabledButton.setAttribute('aria-label', `${enabledButton.textContent} reunión vinculada ${index + 1}`);
+            enabledButton.addEventListener('click', async () => {
+                enabledButton.disabled = true;
+                try {
+                    await sendMessage({
+                        action: 'setMeetMappingEnabled',
+                        data: { roomKey: mapping.roomKey, enabled: !mapping.enabled },
+                    });
+                    await renderMappings();
+                } catch {
+                    enabledButton.disabled = false;
+                }
+            });
+
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'btn btn-danger';
+            deleteButton.textContent = 'Borrar';
+            deleteButton.setAttribute('aria-label', `Borrar reunión vinculada ${index + 1}`);
+            deleteButton.addEventListener('click', async () => {
+                deleteButton.disabled = true;
+                try {
+                    await sendMessage({ action: 'deleteMeetMapping', data: { roomKey: mapping.roomKey } });
+                    await renderMappings();
+                } catch {
+                    deleteButton.disabled = false;
+                }
+            });
+
+            buttonGroup.append(enabledButton, deleteButton);
+            item.append(label, buttonGroup);
+            mappingsList.appendChild(item);
+        });
+    };
+
+    const renderStatus = async (): Promise<void> => {
+        const status = await sendMessage<MeetPriorityStatus>({ action: 'getMeetPriorityStatus' });
+        currentStatus = status;
+        toggle.checked = status.enabled;
+
+        const pending = status.status === 'awaiting-task';
+        const tracking = status.status === 'tracking';
+        const paused = status.status === 'paused';
+        const ignored = status.status === 'ignored';
+        setVisible(chooser, status.enabled && (pending || changingTask));
+        setVisible(actions, status.enabled && (pending || tracking || paused));
+        setVisible(previousButton, pending && !!status.previousTaskId && !!status.previousTeamId);
+        setVisible(changeButton, tracking || paused);
+        setVisible(resumeButton, paused);
+        setVisible(ignoreButton, pending);
+        setVisible(endButton, tracking || paused);
+
+        if (!status.enabled) {
+            setStatusCopy('Prioridad Meet desactivada', 'El sitio Meet no tiene autoridad sobre el temporizador.');
+        } else if (status.status === 'idle') {
+            setStatusCopy('Sin reunión activa', 'Home y prejoin no inician temporizadores.');
+        } else if (pending) {
+            setStatusCopy('Reunión detectada', status.conflict
+                ? 'Hay otra sala abierta. Sólo la pestaña Meet enfocada puede tomar prioridad.'
+                : 'No hay una tarea vinculada. Elegí una o ignorá esta sesión.');
+        } else if (tracking) {
+            await resolveTaskName(status.taskId);
+            const elapsed = status.joinedAt ? formatMeetElapsed(Date.now() - status.joinedAt) : '00:00:00';
+            const conflictNote = status.conflict ? ' · otra sala quedó sin autoridad' : '';
+            setStatusCopy('Reunión en curso', `${taskLabel(status.taskId)} · ${elapsed}${conflictNote}`);
+        } else if (paused) {
+            await resolveTaskName(status.taskId);
+            setStatusCopy('Reunión pausada', `${taskLabel(status.taskId)} · confirmá para continuar.`);
+        } else if (ignored) {
+            setStatusCopy('Reunión ignorada', 'El tracking normal puede continuar; esta sesión no volverá a preguntar.');
+        }
+    };
+
+    const resetChooser = (): void => {
+        selectedTask = null;
+        changingTask = false;
+        searchInput.value = '';
+        searchResults.replaceChildren();
+        rememberToggle.checked = false;
+        assignButton.disabled = true;
+    };
+
+    searchInput.addEventListener('input', () => {
+        selectedTask = null;
+        assignButton.disabled = true;
+        const query = searchInput.value.trim();
+        const revision = ++searchRevision;
+        if (searchTimeout) clearTimeout(searchTimeout);
+        searchResults.replaceChildren();
+        if (query.length < 2) return;
+
+        const loading = document.createElement('p');
+        loading.className = 'hint';
+        loading.textContent = 'Buscando…';
+        searchResults.appendChild(loading);
+        searchTimeout = setTimeout(async () => {
+            try {
+                const result = await sendMessage<{ tasks: Array<{ id?: string; name?: string }> }>({
+                    action: 'searchTasks',
+                    data: { query },
+                });
+                if (revision !== searchRevision) return;
+                searchResults.replaceChildren();
+                const tasks = Array.isArray(result?.tasks) ? result.tasks.slice(0, 5) : [];
+                if (tasks.length === 0) {
+                    const empty = document.createElement('p');
+                    empty.className = 'hint';
+                    empty.textContent = 'No se encontraron tareas';
+                    searchResults.appendChild(empty);
+                    return;
+                }
+                tasks.forEach((task) => {
+                    if (!task.id || !task.name) return;
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'search-result-item meet-task-result';
+                    const name = document.createElement('span');
+                    name.className = 'task-name';
+                    name.textContent = task.name;
+                    const id = document.createElement('span');
+                    id.className = 'task-id';
+                    id.textContent = task.id;
+                    item.append(name, id);
+                    item.addEventListener('click', () => {
+                        selectedTask = { id: task.id!, name: task.name! };
+                        taskNames.set(task.id!, task.name!);
+                        searchInput.value = task.name!;
+                        searchResults.replaceChildren();
+                        assignButton.disabled = false;
+                    });
+                    searchResults.appendChild(item);
+                });
+            } catch {
+                if (revision !== searchRevision) return;
+                searchResults.replaceChildren();
+                const error = document.createElement('p');
+                error.className = 'hint';
+                error.textContent = 'No se pudo buscar';
+                searchResults.appendChild(error);
+            }
+        }, 300);
+    });
+
+    assignButton.addEventListener('click', async () => {
+        if (!selectedTask) return;
+        const teamId = await getTeamId();
+        if (!teamId) {
+            setStatusCopy('Falta espacio de trabajo', 'Elegí un espacio en Configuración.');
+            return;
+        }
+        assignButton.disabled = true;
+        try {
+            const remember = rememberToggle.checked;
+            const result = await sendMessage<{ success: boolean; mappingSaved: boolean }>({
+                action: 'assignMeetTask',
+                data: { taskId: selectedTask.id, teamId, remember },
+            });
+            resetChooser();
+            await Promise.all([renderStatus(), renderMappings(), refreshTimeTracking()]);
+            if (remember && !result.mappingSaved) {
+                setStatusCopy('Reunión en curso', 'El timer inició, pero la asociación no pudo guardarse.');
+            }
+        } catch {
+            setStatusCopy('No se pudo asignar', 'La reunión o la tarea ya no están disponibles.');
+            assignButton.disabled = false;
+        }
+    });
+
+    previousButton.addEventListener('click', async () => {
+        if (!currentStatus.previousTaskId || !currentStatus.previousTeamId) return;
+        previousButton.disabled = true;
+        try {
+            const remember = rememberToggle.checked;
+            const result = await sendMessage<{ success: boolean; mappingSaved: boolean }>({
+                action: 'assignMeetTask',
+                data: {
+                    taskId: currentStatus.previousTaskId,
+                    teamId: currentStatus.previousTeamId,
+                    remember,
+                },
+            });
+            await Promise.all([renderStatus(), renderMappings(), refreshTimeTracking()]);
+            if (remember && !result.mappingSaved) {
+                setStatusCopy('Reunión en curso', 'La tarea se reutilizó, pero la asociación no pudo guardarse.');
+            }
+        } catch {
+            setStatusCopy('No se pudo reutilizar', 'La tarea anterior no es válida para esta sesión.');
+        } finally {
+            previousButton.disabled = false;
+        }
+    });
+
+    changeButton.addEventListener('click', () => {
+        selectedTask = null;
+        searchInput.value = '';
+        searchResults.replaceChildren();
+        rememberToggle.checked = false;
+        assignButton.disabled = true;
+        changingTask = true;
+        setVisible(chooser, true);
+        searchInput.focus();
+    });
+
+    resumeButton.addEventListener('click', async () => {
+        resumeButton.disabled = true;
+        try {
+            await sendMessage({ action: 'resumeMeetSession' });
+            await Promise.all([renderStatus(), refreshTimeTracking()]);
+        } catch {
+            setStatusCopy('No se pudo reanudar', 'La sala o la tarea ya no están disponibles.');
+        } finally {
+            resumeButton.disabled = false;
+        }
+    });
+
+    ignoreButton.addEventListener('click', async () => {
+        ignoreButton.disabled = true;
+        try {
+            await sendMessage({ action: 'ignoreMeetSession' });
+            resetChooser();
+            await Promise.all([renderStatus(), refreshTimeTracking()]);
+        } finally {
+            ignoreButton.disabled = false;
+        }
+    });
+
+    endButton.addEventListener('click', async () => {
+        endButton.disabled = true;
+        try {
+            await sendMessage({ action: 'endMeetSession' });
+            resetChooser();
+            await Promise.all([renderStatus(), refreshTimeTracking()]);
+        } finally {
+            endButton.disabled = false;
+        }
+    });
+
+    toggle.addEventListener('change', async () => {
+        toggle.disabled = true;
+        try {
+            await sendMessage({ action: 'setMeetPriorityEnabled', data: { enabled: toggle.checked } });
+            resetChooser();
+            await Promise.all([renderStatus(), renderMappings(), refreshTimeTracking()]);
+        } catch {
+            toggle.checked = !toggle.checked;
+            setStatusCopy('No se pudo cambiar', 'La configuración permanece sin cambios.');
+        } finally {
+            toggle.disabled = false;
+        }
+    });
+
+    mappingsDetails.addEventListener('toggle', () => {
+        if ((mappingsDetails as HTMLDetailsElement).open) void renderMappings();
+    });
+
+    await renderStatus();
+    await renderMappings();
+    const statusPoll = window.setInterval(() => {
+        if (document.visibilityState === 'visible') void renderStatus();
+    }, 1_000);
+    return () => {
+        clearInterval(statusPoll);
+        if (searchTimeout) clearTimeout(searchTimeout);
+    };
+}
+
+function formatMeetElapsed(durationMs: number): string {
+    const safeMs = Math.max(0, durationMs);
+    const hours = Math.floor(safeMs / 3_600_000);
+    const minutes = Math.floor((safeMs % 3_600_000) / 60_000);
+    const seconds = Math.floor((safeMs % 60_000) / 1_000);
+    return [hours, minutes, seconds].map((value) => value.toString().padStart(2, '0')).join(':');
+}
+
+
+// ============================================================================
 // Team Loading
 // ============================================================================
 
@@ -1285,11 +1756,10 @@ async function loadTeams(): Promise<void> {
         // Preferred Workspace Handling
         const { teamId: savedTeamId } = await sendMessage<{ teamId: string }>({ action: 'getPreferredTeam' });
 
-        let initialTeamId = savedTeamId;
+        let initialTeamId = selectAuthorizedTeamId(teams.teams, savedTeamId);
 
         // Auto-select if only one team exists and no preference saved (or preference matches)
-        if (teams.teams.length === 1 && !initialTeamId) {
-            initialTeamId = teams.teams[0].id;
+        if (initialTeamId && initialTeamId !== savedTeamId) {
             console.log('[Popup] SINGLE_WORKSPACE_AUTO_SELECT');
             await sendMessage({ action: 'savePreferredTeam', data: { teamId: initialTeamId } });
         }
@@ -1405,12 +1875,8 @@ async function getTeamId(): Promise<string | null> {
     try {
         // 1. Check Preferred Team in Storage
         const store = await chrome.storage.local.get(['preferredTeamId', 'cachedTeams']);
-        if (store.preferredTeamId) return store.preferredTeamId;
-
-        // 2. Fallback to cached teams (single)
-        if (store.cachedTeams?.teams?.length > 0) {
-            return store.cachedTeams.teams[0].id;
-        }
+        const selectedTeamId = selectAuthorizedTeamId(store.cachedTeams?.teams, store.preferredTeamId);
+        if (selectedTeamId) return selectedTeamId;
 
         // 3. Fallback: Check Active DOM Element (if applicable)
         const teamSelect = document.getElementById('teamSelect') as HTMLSelectElement;
@@ -1610,6 +2076,7 @@ function sendMessage<T = any>(message: { action: string; data?: any }): Promise<
             if (chrome.runtime.lastError) {
                 reject(new Error(chrome.runtime.lastError.message));
             } else if (response?.error) {
+                if (response.requiresReauth === true) window.location.reload();
                 reject(new Error(response.error));
             } else {
                 resolve(response as T);

@@ -76,7 +76,9 @@ import { storageService } from './src/services/storage.service';
 // Example usage
 const token = await authService.getAccessToken();
 const api = new ClickUpAPIWrapper(token);
-api.setTokenRefreshCallback(() => authService.refreshToken());
+api.setAuthenticationFailureCallback(async () => {
+  // Invalidate the rejected local session and ask the user to reconnect.
+});
 ```
 
 ## Technical Debt

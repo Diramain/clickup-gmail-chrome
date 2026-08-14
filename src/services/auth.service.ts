@@ -19,13 +19,8 @@ export interface OAuthConfig {
 export interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    requiresReauth: boolean;
     user: ClickUpUserResponse | null;
-}
-
-export interface TestResult {
-    success: boolean;
-    message?: string;
-    error?: string;
 }
 
 // ============================================================================
@@ -40,6 +35,7 @@ const STORAGE_KEYS = {
     TEAMS: 'cachedTeams',
     DRAFT_CLIENT_ID: 'draftClientId',
     DRAFT_CLIENT_SECRET: 'draftClientSecret',
+    REAUTH_REQUIRED: 'clickupReauthRequired',
 };
 
 const API_URLS = {
@@ -52,28 +48,21 @@ const API_URLS = {
 // ============================================================================
 
 class AuthService {
-    private onTokenRefreshed: ((token: string) => void) | null = null;
-
-    /**
-     * Set callback for when token is refreshed
-     */
-    setOnTokenRefreshed(callback: (token: string) => void): void {
-        this.onTokenRefreshed = callback;
-    }
-
     /**
      * Get current extension status
      */
     async getStatus(): Promise<ExtensionStatus> {
-        const data = await chrome.storage.local.get(STORAGE_KEYS.USER);
+        const data = await chrome.storage.local.get([STORAGE_KEYS.USER, STORAGE_KEYS.REAUTH_REQUIRED]);
 
         const hasToken = await hasSecureToken(STORAGE_KEYS.TOKEN);
         const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+        const requiresReauth = data[STORAGE_KEYS.REAUTH_REQUIRED] === true;
 
         return {
-            authenticated: hasToken,
+            authenticated: hasToken && !requiresReauth,
             configured,
-            user: data[STORAGE_KEYS.USER] || null
+            requiresReauth,
+            user: requiresReauth ? null : data[STORAGE_KEYS.USER] || null,
         };
     }
 
@@ -145,9 +134,8 @@ class AuthService {
             if (tokenData.access_token) {
                 // Save tokens encrypted
                 await saveSecureToken(STORAGE_KEYS.TOKEN, tokenData.access_token);
-                if (tokenData.refresh_token) {
-                    await saveSecureToken(STORAGE_KEYS.REFRESH_TOKEN, tokenData.refresh_token);
-                }
+                await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                await chrome.storage.local.remove(STORAGE_KEYS.REAUTH_REQUIRED);
 
                 return {
                     success: true,
@@ -164,57 +152,6 @@ class AuthService {
     }
 
     /**
-     * Refresh the access token using refresh token
-     */
-    async refreshToken(): Promise<{ success: boolean; token?: string }> {
-        console.log('[Auth] TOKEN_REFRESH_START');
-
-        const oauthConfig = await this.getOAuthConfig();
-        const refreshTokenValue = await getSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-
-        if (!refreshTokenValue || !oauthConfig?.clientId) {
-            console.log('[Auth] TOKEN_REFRESH_SKIPPED');
-            return { success: false };
-        }
-
-        try {
-            const response = await fetch(API_URLS.TOKEN, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    client_id: oauthConfig.clientId,
-                    client_secret: oauthConfig.clientSecret,
-                    refresh_token: refreshTokenValue,
-                    grant_type: 'refresh_token'
-                })
-            });
-
-            const tokenData = await response.json();
-
-            if (tokenData.access_token) {
-                await saveSecureToken(STORAGE_KEYS.TOKEN, tokenData.access_token);
-                await saveSecureToken(STORAGE_KEYS.REFRESH_TOKEN, tokenData.refresh_token || refreshTokenValue);
-
-                console.log('[Auth] TOKEN_REFRESHED');
-
-                // Notify callback if set
-                if (this.onTokenRefreshed) {
-                    this.onTokenRefreshed(tokenData.access_token);
-                }
-
-                return { success: true, token: tokenData.access_token };
-            }
-
-            console.error('[Auth] TOKEN_REFRESH_FAILED');
-            return { success: false };
-
-        } catch (error) {
-            console.error('[Auth] TOKEN_REFRESH_ERROR');
-            return { success: false };
-        }
-    }
-
-    /**
      * Get the current access token (decrypted)
      */
     async getAccessToken(): Promise<string | null> {
@@ -225,7 +162,8 @@ class AuthService {
      * Check if user is authenticated
      */
     async isAuthenticated(): Promise<boolean> {
-        return await hasSecureToken(STORAGE_KEYS.TOKEN);
+        const state = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+        return state[STORAGE_KEYS.REAUTH_REQUIRED] !== true && await hasSecureToken(STORAGE_KEYS.TOKEN);
     }
 
     /**
@@ -239,7 +177,8 @@ class AuthService {
             STORAGE_KEYS.DRAFT_CLIENT_ID,
             STORAGE_KEYS.DRAFT_CLIENT_SECRET,
             STORAGE_KEYS.USER,
-            STORAGE_KEYS.TEAMS
+            STORAGE_KEYS.TEAMS,
+            STORAGE_KEYS.REAUTH_REQUIRED,
         ]);
 
         console.log('[Auth] LOGGED_OUT');

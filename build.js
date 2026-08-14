@@ -32,6 +32,7 @@ const tsEntryPoints = [
     { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
     { in: 'src/modal.ts', out: 'src/modal' },
     { in: 'src/clickup-tracker.ts', out: 'src/clickup-tracker' },
+    { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
 ];
 
 /**
@@ -79,6 +80,7 @@ async function buildTypeScript() {
             { in: 'src/modal.ts', out: 'src/modal' },
             { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
             { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
+            { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
         ];
 
         // Build bundled files

@@ -1,6 +1,6 @@
 {
   "name": "clickup-gmail-chrome",
-  "version": "1.2.0",
+  "version": "1.2.3",
   "description": "Chrome extension to create ClickUp tasks from Gmail",
   "private": true,
   "author": "Leandro Iramain",

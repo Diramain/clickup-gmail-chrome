@@ -163,6 +163,46 @@
             <!-- TAB B: Time Tracking (DEFAULT) -->
             <!-- ========================================== -->
             <section id="tab-tracking" class="tab-content active" role="tabpanel">
+                <!-- Google Meet Priority -->
+                <div id="meetPriorityCard" class="card meet-card">
+                    <h3>🎥 Prioridad Google Meet</h3>
+                    <div class="toggle-row">
+                        <span class="toggle-label">Detectar sesiones Google Meet</span>
+                        <label class="toggle-switch" aria-label="Detectar sesiones Google Meet">
+                            <input type="checkbox" id="meetPriorityToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="hint mt-8">Desactivado por defecto. Sólo detecta una señal local de llamada en meet.google.com; no lee audio, video, chat, captions, participantes ni títulos.</p>
+                    <div id="meetPriorityStatus" class="meet-status" aria-live="polite">
+                        <p class="hint">Prioridad Meet desactivada</p>
+                    </div>
+
+                    <div id="meetTaskChooser" class="meet-chooser hidden">
+                        <label for="meetTaskSearch" class="meet-label">Elegí una tarea para esta reunión</label>
+                        <input type="text" id="meetTaskSearch" placeholder="Buscar tarea por nombre o ID…" autocomplete="off">
+                        <div id="meetTaskResults" class="search-results"></div>
+                        <label class="checkbox-row">
+                            <input type="checkbox" id="meetRememberToggle">
+                            <span>Recordar para esta sala</span>
+                        </label>
+                        <button id="assignMeetTask" class="btn btn-primary btn-small" disabled>Usar tarea seleccionada</button>
+                    </div>
+
+                    <div id="meetActions" class="meet-actions hidden">
+                        <button id="usePreviousMeetTask" class="btn btn-secondary btn-small hidden">Usar tarea anterior</button>
+                        <button id="changeMeetTask" class="btn btn-secondary btn-small hidden">Cambiar tarea</button>
+                        <button id="resumeMeetSession" class="btn btn-warning btn-small hidden">Reanudar reunión</button>
+                        <button id="ignoreMeetSession" class="btn btn-link btn-small hidden">Ignorar esta reunión</button>
+                        <button id="endMeetSession" class="btn btn-danger btn-small hidden">Finalizar reunión</button>
+                    </div>
+
+                    <details id="meetMappingsDetails" class="meet-mappings hidden">
+                        <summary>Reuniones vinculadas</summary>
+                        <div id="meetMappingsList"></div>
+                    </details>
+                </div>
+
                 <!-- Running Timer -->
                 <div class="card timer-card">
                     <div id="runningTimer" class="running-timer hidden">
@@ -181,17 +221,17 @@
                 <!-- Auto Tracking Toggles -->
                 <div class="card">
                     <h3>🤖 Seguimiento automático</h3>
-                    <p class="hint mb-8">Configuración guardada para futura integración con ClickUp.com</p>
+                    <p class="hint mb-8">La tarea sigue activa mientras trabajás en Gmail, Chatwoot u otras webs. Con Auto-Stop, también se detiene al cerrar su última pestaña ClickUp.</p>
                     <div class="toggle-row">
-                        <span class="toggle-label">Iniciar automáticamente al abrir una tarea</span>
-                        <label class="toggle-switch">
+                        <span class="toggle-label">Iniciar al enfocar una tarea</span>
+                        <label class="toggle-switch" aria-label="Iniciar seguimiento al enfocar una tarea">
                             <input type="checkbox" id="autoStartToggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
                     <div class="toggle-row">
-                        <span class="toggle-label">Detener automáticamente al cerrar una tarea</span>
-                        <label class="toggle-switch">
+                        <span class="toggle-label">Detener al cambiar de tarea o cerrar su última pestaña</span>
+                        <label class="toggle-switch" aria-label="Detener al cambiar de tarea o cerrar su última pestaña">
                             <input type="checkbox" id="autoStopToggle">
                             <span class="toggle-slider"></span>
                         </label>
@@ -255,7 +295,7 @@
                     <h3>🏷️ Campo personalizado</h3>
                     <div class="toggle-row mb-4">
                         <span class="toggle-label">Usar campo personalizado</span>
-                        <label class="toggle-switch">
+                        <label class="toggle-switch" aria-label="Usar campo personalizado para el ID del hilo">
                             <input type="checkbox" id="useCustomFieldToggle" checked>
                             <span class="toggle-slider"></span>
                         </label>
@@ -306,13 +346,6 @@
                     </a>
                 </div>
 
-                <!-- Dev Tools -->
-                <div class="card dev-tools">
-                    <h3>🔧 Herramientas de desarrollo</h3>
-                    <button id="testTokenRefresh" class="btn btn-warning">🧪 Probar renovación de token</button>
-                    <p class="hint" id="testResult"></p>
-                </div>
-
                 <!-- DBA-H1 & DM-H1: Data Management -->
                 <div class="card">
                     <h3>💾 Gestión de datos</h3>
@@ -327,6 +360,25 @@
                 <button id="signOut" class="btn btn-danger">Cerrar sesión</button>
             </section>
         </div>
+
+        <section id="safeDiagnostics" class="section hidden" aria-labelledby="safeDiagnosticsTitle">
+            <div class="card diagnostic-card">
+                <h3 id="safeDiagnosticsTitle">🩺 Diagnóstico seguro</h3>
+                <div class="toggle-row">
+                    <span class="toggle-label">Registrar eventos técnicos durante esta sesión</span>
+                    <label class="toggle-switch" aria-label="Activar diagnóstico seguro">
+                        <input type="checkbox" id="diagnosticToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p class="help-text">Apagado por defecto. Conserva hasta 200 eventos categóricos en memoria de sesión; no guarda tokens, headers, URLs, IDs, nombres, emails, payloads ni contenido de Gmail o Meet.</p>
+                <div class="btn-row diagnostic-actions">
+                    <button id="exportDiagnostics" class="btn btn-secondary btn-small" type="button">📥 Exportar JSON</button>
+                    <button id="clearDiagnostics" class="btn btn-danger btn-small" type="button">🗑️ Borrar registro</button>
+                </div>
+                <p class="hint mt-8" id="diagnosticStatus" aria-live="polite">Diagnóstico desactivado · 0/200 eventos</p>
+            </div>
+        </section>
 
         <footer class="popup-footer">
             <p>
