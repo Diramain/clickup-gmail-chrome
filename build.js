@@ -10,6 +10,7 @@ const { execSync } = require('child_process');
 
 const isWatch = process.argv.includes('--watch');
 const skipTypeCheck = process.argv.includes('--skip-typecheck');
+const sidecarOnly = process.argv.includes('--sidecar-only');
 
 // Ensure dist directory exists
 const distDir = path.join(__dirname, 'dist');
@@ -26,6 +27,7 @@ const tsEntryPoints = [
     { in: 'background.ts', out: 'background' },
     // Popup
     { in: 'popup/popup.ts', out: 'popup/popup' },
+    { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
     // Content scripts
     { in: 'src/logger.ts', out: 'src/logger' },
     { in: 'src/gmail-adapter.ts', out: 'src/gmail-adapter' },
@@ -77,6 +79,7 @@ async function buildTypeScript() {
         const bundledEntryPoints = [
             { in: 'background.ts', out: 'background' },
             { in: 'popup/popup.ts', out: 'popup/popup' },
+            { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
             { in: 'src/modal.ts', out: 'src/modal' },
             { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
             { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
@@ -93,7 +96,7 @@ async function buildTypeScript() {
             bundle: true,
             format: 'iife',
         });
-        console.log('  ✅ Bundled files: background.ts, popup.ts, modal.ts');
+        console.log('  ✅ Bundled files: background.ts, popup.ts, recorder.ts, modal.ts');
 
         // Build other files without bundling
         const otherEntryPoints = tsEntryPoints.filter(e =>
@@ -125,6 +128,40 @@ async function buildJavaScript() {
     return true;
 }
 
+async function buildSidecar() {
+    const sidecarRoot = path.join(__dirname, 'tools', 'session-observer');
+    const sidecarDist = path.join(sidecarRoot, 'dist');
+    const sidecarFiles = ['manifest.json', 'recorder.html', 'recorder.css', 'background.js', 'recorder.js'];
+    fs.rmSync(sidecarDist, { recursive: true, force: true });
+    fs.mkdirSync(sidecarDist, { recursive: true });
+    try {
+        await esbuild.build({
+            ...commonBuildOptions,
+            entryPoints: [
+                { in: 'tools/session-observer/background.ts', out: 'background' },
+                { in: 'tools/session-observer/recorder.ts', out: 'recorder' },
+            ],
+            outdir: sidecarDist,
+            outExtension: { '.js': '.js' },
+            loader: { '.ts': 'ts' },
+            bundle: true,
+            format: 'iife',
+        });
+        for (const file of ['manifest.json', 'recorder.html', 'recorder.css']) {
+            fs.copyFileSync(path.join(sidecarRoot, file), path.join(sidecarDist, file));
+        }
+        const actual = fs.readdirSync(sidecarDist).sort();
+        if (JSON.stringify(actual) !== JSON.stringify(sidecarFiles.sort())) {
+            throw new Error(`Sidecar allowlist mismatch: ${actual.join(', ')}`);
+        }
+        console.log('  ✅ Sidecar built with explicit allowlist');
+        return true;
+    } catch (error) {
+        console.error('❌ Sidecar build failed:', error);
+        return false;
+    }
+}
+
 async function build() {
     console.log('🚀 Starting build...\n');
 
@@ -135,17 +172,22 @@ async function build() {
         process.exit(1);
     }
 
-    // Step 2: Build TypeScript
-    const tsBuildPassed = await buildTypeScript();
-    if (!tsBuildPassed) {
-        process.exit(1);
+    if (!sidecarOnly) {
+        // Step 2: Build TypeScript
+        const tsBuildPassed = await buildTypeScript();
+        if (!tsBuildPassed) {
+            process.exit(1);
+        }
+
+        // Step 3: Build JavaScript (legacy)
+        const jsBuildPassed = await buildJavaScript();
+        if (!jsBuildPassed) {
+            process.exit(1);
+        }
     }
 
-    // Step 3: Build JavaScript (legacy)
-    const jsBuildPassed = await buildJavaScript();
-    if (!jsBuildPassed) {
-        process.exit(1);
-    }
+    const sidecarBuildPassed = await buildSidecar();
+    if (!sidecarBuildPassed) process.exit(1);
 
     console.log('\n✨ Build completed successfully!');
 

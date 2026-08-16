@@ -54,6 +54,7 @@ import {
 import { extractCurrentUserId } from './src/time-entry-history';
 import {
     applyManualStopSuppression,
+    decideClickUpTaskTabIndexTransition,
     decideLastTaskTabCloseAction,
     decideFocusedTimerAction,
     executeFocusedTimerAction,
@@ -75,6 +76,13 @@ import {
 import { createMeetRoomKey, resolveMeetPageContext } from './src/meet/meet-room';
 import { isAuthorizedTeamId, selectAuthorizedTeamId } from './src/team-selection';
 import { SafeDiagnosticLog, type DiagnosticEventName } from './src/diagnostic-log';
+import {
+    CAUSAL_TRACE_PORT_NAME,
+    CausalTraceSanitizer,
+    createCaptureRef,
+    type CausalTraceInput,
+    type SafeCausalTraceEvent,
+} from './src/causal-trace';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -129,10 +137,45 @@ const MEET_HEARTBEAT_STALE_MS = 3 * 60 * 1000;
 const storageLocalTrustedReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const storageSessionTrustedReady = chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const diagnosticLog = new SafeDiagnosticLog(chrome.storage.session);
+const causalTracePorts = new Map<chrome.runtime.Port, CausalTraceSanitizer>();
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
+    emitCausalTrace({ event: 'diagnostic', action: event, outcome: String(details.outcome || 'none'), reason: String(details.reason || 'unknown') });
 }
+
+function emitCausalTrace(input: CausalTraceInput): SafeCausalTraceEvent | null {
+    if (causalTracePorts.size === 0) return null;
+    let lastEvent: SafeCausalTraceEvent | null = null;
+    for (const [port, sanitizer] of [...causalTracePorts.entries()]) {
+        const event = sanitizer.event(input);
+        lastEvent = event;
+        try {
+            port.postMessage({ type: 'cgc-causal-trace-event', event });
+        } catch {
+            causalTracePorts.delete(port);
+        }
+    }
+    return lastEvent;
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== CAUSAL_TRACE_PORT_NAME) return;
+    const sanitizer = new CausalTraceSanitizer('extension-main', createCaptureRef('main'));
+    causalTracePorts.set(port, sanitizer);
+    try {
+        port.postMessage({
+            type: 'cgc-causal-trace-event',
+            event: sanitizer.event({ event: 'capture', action: 'recording-started', outcome: 'armed' }),
+        });
+    } catch {
+        causalTracePorts.delete(port);
+        return;
+    }
+    port.onDisconnect.addListener(() => {
+        causalTracePorts.delete(port);
+    });
+});
 
 function emitSyncProgress(message: SyncProgressMessage): void {
     if (!isSyncProgressMessage(message)) return;
@@ -245,16 +288,21 @@ const meetPriorityReady = restoreMeetPrioritySession();
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    emitCausalTrace({ event: 'listener', action: 'windows.onFocusChanged', outcome: 'received', windowId });
     void requestMeetAuthorityRefreshForWindow(windowId);
     scheduleFocusedTimerEvaluation('window-focus');
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
+    emitCausalTrace({ event: 'listener', action: 'tabs.onActivated', outcome: 'received', tabId: activeInfo.tabId, windowId: activeInfo.windowId });
     void requestMeetAuthorityRefresh(activeInfo.tabId);
     scheduleFocusedTimerEvaluation('tab-activated');
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url || changeInfo.status === 'complete') {
+        emitCausalTrace({ event: 'listener', action: 'tabs.onUpdated', outcome: 'received', rawUrl: changeInfo.url || tab.url, tabId, windowId: tab.windowId });
+    }
     if (changeInfo.url
         || (changeInfo.status === 'complete' && tab.url?.startsWith('https://app.clickup.com/'))) {
         void updateTrackedClickUpTaskTab(tabId, changeInfo.url || tab.url)
@@ -272,6 +320,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+    emitCausalTrace({ event: 'listener', action: 'tabs.onRemoved', outcome: 'received', tabId });
     if (meetPrioritySession?.tabId === tabId) {
         void runTimerWrite(() => endMeetSession('tab-closed'));
     }
@@ -281,6 +330,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
+    emitCausalTrace({ event: 'listener', action: 'windows.onRemoved', outcome: 'received', windowId });
     if (meetPrioritySession?.windowId === windowId) {
         void runTimerWrite(() => endMeetSession('window-closed'));
     }
@@ -1452,15 +1502,29 @@ async function updateTrackedClickUpTaskTab(tabId: number, rawUrl: string | undef
     const settings = await readFocusedTimerSettings();
     if (!settings.autoStopTimer) return;
     await storageSessionTrustedReady;
+    let exitedTaskId: string | null = null;
     await runClickUpTaskTabIndexMutation(async () => {
         const stored = await chrome.storage.session.get(CLICKUP_TASK_TAB_INDEX_SESSION_KEY);
-        const nextIndex = updateClickUpTaskTabIndex(
+        const transition = decideClickUpTaskTabIndexTransition(
             stored[CLICKUP_TASK_TAB_INDEX_SESSION_KEY],
             tabId,
             rawUrl,
         );
-        await chrome.storage.session.set({ [CLICKUP_TASK_TAB_INDEX_SESSION_KEY]: nextIndex });
+        exitedTaskId = transition.exitedTaskId;
+        await chrome.storage.session.set({ [CLICKUP_TASK_TAB_INDEX_SESSION_KEY]: transition.nextIndex });
+        emitCausalTrace({
+            event: 'index',
+            action: 'last-task-view-exit',
+            outcome: transition.outcome,
+            reason: exitedTaskId ? 'last-task-view-left' : 'unknown',
+            rawUrl,
+            tabId,
+            taskId: transition.nextTaskId || transition.previousTaskId,
+        });
     });
+    if (exitedTaskId) {
+        await runTimerWrite(() => stopTimerAfterLastTaskTabClose(exitedTaskId!, 'last-task-view-left'));
+    }
 }
 
 async function clearTrackedClickUpTaskTabIndex(): Promise<void> {
@@ -1486,50 +1550,75 @@ async function removeTrackedClickUpTaskTab(tabId: number): Promise<string | null
 
 async function handleTrackedClickUpTaskTabRemoved(tabId: number): Promise<void> {
     const closedTaskId = await removeTrackedClickUpTaskTab(tabId);
+    emitCausalTrace({ event: 'index', action: 'last-task-view-exit', outcome: closedTaskId ? 'index-hit' : 'index-miss', reason: closedTaskId ? 'last-task-tab-closed' : 'closed-task-unknown', tabId, taskId: closedTaskId });
     if (!closedTaskId) return;
     await runTimerWrite(() => stopTimerAfterLastTaskTabClose(closedTaskId));
 }
 
-async function stopTimerAfterLastTaskTabClose(closedTaskId: string): Promise<void> {
-    if (logoutInProgress) return;
+async function stopTimerAfterLastTaskTabClose(closedTaskId: string, traceReason: 'last-task-tab-closed' | 'last-task-view-left' = 'last-task-tab-closed'): Promise<void> {
+    if (logoutInProgress) {
+        emitCausalTrace({ event: 'guard', guard: 'auth', outcome: 'skipped', reason: 'unknown', taskId: closedTaskId });
+        return;
+    }
     const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
-    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+    if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
+        emitCausalTrace({ event: 'guard', guard: 'auth', outcome: 'skipped', reason: 'unknown', taskId: closedTaskId });
+        return;
+    }
 
     await meetPriorityReady;
     const meetPriorityActive = !!meetPrioritySession
         && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status);
+    if (meetPriorityActive) emitCausalTrace({ event: 'guard', guard: 'meet-priority', outcome: 'skipped', reason: 'meet-priority', taskId: closedTaskId });
     if (meetPriorityActive) return;
 
     const settings = await readFocusedTimerSettings();
-    if (!settings.autoStopTimer) return;
+    if (!settings.autoStopTimer) {
+        emitCausalTrace({ event: 'guard', guard: 'settings', outcome: 'skipped', reason: 'auto-stop-disabled', taskId: closedTaskId });
+        return;
+    }
 
-    const teamId = await resolveFocusedTimerTeamId();
-    if (!teamId) return;
-    await ensureAPI();
+    try {
+        const teamId = await resolveFocusedTimerTeamId();
+        if (!teamId) {
+            emitCausalTrace({ event: 'guard', guard: 'team', outcome: 'skipped', reason: 'unknown', taskId: closedTaskId });
+            return;
+        }
+        await ensureAPI();
 
-    const runningBeforeTabQuery = await clickupAPI!.getRunningTimer(teamId);
-    const runningTaskId = getRunningTaskId(runningBeforeTabQuery);
-    const remainingTabs = await chrome.tabs.query({ url: 'https://app.clickup.com/*' });
-    const action = decideLastTaskTabCloseAction(
-        settings,
-        closedTaskId,
-        runningTaskId,
-        remainingTabs.map((tab) => tab.url),
-        false,
-    );
-    if (action.type !== 'stop') return;
+        const runningBeforeTabQuery = await clickupAPI!.getRunningTimer(teamId);
+        const runningTaskId = getRunningTaskId(runningBeforeTabQuery);
+        const remainingTabs = await chrome.tabs.query({ url: 'https://app.clickup.com/*' });
+        emitCausalTrace({ event: 'navigation', action: 'last-task-view-exit', outcome: 'attempted', reason: traceReason, taskId: closedTaskId });
+        const action = decideLastTaskTabCloseAction(
+            settings,
+            closedTaskId,
+            runningTaskId,
+            remainingTabs.map((tab) => tab.url),
+            false,
+        );
+        emitCausalTrace({ event: 'decision', action: action.type, outcome: action.type === 'stop' ? 'attempted' : 'skipped', reason: action.type === 'stop' ? traceReason : action.reason, taskId: closedTaskId });
+        if (action.type !== 'stop') return;
 
-    const runningBeforeStop = await clickupAPI!.getRunningTimer(teamId);
-    if (getRunningTaskId(runningBeforeStop) !== closedTaskId) return;
-
-    await clickupAPI!.stopTimer(teamId);
-    await updateTimerBadge('stopped');
-    await chrome.storage.session.remove(FOCUSED_TIMER_SESSION_KEY);
-    recordDiagnostic('timer_transition', {
-        action: 'stop',
-        outcome: 'stopped',
-        reason: 'last-task-tab-closed',
-    });
+        emitCausalTrace({ event: 'attempt', action: 'stop', outcome: 'attempted', reason: traceReason, taskId: closedTaskId });
+        const runningBeforeStop = await clickupAPI!.getRunningTimer(teamId);
+        if (getRunningTaskId(runningBeforeStop) !== closedTaskId) {
+            emitCausalTrace({ event: 'guard', guard: 'running-task', outcome: 'skipped', reason: 'closed-different-task', taskId: closedTaskId });
+            return;
+        }
+        await clickupAPI!.stopTimer(teamId);
+        await updateTimerBadge('stopped');
+        await chrome.storage.session.remove(FOCUSED_TIMER_SESSION_KEY);
+        recordDiagnostic('timer_transition', {
+            action: 'stop',
+            outcome: 'stopped',
+            reason: traceReason,
+        });
+        emitCausalTrace({ event: 'result', action: 'stop', outcome: 'stopped', reason: traceReason, taskId: closedTaskId });
+    } catch (error) {
+        emitCausalTrace({ event: 'result', action: 'stop', outcome: 'failure', reason: traceReason, error, taskId: closedTaskId });
+        throw error;
+    }
 }
 
 function scheduleFocusedTimerEvaluation(reason: string): void {
@@ -1547,6 +1636,7 @@ async function evaluateFocusedTimer(revision: number, _reason: string): Promise<
     if (revision !== focusedTimerRevision || logoutInProgress) return;
     const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) return;
+    emitCausalTrace({ event: 'listener', action: 'focused-evaluation', outcome: 'received', reason: _reason });
     await meetPriorityReady;
     if (meetPrioritySession && ['awaiting-task', 'tracking', 'paused'].includes(meetPrioritySession.status)) return;
 
@@ -1557,6 +1647,16 @@ async function evaluateFocusedTimer(revision: number, _reason: string): Promise<
     if (!snapshot || revision !== focusedTimerRevision) return;
 
     const context = resolveClickUpFocusContext(snapshot.url);
+    emitCausalTrace({
+        event: 'navigation',
+        action: 'focused-evaluation',
+        outcome: 'attempted',
+        rawUrl: snapshot.url,
+        tabId: snapshot.tabId,
+        windowId: snapshot.windowId,
+        taskId: context.kind === 'task' ? context.taskId : null,
+        reason: context.kind === 'task' ? context.source : context.source,
+    });
     const teamId = await resolveFocusedTimerTeamId();
     if (!teamId || revision !== focusedTimerRevision) return;
 
@@ -1576,6 +1676,19 @@ async function evaluateFocusedTimer(revision: number, _reason: string): Promise<
         const proposedAction = decideFocusedTimerAction(settings, context, runningTaskId);
         const suppressedTaskId = await readManualStopSuppression();
         const suppression = applyManualStopSuppression(proposedAction, suppressedTaskId);
+        emitCausalTrace({
+            event: 'decision',
+            action: suppression.action.type,
+            outcome: suppression.action.type === 'none' ? 'skipped' : 'attempted',
+            reason: suppression.action.reason,
+            rawUrl: snapshot.url,
+            tabId: snapshot.tabId,
+            windowId: snapshot.windowId,
+            taskId: suppression.action.type === 'start' || suppression.action.type === 'switch' ? suppression.action.taskId : runningTaskId,
+        });
+        if (suppression.action.type !== 'none') {
+            emitCausalTrace({ event: 'attempt', action: suppression.action.type, outcome: 'attempted', reason: suppression.action.reason, tabId: snapshot.tabId, windowId: snapshot.windowId });
+        }
         const transitionResult = await executeFocusedTimerAction(suppression.action, {
             isCurrent: async () => revision === focusedTimerRevision && await isSnapshotStillFocused(snapshot),
             validateTask: (taskId) => validateFocusedTask(taskId, teamId),
@@ -1595,6 +1708,16 @@ async function evaluateFocusedTimer(revision: number, _reason: string): Promise<
             action: suppression.action.type,
             outcome: transitionResult,
             reason: sanitizeDiagnosticTimerReason(suppression.action.reason),
+        });
+        emitCausalTrace({
+            event: 'result',
+            action: suppression.action.type,
+            outcome: transitionResult,
+            reason: suppression.action.reason,
+            rawUrl: snapshot.url,
+            tabId: snapshot.tabId,
+            windowId: snapshot.windowId,
+            taskId: suppression.action.type === 'start' || suppression.action.type === 'switch' ? suppression.action.taskId : runningTaskId,
         });
     });
 }
@@ -1715,7 +1838,7 @@ function sanitizeDiagnosticTimerReason(reason: string): string {
         'direct', 'inbox-notification', 'disabled', 'outside-clickup', 'inbox',
         'clickup-other', 'same-task', 'different-task', 'timer-already-running',
         'auto-start-disabled', 'manually-stopped', 'manual', 'poll',
-        'last-task-tab-closed',
+        'last-task-tab-closed', 'last-task-view-left',
     ].includes(reason) ? reason : 'unknown';
 }
 

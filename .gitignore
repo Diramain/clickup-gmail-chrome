@@ -10,6 +10,8 @@ task-modal-entry.js
 popup/popup.js
 src/*.js
 src/**/*.js
+diagnostics/*.js
+tools/session-observer/dist/
 
 # Distribution packages
 *.zip

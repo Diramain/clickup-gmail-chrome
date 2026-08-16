@@ -29,6 +29,8 @@
     },
     "include": [
         "src/**/*.ts",
+        "diagnostics/**/*.ts",
+        "tools/session-observer/**/*.ts",
         "background.ts",
         "popup/**/*.ts"
     ],

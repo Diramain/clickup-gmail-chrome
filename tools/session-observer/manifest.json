@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "102",
+  "name": "CGC Session Observer",
+  "version": "1.2.3",
+  "description": "Observador diagnóstico local para correlacionar eventos de pestañas y ventanas sin API de ClickUp",
+  "permissions": ["tabs"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {}
+}

@@ -193,6 +193,7 @@ async function initSafeDiagnostics(): Promise<void> {
     const toggle = document.getElementById('diagnosticToggle') as HTMLInputElement | null;
     const exportButton = document.getElementById('exportDiagnostics') as HTMLButtonElement | null;
     const clearButton = document.getElementById('clearDiagnostics') as HTMLButtonElement | null;
+    const openRecorderButton = document.getElementById('openCausalRecorder') as HTMLButtonElement | null;
     const status = document.getElementById('diagnosticStatus') as HTMLElement | null;
     if (!container || !toggle || !exportButton || !clearButton || !status) return;
 
@@ -268,6 +269,10 @@ async function initSafeDiagnostics(): Promise<void> {
             status.style.color = '#ff5252';
             clearButton.disabled = false;
         }
+    });
+
+    openRecorderButton?.addEventListener('click', () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics/recorder.html') });
     });
 }
 

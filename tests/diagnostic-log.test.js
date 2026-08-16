@@ -174,6 +174,14 @@ describe('CGC-DIAG-005 safe session diagnostics', () => {
         expect(JSON.stringify(exported)).not.toMatch(/TASK-PRIVATE-123|clickup\.com/);
     });
 
+    test('diagnostic timer transition allowlist preserves task view exit subtype', async () => {
+        const log = new diagnostics.SafeDiagnosticLog(chrome.storage.session, () => 1_700_000_000_000);
+        await log.setEnabled(true);
+        await log.record('timer_transition', { action: 'stop', outcome: 'stopped', reason: 'last-task-view-left' });
+        const exported = await log.createExport('1.2.3');
+        expect(exported.events.at(-1).details).toEqual({ action: 'stop', outcome: 'stopped', reason: 'last-task-view-left' });
+    });
+
     test('sanitizes corrupted session state again before export', async () => {
         chrome.storage.session.data.safeDiagnosticLogV1 = {
             enabled: true,

@@ -26,6 +26,14 @@ export interface RemovedClickUpTaskTab {
     taskId: string | null;
 }
 
+export interface ClickUpTaskTabIndexTransition {
+    nextIndex: ClickUpTaskTabIndex;
+    previousTaskId: string | null;
+    nextTaskId: string | null;
+    exitedTaskId: string | null;
+    outcome: 'index-hit' | 'index-miss';
+}
+
 export type FocusedTimerAction =
     | { type: 'none'; reason: string }
     | { type: 'stop'; reason: string }
@@ -95,6 +103,24 @@ export function updateClickUpTaskTabIndex(
         next[key] = taskId;
     }
     return next;
+}
+
+export function decideClickUpTaskTabIndexTransition(
+    value: unknown,
+    tabId: number,
+    rawUrl: string | undefined | null,
+): ClickUpTaskTabIndexTransition {
+    const current = sanitizeClickUpTaskTabIndex(value);
+    const previousTaskId = Number.isSafeInteger(tabId) && tabId >= 0 ? current[String(tabId)] || null : null;
+    const nextIndex = updateClickUpTaskTabIndex(current, tabId, rawUrl);
+    const nextTaskId = Number.isSafeInteger(tabId) && tabId >= 0 ? nextIndex[String(tabId)] || null : null;
+    return {
+        nextIndex,
+        previousTaskId,
+        nextTaskId,
+        exitedTaskId: previousTaskId && previousTaskId !== nextTaskId ? previousTaskId : null,
+        outcome: previousTaskId || nextTaskId ? 'index-hit' : 'index-miss',
+    };
 }
 
 export function removeClickUpTaskTabIndexEntry(value: unknown, tabId: number): RemovedClickUpTaskTab {

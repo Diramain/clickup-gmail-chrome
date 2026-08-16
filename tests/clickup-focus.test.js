@@ -17,6 +17,7 @@ function loadTsModule(relativePath) {
 const {
     CLICKUP_TASK_TAB_INDEX_MAX_ENTRIES,
     applyManualStopSuppression,
+    decideClickUpTaskTabIndexTransition,
     decideLastTaskTabCloseAction,
     decideFocusedTimerAction,
     executeFocusedTimerAction,
@@ -152,6 +153,21 @@ describe('ClickUp task-tab session index', () => {
             taskId: null,
         });
     });
+
+    test('pure transition detects task to Kanban, Home, Inbox, and task A to B without raw retention', () => {
+        expect(decideClickUpTaskTabIndexTransition({ 7: 'TASK_A' }, 7, 'https://app.clickup.com/123/v/l/li/list')).toEqual({
+            nextIndex: {}, previousTaskId: 'TASK_A', nextTaskId: null, exitedTaskId: 'TASK_A', outcome: 'index-hit',
+        });
+        expect(decideClickUpTaskTabIndexTransition({ 7: 'TASK_A' }, 7, 'https://app.clickup.com/')).toEqual({
+            nextIndex: {}, previousTaskId: 'TASK_A', nextTaskId: null, exitedTaskId: 'TASK_A', outcome: 'index-hit',
+        });
+        expect(decideClickUpTaskTabIndexTransition({ 7: 'TASK_A' }, 7, 'https://app.clickup.com/123/inbox?tab=primary')).toEqual({
+            nextIndex: {}, previousTaskId: 'TASK_A', nextTaskId: null, exitedTaskId: 'TASK_A', outcome: 'index-hit',
+        });
+        expect(decideClickUpTaskTabIndexTransition({ 7: 'TASK_A' }, 7, 'https://app.clickup.com/t/123/TASK_B?secret=value')).toEqual({
+            nextIndex: { 7: 'TASK_B' }, previousTaskId: 'TASK_A', nextTaskId: 'TASK_B', exitedTaskId: 'TASK_A', outcome: 'index-hit',
+        });
+    });
 });
 
 describe('Last task-tab close policy', () => {
@@ -192,6 +208,17 @@ describe('Last task-tab close policy', () => {
             ],
             false,
         )).toEqual({ type: 'stop', reason: 'last-task-tab-closed' });
+    });
+
+    test('task to Kanban/Home/Inbox stops only without another equivalent task view', () => {
+        for (const remaining of [
+            ['https://app.clickup.com/123/v/l/li/list'],
+            ['https://app.clickup.com/'],
+            ['https://app.clickup.com/123/inbox?tab=primary'],
+        ]) {
+            expect(decideLastTaskTabCloseAction(enabled, 'TASK_A', 'TASK_A', remaining, false)).toEqual({ type: 'stop', reason: 'last-task-tab-closed' });
+            expect(decideLastTaskTabCloseAction(enabled, 'TASK_A', 'TASK_A', [...remaining, 'https://app.clickup.com/t/123/TASK_A'], false)).toEqual({ type: 'none', reason: 'same-task-tab-open' });
+        }
     });
 
     test('fails closed when Auto-Stop is disabled, identity is unknown, or Meet has authority', () => {
@@ -391,9 +418,9 @@ describe('Focused timer integration guardrails', () => {
         expect(background).toMatch(/chrome\.tabs\.onRemoved\.addListener[\s\S]{0,350}handleTrackedClickUpTaskTabRemoved\(tabId\)/);
         expect(background).toMatch(/case 'focusedClickUpNavigation':[\s\S]{0,220}updateTrackedClickUpTaskTab\(sender\.tab\.id/);
         expect(background).toMatch(/stopTimerAfterLastTaskTabClose[\s\S]{0,1800}chrome\.tabs\.query\(\{ url: 'https:\/\/app\.clickup\.com\/\*' \}\)/);
-        expect(background).toMatch(/const runningBeforeTabQuery = await clickupAPI!\.getRunningTimer\(teamId\)[\s\S]{0,900}const runningBeforeStop = await clickupAPI!\.getRunningTimer\(teamId\)/);
-        expect(background).toMatch(/if \(getRunningTaskId\(runningBeforeStop\) !== closedTaskId\) return;[\s\S]{0,120}await clickupAPI!\.stopTimer\(teamId\)/);
-        expect(background).toMatch(/handleTrackedClickUpTaskTabRemoved[\s\S]{0,250}runTimerWrite\(\(\) => stopTimerAfterLastTaskTabClose\(closedTaskId\)\)/);
+        expect(background).toMatch(/const runningBeforeTabQuery = await clickupAPI!\.getRunningTimer\(teamId\)[\s\S]{0,1800}const runningBeforeStop = await clickupAPI!\.getRunningTimer\(teamId\)/);
+        expect(background).toMatch(/if \(getRunningTaskId\(runningBeforeStop\) !== closedTaskId\) \{[\s\S]{0,220}return;[\s\S]{0,120}\}[\s\S]{0,120}await clickupAPI!\.stopTimer\(teamId\)/);
+        expect(background).toMatch(/handleTrackedClickUpTaskTabRemoved[\s\S]{0,520}emitCausalTrace\(\{ event: 'index'[\s\S]{0,320}runTimerWrite\(\(\) => stopTimerAfterLastTaskTabClose\(closedTaskId\)\)/);
         expect(background).toMatch(/meetPriorityActive[\s\S]{0,180}if \(meetPriorityActive\) return/);
         expect(background).toMatch(/if \(changes\.autoStopTimer\)[\s\S]{0,220}hydrateTrackedClickUpTaskTabs\(\)[\s\S]{0,120}clearTrackedClickUpTaskTabIndex\(\)/);
         expect(background).toMatch(/async function hydrateTrackedClickUpTaskTabs[\s\S]{0,220}if \(!settings\.autoStopTimer\)[\s\S]{0,100}clearTrackedClickUpTaskTabIndex/);

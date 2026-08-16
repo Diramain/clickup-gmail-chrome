@@ -7,6 +7,7 @@
   "homepage": "https://leandroiramain.com.ar",
   "scripts": {
     "build": "tsc && node build.js",
+    "build:sidecar": "node build.js --sidecar-only",
     "build:release": "npm run build && node scripts/build-release.js",
     "build:js": "node build.js",
     "validate:release": "node scripts/validate-release.js",

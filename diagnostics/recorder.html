@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recorder causal seguro</title>
+    <link rel="stylesheet" href="recorder.css">
+</head>
+<body>
+    <main class="shell">
+        <section class="card">
+            <h1>Recorder causal seguro</h1>
+            <p>El archivo se elige con un gesto tuyo. Stop manual es el cierre confiable; cerrar la página intenta flush agresivo pero puede dejar escritura en vuelo marcada como riesgo.</p>
+            <p class="safe">Guarda timestamps y metadatos de actividad categóricos. No guarda URL, query, fragment, título, contenido, ID de tarea, email, tokens, headers ni credenciales. Revisá el JSONL antes de compartirlo y borralo después.</p>
+            <div class="actions">
+                <button id="startRecorder" type="button">Elegir archivo e iniciar</button>
+                <button id="stopRecorder" type="button" disabled>Detener y cerrar lote</button>
+            </div>
+            <dl class="status">
+                <div><dt>Estado</dt><dd id="state">inactivo</dd></div>
+                <div><dt>Eventos</dt><dd id="eventCount">0</dd></div>
+                <div><dt>Bytes</dt><dd id="byteCount">0</dd></div>
+                <div><dt>Cola</dt><dd id="queueCount">0</dd></div>
+                <div><dt>Parada 18:00</dt><dd id="scheduledStop">pendiente si se inicia antes de las 18:00</dd></div>
+            </dl>
+            <p id="message" class="message" role="status" aria-live="polite"></p>
+        </section>
+    </main>
+    <script src="recorder.js"></script>
+</body>
+</html>

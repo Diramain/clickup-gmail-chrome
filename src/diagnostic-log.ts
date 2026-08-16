@@ -97,7 +97,7 @@ const STRING_VALUE_ALLOWLISTS: Record<string, ReadonlySet<string>> = {
         'direct', 'inbox-notification', 'disabled', 'outside-clickup', 'inbox',
         'clickup-other', 'same-task', 'different-task', 'timer-already-running',
         'auto-start-disabled', 'manually-stopped', 'manual', 'poll',
-        'last-task-tab-closed', 'unknown',
+        'last-task-tab-closed', 'last-task-view-left', 'unknown',
     ]),
     clickupCode: new Set([
         'OAUTH_023', 'OAUTH_026', 'OAUTH_027',

@@ -2,6 +2,9 @@ const RELEASE_DIR = 'dist/extension';
 
 const RELEASE_FILES = [
     'background.js',
+    'diagnostics/recorder.css',
+    'diagnostics/recorder.html',
+    'diagnostics/recorder.js',
     'icons/icon-16.png',
     'icons/icon-32.png',
     'icons/icon-48.png',
