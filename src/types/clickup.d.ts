@@ -134,6 +134,7 @@ export interface ClickUpTask {
     time_estimate: number | null;
     time_spent: number | null;
     custom_fields: any[];
+    custom_item_id?: number | null;
     dependencies: any[];
     linked_tasks: any[];
     team_id: string;
@@ -157,10 +158,27 @@ export interface ClickUpCustomField {
     date_created: string;
     hide_from_guests: boolean;
     required: boolean;
+    applied_objects?: ClickUpCustomFieldAppliedObject[];
+}
+
+export interface ClickUpCustomFieldAppliedObject {
+    object_id: string | number;
+    object_type: string | number;
 }
 
 export interface ClickUpCustomFieldsResponse {
     fields: ClickUpCustomField[];
+}
+
+export interface ClickUpCustomTaskType {
+    id: number;
+    name: string;
+    name_plural?: string;
+    description?: string;
+}
+
+export interface ClickUpCustomTaskTypesResponse {
+    custom_items: ClickUpCustomTaskType[];
 }
 
 // ============================================================================
@@ -184,6 +202,7 @@ export interface CreateTaskPayload {
     parent?: string | null;
     links_to?: string | null;
     custom_fields?: { id: string; value: any }[];
+    custom_item_id?: number;
 }
 
 // ============================================================================
@@ -347,7 +366,12 @@ export type MessageAction =
     | 'getDiagnosticStatus'
     | 'setDiagnosticEnabled'
     | 'exportDiagnostics'
-    | 'clearDiagnostics';
+    | 'clearDiagnostics'
+    | 'getMeetingLinkUiState'
+    | 'previewMeetingLink'
+    | 'beginMeetingLinkCreate'
+    | 'resumeMeetingOperation'
+    | 'repairMeetingOperation';
 
 export interface ExtensionMessage {
     action: MessageAction;

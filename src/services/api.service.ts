@@ -15,7 +15,8 @@ import type {
     CreateTaskPayload,
     EmailData,
     TimeEntry,
-    ClickUpCustomFieldsResponse
+    ClickUpCustomFieldsResponse,
+    ClickUpCustomTaskTypesResponse
 } from '../types/clickup';
 import { calculateRetryDelayMs } from '../link-hardening';
 import { wrapSanitizedEmailHtml } from '../utils/sanitize.utils';
@@ -222,6 +223,7 @@ export class ClickUpAPIWrapper {
         options: RequestInit = {},
         retryCount = 0,
         authorizationFallbackUsed = false,
+        retryWriteRateLimit = true,
     ): Promise<T> {
         const method = normalizeRequestMethod(options.method);
         const diagnosticBase = {
@@ -258,7 +260,7 @@ export class ClickUpAPIWrapper {
                         outcome: 'attempted',
                         authorizationMode: alternateMode,
                     });
-                    return this.request(endpoint, options, retryCount, true);
+                    return this.request(endpoint, options, retryCount, true, retryWriteRateLimit);
                 }
                 if (endpoint !== '/user') {
                     const probe = await this.confirmAuthentication();
@@ -280,14 +282,14 @@ export class ClickUpAPIWrapper {
             });
 
             // Handle rate limiting and server errors with exponential backoff
-            if (this.shouldRetryResponse(response.status, method) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
+            if (this.shouldRetryResponse(response.status, method, retryWriteRateLimit) && retryCount < ClickUpAPIWrapper.MAX_RETRIES) {
                 const delay = response.status === 429
                     ? calculateRetryDelayMs(response.headers, retryCount)
                     : Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
                 if (response.status === 429) this.governor.deferFor(delay);
                 console.log('[API] RETRY_STATUS');
                 await this.sleep(delay);
-                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed);
+                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed, retryWriteRateLimit);
             }
 
             if (!response.ok) {
@@ -309,15 +311,15 @@ export class ClickUpAPIWrapper {
                 const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.floor(Math.random() * 250), 60_000);
                 console.log('[API] RETRY_NETWORK');
                 await this.sleep(delay);
-                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed);
+                return this.request(endpoint, options, retryCount + 1, authorizationFallbackUsed, retryWriteRateLimit);
             }
             throw error;
         }
     }
 
-    private shouldRetryResponse(status: number, method: string): boolean {
+    private shouldRetryResponse(status: number, method: string, retryWriteRateLimit = true): boolean {
         if (!ClickUpAPIWrapper.RETRY_STATUS_CODES.includes(status)) return false;
-        if (status === 429) return true;
+        if (status === 429) return retryWriteRateLimit || isSafeReadMethod(method);
         return isSafeReadMethod(method);
     }
 
@@ -540,6 +542,16 @@ export class ClickUpAPIWrapper {
         return this.request(`/list/${listId}/field`);
     }
 
+    async getAccessibleCustomFieldsWithAppliedObjects(listId: string): Promise<ClickUpCustomFieldsResponse> {
+        if (!isSafeApiId(listId, 100)) throw this.createApiError('Invalid list id', 400);
+        return this.request(`/list/${listId}/field?include_applied_objects=true`);
+    }
+
+    async getCustomTaskTypes(teamId: string): Promise<ClickUpCustomTaskTypesResponse> {
+        if (!isSafeApiId(teamId, 100)) throw this.createApiError('Invalid team id', 400);
+        return this.request(`/team/${teamId}/custom_item`);
+    }
+
     async setCustomFieldValue(taskId: string, fieldId: string, value: any): Promise<any> {
         return this.request(`/task/${taskId}/field/${fieldId}`, {
             method: 'POST',
@@ -555,7 +567,31 @@ export class ClickUpAPIWrapper {
         return this.request(`/list/${listId}/task`, {
             method: 'POST',
             body: JSON.stringify(taskData)
-        });
+        }, 0, false, false);
+    }
+
+    async findTasksByExactCustomField(
+        teamId: string,
+        fieldId: string,
+        value: string,
+        maxPages = 10,
+    ): Promise<ClickUpTask[]> {
+        if (!isSafeApiId(teamId, 100) || !isSafeApiId(fieldId, 100) || !isSafeApiId(value, 128)) throw this.createApiError('Invalid exact custom field filter', 400);
+        const tasks: ClickUpTask[] = [];
+        const safePages = Number.isInteger(maxPages) && maxPages > 0 && maxPages <= 50 ? maxPages : 10;
+        for (let page = 0; page < safePages; page += 1) {
+            const params = new URLSearchParams({
+                include_closed: 'true',
+                subtasks: 'true',
+                page: String(page),
+            });
+            params.append('custom_fields[]', JSON.stringify({ field_id: fieldId, operator: '==', value }));
+            const response = await this.request<ClickUpTasksResponse>(`/team/${teamId}/task?${params.toString()}`);
+            const pageTasks = response.tasks || [];
+            tasks.push(...pageTasks.filter((task) => hasExactCustomFieldValue(task, fieldId, value)));
+            if (pageTasks.length < 100) break;
+        }
+        return tasks;
     }
 
     async getTask(taskId: string): Promise<ClickUpTask> {
@@ -824,4 +860,12 @@ function classifyDiagnosticStatus(status: number): string {
     if (status === 429) return 'rate-limited';
     if (status >= 500 && status <= 599) return 'server-error';
     return 'unknown';
+}
+
+function hasExactCustomFieldValue(task: ClickUpTask, fieldId: string, value: string): boolean {
+    return Array.isArray(task.custom_fields) && task.custom_fields.some((field: any) => field?.id === fieldId && String(field?.value ?? '') === value);
+}
+
+function isSafeApiId(value: unknown, max: number): value is string {
+    return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\s/?#]/.test(value);
 }

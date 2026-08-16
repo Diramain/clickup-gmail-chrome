@@ -14,6 +14,7 @@ import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialO
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
 import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
 import { selectAuthorizedTeamId } from '../src/team-selection';
+import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -546,6 +547,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
     // DBA-H1 & DM-H1: Initialize data management buttons
     initDataManagement();
+    void initMeetingLinkSection();
 
     let timeTrackingRefreshInFlight: Promise<void> | null = null;
     let recentRunningStart: number | null = null;
@@ -2069,6 +2071,14 @@ function initDataManagement(): void {
             }
         });
     }
+}
+
+async function initMeetingLinkSection(): Promise<void> {
+    const section = document.getElementById('meetingLinkSection') as HTMLElement | null;
+    await initMeetingLinkSectionFailClosed(
+        section,
+        () => sendMessage<MeetingLinkUiState>({ action: 'getMeetingLinkUiState' }),
+    );
 }
 
 // ============================================================================

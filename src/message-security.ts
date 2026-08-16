@@ -21,7 +21,8 @@ const EXTENSION_ACTIONS = new Set([
     'searchTasks', 'syncEmailTasks', 'clearLocalData', 'getTimeEntries',
     'getMeetPriorityStatus', 'getMeetMappings', 'assignMeetTask', 'ignoreMeetSession', 'endMeetSession', 'resumeMeetSession',
     'deleteMeetMapping', 'setMeetMappingEnabled', 'setMeetPriorityEnabled',
-    'getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics'
+    'getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics',
+    'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation'
 ]);
 
 const MAX_SUBJECT = 500;
@@ -136,6 +137,28 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
         case 'exportDiagnostics':
         case 'clearDiagnostics':
             return hasOnlyRootKeys(message, ['action']);
+        case 'getMeetingLinkUiState':
+            return hasOnlyRootKeys(message, ['action']);
+        case 'previewMeetingLink':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['clientRequestId', 'payloadHash'])
+                && isUuidV4(data.clientRequestId)
+                && isPayloadHash(data.payloadHash);
+        case 'beginMeetingLinkCreate':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['clientRequestId', 'cgcLinkId', 'payloadHash', 'calendarId', 'workspaceId', 'listId', 'customItemId'])
+                && isUuidV4(data.clientRequestId)
+                && isUuidV4(data.cgcLinkId)
+                && isPayloadHash(data.payloadHash)
+                && isBoundedOpaqueId(data.calendarId, 256)
+                && isBoundedOpaqueId(data.workspaceId, 100)
+                && isBoundedOpaqueId(data.listId, 100)
+                && Number.isInteger(data.customItemId) && data.customItemId > 0;
+        case 'resumeMeetingOperation':
+        case 'repairMeetingOperation':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['cgcLinkId'])
+                && isUuidV4(data.cgcLinkId);
         case 'deleteMeetMapping':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && isHexRoomKey(data.roomKey)
@@ -156,6 +179,22 @@ function isHexRoomKey(value: unknown): value is string {
 
 function hasOnlyRootKeys(message: ExtensionMessage, allowed: string[]): boolean {
     return Object.keys(message).every((key) => allowed.includes(key));
+}
+
+function hasOnlyDataKeys(data: any, allowed: string[]): boolean {
+    return !!data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).every((key) => allowed.includes(key));
+}
+
+function isUuidV4(value: unknown): value is string {
+    return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isPayloadHash(value: unknown): value is string {
+    return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
+}
+
+function isBoundedOpaqueId(value: unknown, max: number): value is string {
+    return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\s/?#]/.test(value);
 }
 
 function isValidTimeEntryTaskAndDuration(data: any): boolean {

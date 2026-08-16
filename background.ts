@@ -83,6 +83,7 @@ import {
     type CausalTraceInput,
     type SafeCausalTraceEvent,
 } from './src/causal-trace';
+import { MeetingLinkController, MEETING_FEATURE_FLAGS_KEY, type MeetingLinkWriteAction } from './src/meeting-link/meeting-link.controller';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -138,6 +139,9 @@ const storageLocalTrustedReady = chrome.storage.local.setAccessLevel({ accessLev
 const storageSessionTrustedReady = chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const diagnosticLog = new SafeDiagnosticLog(chrome.storage.session);
 const causalTracePorts = new Map<chrome.runtime.Port, CausalTraceSanitizer>();
+const meetingLinkController = new MeetingLinkController({
+    get: (key: typeof MEETING_FEATURE_FLAGS_KEY) => chrome.storage.local.get(key) as Promise<Record<typeof MEETING_FEATURE_FLAGS_KEY, unknown>>,
+});
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
@@ -724,6 +728,15 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 defaultList: typeof defaultListStore.defaultList === 'string' ? defaultListStore.defaultList : undefined,
                 defaultListConfig: sanitizeDefaultListConfig(defaultListStore.defaultListConfig),
             };
+
+        case 'getMeetingLinkUiState':
+            return await meetingLinkController.getUiState();
+
+        case 'previewMeetingLink':
+        case 'beginMeetingLinkCreate':
+        case 'resumeMeetingOperation':
+        case 'repairMeetingOperation':
+            return await meetingLinkController.handleWriteAction(action as MeetingLinkWriteAction);
 
         case 'preloadFullHierarchy':
             // Trigger full hierarchy fetch and wait for result
