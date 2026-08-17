@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>ClickUp Gmail Tracker</title>
     <link rel="stylesheet" href="app.css">
 </head>
@@ -23,12 +23,41 @@
             </div>
 
             <nav class="primary-nav" aria-label="Secciones">
-                <a href="#inicio" data-route="inicio" aria-current="page"><span class="nav-index">01</span>Inicio</a>
-                <a href="#tareas" data-route="tareas"><span class="nav-index">02</span>Tareas</a>
-                <a href="#seguimiento" data-route="seguimiento"><span class="nav-index">03</span>Seguimiento</a>
-                <a href="#reuniones" data-route="reuniones"><span class="nav-index">04</span>Reuniones</a>
-                <a href="#conexiones" data-route="conexiones"><span class="nav-index">05</span>Conexiones</a>
-                <a href="#configuracion" data-route="configuracion"><span class="nav-index">06</span>Configuración</a>
+                <a href="#inicio" data-route="inicio" aria-current="page">
+                    <span class="nav-index">01</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9 20v-6h6v6"/></svg>
+                    <span class="nav-text">Inicio</span>
+                </a>
+                <a href="#gmail" data-route="gmail">
+                    <span class="nav-index">02</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM3 7l9 7 9-7"/></svg>
+                    <span class="nav-text">Gmail → ClickUp</span>
+                </a>
+                <a href="#tiempo" data-route="tiempo">
+                    <span class="nav-index">03</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg>
+                    <span class="nav-text">Jornada y tiempo</span>
+                </a>
+                <a href="#meet" data-route="meet">
+                    <span class="nav-index">04</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12v10H3zM15 10l6-3v10l-6-3z"/></svg>
+                    <span class="nav-text">Calendar y Meet</span>
+                </a>
+                <a href="#sync" data-route="sync">
+                    <span class="nav-index">05</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-7V2M4 17h7v5M19 12a7 7 0 0 0-12-5l-3 3M5 12a7 7 0 0 0 12 5l3-3"/></svg>
+                    <span class="nav-text">Sincronización</span>
+                </a>
+                <a href="#conexion" data-route="conexion">
+                    <span class="nav-index">06</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14.8 6L14.5 3h-5L9.2 6a8 8 0 0 0-1.7 1.1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.2 18l.3 3h5l.3-3a8 8 0 0 0 1.7-1.1l2.4 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>
+                    <span class="nav-text">Conexión</span>
+                </a>
+                <a href="#datos" data-route="datos">
+                    <span class="nav-index">07</span>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+                    <span class="nav-text">Datos y diagnóstico</span>
+                </a>
             </nav>
 
             <div class="sidebar-note">
@@ -43,49 +72,77 @@
                     <span class="topbar-label">ClickUp Gmail Tracker</span>
                     <h1 id="pageTitle">Inicio</h1>
                 </div>
-                <div class="phase-badge"><span aria-hidden="true"></span>UX V2 · Conexiones locales</div>
+                <div class="topbar-actions">
+                    <div class="theme-switcher" role="group" aria-label="Seleccionar tema visual">
+                        <button type="button" class="theme-btn" data-theme-choice="paper" aria-pressed="true"><span class="theme-swatch theme-swatch-paper" aria-hidden="true"></span>Claro</button>
+                        <button type="button" class="theme-btn" data-theme-choice="clickup" aria-pressed="false"><span class="theme-swatch theme-swatch-clickup" aria-hidden="true"></span>ClickUp</button>
+                        <button type="button" class="theme-btn owner-theme-option" data-theme-choice="spiritfox" aria-pressed="false" hidden><span class="theme-swatch theme-swatch-spiritfox" aria-hidden="true"></span>Spiritfox</button>
+                    </div>
+                    <div class="phase-badge"><span aria-hidden="true"></span>UX V2 · Fundación visual</div>
+                </div>
             </header>
 
             <section class="page-section" data-page="inicio" aria-labelledby="inicioTitle">
-                <div class="hero-panel">
-                    <div class="hero-copy">
-                        <p class="section-label">Centro de trabajo</p>
-                        <h2 id="inicioTitle">Tu flujo entre Gmail y ClickUp, sin vivir dentro de un popup.</h2>
-                        <p>Esta pestaña será la nueva superficie principal. Durante la migración, las funciones actuales siguen operativas en el popup clásico.</p>
-                    </div>
-                    <div class="hero-orbit" aria-hidden="true">
-                        <div class="orbit orbit-a">Gmail</div>
-                        <div class="orbit orbit-b">ClickUp</div>
-                        <div class="orbit orbit-c">Calendar</div>
+                <div class="section-heading">
+                    <div>
+                        <p class="section-label">Panel por usuario</p>
+                        <h2 id="inicioTitle">Tu jornada, de un vistazo.</h2>
+                        <p>Cada fase de la migración aporta su módulo a este panel. Podés elegir cuáles ver y en qué orden.</p>
                     </div>
                 </div>
 
-                <div class="migration-grid" aria-label="Estado de migración de módulos">
-                    <article class="module-card module-card-primary">
-                        <span class="module-kicker">Disponible ahora</span>
-                        <h3>Conexiones</h3>
-                        <p>Revisá cómo convivirán ClickUp y Google Calendar con permisos separados.</p>
-                        <a href="#conexiones">Abrir Conexiones</a>
-                    </article>
-                    <article class="module-card">
-                        <span class="module-kicker">Siguiente fase</span>
-                        <h3>Tareas y seguimiento</h3>
-                        <p>La migración conservará búsquedas, creación de tareas y timers sin duplicar lógica.</p>
-                    </article>
-                    <article class="module-card module-card-muted">
-                        <span class="module-kicker">Fallback activo</span>
-                        <h3>Popup clásico</h3>
-                        <p>Continúa siendo la interfaz funcional hasta alcanzar paridad y validar regresión.</p>
-                    </article>
+                <div class="dashboard-toolbar">
+                    <div class="dashboard-toolbar-info">
+                        <span id="dashboardPresetChip" class="chip"><span class="chip-dot" aria-hidden="true"></span>Preset PM</span>
+                        <span id="dashboardSaveState" class="dashboard-save-state" role="status" aria-live="polite">Preferencias guardadas sólo en este navegador.</span>
+                    </div>
+                    <button type="button" id="openCustomizer" class="btn primary">Personalizar dashboard</button>
+                </div>
+
+                <div id="dashboardWidgets" class="dashboard-widgets"></div>
+
+                <div id="dashboardEmptyState" class="empty-state dashboard-empty">
+                    <span class="section-label">Panel vacío</span>
+                    <h3>Todavía no hay módulos disponibles.</h3>
+                    <p>La infraestructura del panel ya está lista. Cada fase de la migración habilita su módulo: Gmail, jornada y tiempo, reuniones. Hasta entonces esta pantalla no muestra números inventados.</p>
                 </div>
             </section>
 
-            <section class="page-section" data-page="tareas" aria-labelledby="tareasTitle" hidden>
+            <section class="page-section" data-page="gmail" aria-labelledby="gmailTitle" hidden>
                 <div class="section-heading">
                     <div>
-                        <p class="section-label">Buscar antes de crear</p>
-                        <h2 id="tareasTitle">Tareas</h2>
-                        <p>Encontrá una tarea por título, ID o URL. La creación se incorporará después de validar esta lectura.</p>
+                        <p class="section-label">Gmail → ClickUp</p>
+                        <h2 id="gmailTitle">Convertí conversación en trabajo concreto.</h2>
+                        <p>Definí dónde se crean las tareas y buscá una existente para vincular un correo, sin convertir el correo en una fuente de vigilancia.</p>
+                    </div>
+                </div>
+
+                <div class="destination-panel">
+                    <div class="destination-head">
+                        <div>
+                            <h3>Destino predeterminado</h3>
+                            <p>La creación rápida usa esta lista desde cualquier pestaña.</p>
+                        </div>
+                        <span id="destinationCurrent" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span>Sin destino</span>
+                    </div>
+
+                    <form id="destinationForm" class="destination-form">
+                        <div class="destination-fields">
+                            <div class="field">
+                                <label for="destinationTeam">Workspace</label>
+                                <select id="destinationTeam" disabled aria-describedby="destinationState"></select>
+                            </div>
+                            <div class="field">
+                                <label for="destinationList">Lista predeterminada</label>
+                                <select id="destinationList" disabled aria-describedby="destinationState"></select>
+                            </div>
+                        </div>
+                        <button type="submit" id="destinationSave" class="btn primary" disabled aria-describedby="destinationState">Guardar destino</button>
+                    </form>
+
+                    <div id="destinationState" class="task-search-state" data-state="loading" role="status" aria-live="polite">
+                        <strong id="destinationStateTitle">Leyendo datos locales…</strong>
+                        <span id="destinationStateDetail">No se realizará ninguna consulta a ClickUp.</span>
                     </div>
                 </div>
 
@@ -107,27 +164,35 @@
                 </div>
             </section>
 
-            <section class="page-section" data-page="seguimiento" aria-labelledby="seguimientoTitle" hidden>
+            <section class="page-section" data-page="tiempo" aria-labelledby="tiempoTitle" hidden>
                 <div class="empty-state">
                     <span class="section-label">Migración pendiente</span>
-                    <h2 id="seguimientoTitle">Seguimiento</h2>
-                    <p>Los temporizadores y entradas manuales continúan en el popup clásico hasta que esta pantalla alcance paridad funcional.</p>
+                    <h2 id="tiempoTitle">Tiempo registrado, no una nota de productividad.</h2>
+                    <p>Los temporizadores y entradas manuales continúan en el popup clásico hasta que esta pantalla alcance paridad funcional. El objetivo de jornada será opcional y vivirá sólo en este navegador.</p>
                 </div>
             </section>
 
-            <section class="page-section" data-page="reuniones" aria-labelledby="reunionesTitle" hidden>
+            <section class="page-section" data-page="meet" aria-labelledby="meetTitle" hidden>
                 <div class="empty-state">
                     <span class="section-label">Capacidad protegida</span>
-                    <h2 id="reunionesTitle">Reuniones</h2>
-                    <p>Meet Priority sigue funcionando con su alcance actual. Calendar y la creación coordinada permanecen desactivados.</p>
+                    <h2 id="meetTitle">Planificá la reunión y dejá su tarea preparada.</h2>
+                    <p>Meet Priority sigue funcionando con su alcance actual. Calendar, la disponibilidad de equipo y la creación coordinada permanecen desactivados. La extensión no graba, transcribe ni toma notas.</p>
                 </div>
             </section>
 
-            <section class="page-section" data-page="conexiones" aria-labelledby="conexionesTitle" hidden>
+            <section class="page-section" data-page="sync" aria-labelledby="syncTitle" hidden>
+                <div class="empty-state">
+                    <span class="section-label">Migración pendiente</span>
+                    <h2 id="syncTitle">Progreso visible y un log que diga dónde falló.</h2>
+                    <p>La sincronización de espacios, carpetas, listas y tareas continúa en el popup clásico. Cuando migre, su log será acotado, local y sin identificadores sensibles.</p>
+                </div>
+            </section>
+
+            <section class="page-section" data-page="conexion" aria-labelledby="conexionTitle" hidden>
                 <div class="section-heading">
                     <div>
                         <p class="section-label">Autorizaciones separadas</p>
-                        <h2 id="conexionesTitle">Conexiones</h2>
+                        <h2 id="conexionTitle">Conexión</h2>
                         <p>Controlá qué servicios puede usar la extensión. Ninguna cuenta comparte tokens o configuración con la otra.</p>
                     </div>
                 </div>
@@ -173,15 +238,52 @@
                 </aside>
             </section>
 
-            <section class="page-section" data-page="configuracion" aria-labelledby="configuracionTitle" hidden>
+            <section class="page-section" data-page="datos" aria-labelledby="datosTitle" hidden>
                 <div class="empty-state">
                     <span class="section-label">Migración pendiente</span>
-                    <h2 id="configuracionTitle">Configuración</h2>
-                    <p>Espacio de trabajo, campo personalizado, sincronización, datos y diagnóstico continúan en el popup clásico.</p>
+                    <h2 id="datosTitle">Control visible sobre lo que queda guardado.</h2>
+                    <p>Export, borrado y diagnóstico seguro continúan en el popup clásico. No existe telemetría hacia servidores propios, y el diagnóstico seguirá siendo categórico y opt-in.</p>
                 </div>
             </section>
         </main>
     </div>
+
+    <div id="dashboardCustomizer" class="customizer-backdrop" hidden>
+        <section class="customizer-panel" role="dialog" aria-modal="true" aria-labelledby="customizerTitle">
+            <div class="customizer-head">
+                <div>
+                    <p class="section-label">Panel por usuario</p>
+                    <h2 id="customizerTitle">Personalizar dashboard</h2>
+                    <p>Elegí módulos, cambiales el orden y guardá el resultado para este usuario.</p>
+                </div>
+                <button type="button" id="closeCustomizer" class="btn small" aria-label="Cerrar personalización">Cerrar</button>
+            </div>
+
+            <div class="customizer-field">
+                <label for="presetSelect">Preset</label>
+                <select id="presetSelect">
+                    <option value="pm">PM · coordinación y reuniones</option>
+                    <option value="ejecucion">Ejecución · trabajo individual</option>
+                    <option value="completo">Completo · todos los módulos</option>
+                </select>
+            </div>
+
+            <div id="widgetConfigList" class="widget-config-list" aria-label="Módulos del dashboard"></div>
+
+            <div class="customizer-field">
+                <label for="presetName">Nombre del preset</label>
+                <input id="presetName" type="text" maxlength="40" autocomplete="off" placeholder="Mi panel">
+            </div>
+
+            <p id="customizerState" class="field-help" role="status" aria-live="polite">Ningún módulo está disponible todavía. El orden que definas se aplicará cuando lleguen.</p>
+
+            <div class="customizer-actions">
+                <button type="button" id="resetPmPreset" class="btn">Restablecer preset PM</button>
+                <button type="button" id="saveDashboardPreset" class="btn primary">Guardar</button>
+            </div>
+        </section>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

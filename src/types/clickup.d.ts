@@ -338,6 +338,8 @@ export type MessageAction =
     | 'getTaskById'
     | 'preloadFullHierarchy'
     | 'getHierarchyCache'
+    | 'getDestinationOptions'
+    | 'setDefaultDestination'
     | 'getEmailTaskMappings'
     | 'getDefaultListConfig'
     | 'syncEmailTasks'

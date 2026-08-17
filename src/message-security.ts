@@ -22,7 +22,10 @@ const EXTENSION_ACTIONS = new Set([
     'getMeetPriorityStatus', 'getMeetMappings', 'assignMeetTask', 'ignoreMeetSession', 'endMeetSession', 'resumeMeetSession',
     'deleteMeetMapping', 'setMeetMappingEnabled', 'setMeetPriorityEnabled',
     'getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics',
-    'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation'
+    'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation',
+    // CGC-UX-V2-D2: sólo para la app en pestaña. Fuera de GMAIL_ACTIONS y
+    // CLICKUP_ACTIONS a propósito: ningún content script debe escribir destino.
+    'getDestinationOptions', 'setDefaultDestination'
 ]);
 
 const MAX_SUBJECT = 500;
@@ -57,6 +60,10 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return isShortString(data.clientId, 300) && isShortString(data.clientSecret, 1000);
         case 'savePreferredTeam':
             return isShortString(data.teamId, 100);
+        case 'setDefaultDestination':
+            return isShortString(data.listId, 100)
+                && (data.listName === undefined || isShortString(data.listName, 500))
+                && (data.path === undefined || isShortString(data.path, 1000));
         case 'getSpaces':
             return !data.teamId || isShortString(data.teamId, 100);
         case 'searchTasks':

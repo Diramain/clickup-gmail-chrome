@@ -16,6 +16,7 @@ function loadTsModule(relativePath) {
     const localRequire = (request) => {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
+        if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
@@ -59,12 +60,12 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(port.calls.store).toEqual([21]);
     });
 
-    test('full-tab page exposes six routes and keeps Google OAuth disabled', () => {
+    test('full-tab page exposes seven routes and keeps Google OAuth disabled', () => {
         document.documentElement.innerHTML = source('app/app.html');
         const routes = [...document.querySelectorAll('[data-route]')].map((node) => node.getAttribute('data-route'));
 
-        expect(routes).toEqual(['inicio', 'tareas', 'seguimiento', 'reuniones', 'conexiones', 'configuracion']);
-        expect(document.querySelectorAll('[data-page]')).toHaveLength(6);
+        expect(routes).toEqual(['inicio', 'gmail', 'tiempo', 'meet', 'sync', 'conexion', 'datos']);
+        expect(document.querySelectorAll('[data-page]')).toHaveLength(7);
         const googleButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Conectar Google Calendar'));
         expect(googleButton).toBeDefined();
         expect(googleButton.disabled).toBe(true);
@@ -73,11 +74,35 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(source('app/app.ts')).toContain("action: 'getLocalConnectionStatus'");
     });
 
+    test('task search panel lives inside the Gmail section', () => {
+        document.documentElement.innerHTML = source('app/app.html');
+        const form = document.getElementById('taskSearchForm');
+
+        expect(form).not.toBeNull();
+        expect(form.closest('[data-page]').getAttribute('data-page')).toBe('gmail');
+        expect(document.querySelector('[data-page="tareas"]')).toBeNull();
+        for (const id of ['appTaskSearch', 'appTaskSearchButton', 'taskSearchHelp', 'taskSearchState', 'taskSearchStateTitle', 'taskSearchStateDetail', 'taskSearchResults']) {
+            expect(document.getElementById(id)).not.toBeNull();
+        }
+    });
+
     test('navigation sanitizer fails closed to Inicio', () => {
         const app = loadTsModule('app/app.ts');
 
-        expect(app.sanitizeAppRoute('#conexiones')).toBe('conexiones');
+        expect(app.sanitizeAppRoute('#conexion')).toBe('conexion');
         expect(app.sanitizeAppRoute('#unknown')).toBe('inicio');
+    });
+
+    test('stylesheet carries the prototype identity without remote assets', () => {
+        const css = source('app/app.css');
+
+        expect(css).toContain('#ad4f32');
+        expect(css).toContain('#176b63');
+        expect(css).not.toContain('#3979c6');
+        expect(css).not.toMatch(/@import|url\(\s*["']?https?:/);
+        for (const primitive of ['.chart', '.stat', '.progress', '.switch', '.chip', '.agenda-item', '.list-row']) {
+            expect(css).toContain(`${primitive} {`);
+        }
     });
 
     test('popup exposes the launcher and build compiles the new app entry', () => {

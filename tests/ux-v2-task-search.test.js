@@ -16,6 +16,7 @@ function loadTsModule(relativePath) {
     const localRequire = (request) => {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
+        if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);

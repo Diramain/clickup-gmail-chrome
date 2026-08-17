@@ -20,6 +20,7 @@ import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorization
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
+import { flattenHierarchySpaces, getTeamHierarchyCache } from './src/hierarchy-utils';
 import {
     EMAIL_TASK_MAPPINGS_V2_KEY,
     SingleFlight,
@@ -737,6 +738,61 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 defaultList: typeof defaultListStore.defaultList === 'string' ? defaultListStore.defaultList : undefined,
                 defaultListConfig: sanitizeDefaultListConfig(defaultListStore.defaultListConfig),
             };
+
+        // CGC-UX-V2-D2: lectura local del destino para la app en pestaña.
+        // Resuelve equipos, listas y destino vigente en una sola ida y vuelta,
+        // exclusivamente desde caché. Nunca llama a la API.
+        case 'getDestinationOptions': {
+            await storageLocalTrustedReady;
+            const destinationStore = await chrome.storage.local.get([
+                STORAGE_KEYS.CACHED_TEAMS,
+                STORAGE_KEYS.CACHED_HIERARCHY,
+                STORAGE_KEYS.PREFERRED_TEAM,
+                'defaultListConfig',
+            ]);
+
+            const cachedTeams = destinationStore[STORAGE_KEYS.CACHED_TEAMS];
+            const teams = Array.isArray(cachedTeams?.teams)
+                ? cachedTeams.teams.map((team: { id?: unknown; name?: unknown }) => ({ id: team?.id, name: team?.name }))
+                : [];
+
+            const preferredTeamId = typeof destinationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+                ? destinationStore[STORAGE_KEYS.PREFERRED_TEAM]
+                : teams[0]?.id;
+
+            const teamCache = getTeamHierarchyCache(destinationStore[STORAGE_KEYS.CACHED_HIERARCHY], preferredTeamId);
+            const lists = flattenHierarchySpaces(teamCache?.data?.spaces).map((list) => ({
+                id: list.id,
+                name: list.name,
+                path: list.path,
+            }));
+
+            return {
+                teams,
+                preferredTeamId,
+                lists,
+                current: sanitizeDefaultListConfig(destinationStore.defaultListConfig),
+                cachedAt: typeof teamCache?.timestamp === 'number' ? teamCache.timestamp : null,
+            };
+        }
+
+        // CGC-UX-V2-D2: escritura local del destino. Devuelve lo persistido para
+        // que la UI confirme por read-back en lugar de asumir el éxito.
+        case 'setDefaultDestination': {
+            await storageLocalTrustedReady;
+            const requested = sanitizeDefaultListConfig(data);
+            if (!requested) {
+                return { ok: false, code: 'INVALID_DESTINATION' };
+            }
+
+            await chrome.storage.local.set({
+                defaultList: requested.listId,
+                defaultListConfig: requested,
+            });
+
+            const persisted = await chrome.storage.local.get('defaultListConfig');
+            return { ok: true, current: sanitizeDefaultListConfig(persisted.defaultListConfig) };
+        }
 
         case 'getMeetingLinkUiState':
             return await meetingLinkController.getUiState();
