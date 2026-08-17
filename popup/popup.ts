@@ -12,9 +12,11 @@ import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from
 import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
 import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
+import { openOrFocusAppTab } from '../src/app-tab';
 import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
 import { selectAuthorizedTeamId } from '../src/team-selection';
 import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
+import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -154,6 +156,17 @@ async function init(): Promise<void> {
     const standaloneSetup = isSetupStandalone();
 
     chrome.storage.local.remove('draftClientSecret');
+    initAppTabLauncher();
+    initGoogleOAuthConnectionPreview([
+        {
+            button: document.getElementById('connectGoogleCalendarSetup') as HTMLButtonElement | null,
+            status: document.getElementById('googleOAuthSetupStatus'),
+        },
+        {
+            button: document.getElementById('connectGoogleCalendarConfig') as HTMLButtonElement | null,
+            status: document.getElementById('googleOAuthConfigStatus'),
+        },
+    ]);
 
     try {
         const status = await sendMessage<ExtensionStatus>({ action: 'getStatus' });
@@ -187,6 +200,26 @@ async function init(): Promise<void> {
         console.error('INIT_ERROR');
         loading.innerHTML = '<p style="color: #ff5252;">No se pudo cargar la extensión</p>';
     }
+}
+
+function initAppTabLauncher(): void {
+    const button = document.getElementById('openAppTab') as HTMLButtonElement | null;
+    if (!button) return;
+    button.addEventListener('click', async () => {
+        const originalLabel = button.textContent || 'Abrir app';
+        button.disabled = true;
+        button.textContent = 'Abriendo…';
+        try {
+            await openOrFocusAppTab();
+            window.close();
+        } catch {
+            button.textContent = 'No se pudo abrir';
+            button.disabled = false;
+            window.setTimeout(() => {
+                button.textContent = originalLabel;
+            }, 1_800);
+        }
+    });
 }
 
 async function initSafeDiagnostics(): Promise<void> {

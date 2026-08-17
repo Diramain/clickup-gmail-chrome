@@ -26,6 +26,9 @@
                 </svg>
                 <h1>ClickUp Gmail</h1>
             </div>
+            <button id="openAppTab" class="app-launcher" type="button" title="Abrir nueva interfaz en una pestaña">
+                Abrir app
+            </button>
         </header>
 
         <!-- Loading State -->
@@ -90,6 +93,28 @@
             <button id="signIn" class="btn btn-primary" disabled>
                 Iniciar sesión con ClickUp
             </button>
+
+            <div class="card connection-preview-card google-connection-card" aria-labelledby="googleCalendarSetupTitle">
+                <div class="connection-heading">
+                    <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
+                    <div class="connection-title">
+                        <h3 id="googleCalendarSetupTitle">Google Calendar</h3>
+                        <p>Integración opcional para disponibilidad y reuniones propias</p>
+                    </div>
+                    <span class="connection-badge">Opcional</span>
+                </div>
+                <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
+                    <li>Lista de calendarios</li>
+                    <li>Disponibilidad</li>
+                    <li>Eventos propios</li>
+                </ul>
+                <button id="connectGoogleCalendarSetup" class="btn btn-google" type="button"
+                    aria-describedby="googleOAuthSetupStatus" aria-disabled="true" disabled>
+                    Conectar Google Calendar
+                </button>
+                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
+            </div>
 
             <button id="openWindow" class="btn btn-link">
                 📐 Abrir ventana durable de configuración
@@ -282,6 +307,40 @@
                         <span id="userName" class="user-name">Usuario</span>
                         <span id="userEmail" class="user-email">email@example.com</span>
                     </div>
+                </div>
+
+                <div class="card connections-card" aria-labelledby="connectionsTitle">
+                    <h3 id="connectionsTitle">Conexiones</h3>
+                    <p class="help-text">Cada servicio mantiene su autorización por separado.</p>
+
+                    <div class="connection-row">
+                        <span class="connection-provider connection-provider-clickup" aria-hidden="true">C</span>
+                        <div class="connection-title">
+                            <strong>ClickUp</strong>
+                            <span>Tareas y seguimiento de tiempo</span>
+                        </div>
+                        <span class="connection-state connection-state-ok">Conectado</span>
+                    </div>
+
+                    <div class="connection-row connection-row-google">
+                        <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
+                        <div class="connection-title">
+                            <strong>Google Calendar</strong>
+                            <span>Disponibilidad y reuniones propias</span>
+                        </div>
+                        <span class="connection-badge">Opcional</span>
+                    </div>
+                    <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
+                        <li>Lista de calendarios</li>
+                        <li>Disponibilidad</li>
+                        <li>Eventos propios</li>
+                    </ul>
+                    <button id="connectGoogleCalendarConfig" class="btn btn-google" type="button"
+                        aria-describedby="googleOAuthConfigStatus" aria-disabled="true" disabled>
+                        Conectar Google Calendar
+                    </button>
+                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                    <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
                 </div>
 
                 <!-- Preferred Workspace -->

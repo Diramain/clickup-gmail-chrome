@@ -15,7 +15,7 @@ const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', '
 const MEET_ACTIONS = new Set(['meetSessionEvent', 'getMeetDetectionEnabled']);
 const DIAGNOSTIC_ACTIONS = new Set(['getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics']);
 const EXTENSION_ACTIONS = new Set([
-    'authenticate', 'logout', 'checkAuth', 'getStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
+    'authenticate', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
     'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'createTaskSimple', 'saveOAuthConfig', 'savePreferredTeam',
     'getPreferredTeam', 'getTaskById', 'preloadFullHierarchy', 'getHierarchyCache', 'getEmailTasksSyncStatus', 'findLinkedTasks',
     'searchTasks', 'syncEmailTasks', 'clearLocalData', 'getTimeEntries',

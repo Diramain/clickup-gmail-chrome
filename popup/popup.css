@@ -21,13 +21,16 @@ body {
 
 .popup-header {
     margin-bottom: 20px;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .logo {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 12px;
 }
 
@@ -39,6 +42,30 @@ body {
     background-clip: text;
     -webkit-text-fill-color: transparent;
     color: transparent;
+}
+
+.app-launcher {
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border: 1px solid rgba(73, 204, 249, 0.28);
+    border-radius: 8px;
+    color: #bdeeff;
+    background: rgba(73, 204, 249, 0.09);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.app-launcher:hover:not(:disabled),
+.app-launcher:focus-visible {
+    color: #fff;
+    border-color: rgba(73, 204, 249, 0.52);
+    background: rgba(73, 204, 249, 0.16);
+}
+
+.app-launcher:disabled {
+    opacity: 0.58;
+    cursor: wait;
 }
 
 /* Loading */
@@ -87,6 +114,130 @@ body {
     font-size: 14px;
     font-weight: 600;
     margin-bottom: 8px;
+}
+
+/* OAuth connection preview */
+.connection-preview-card,
+.connections-card {
+    border-color: rgba(73, 169, 215, 0.24);
+}
+
+.connection-heading,
+.connection-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.connection-row {
+    padding: 10px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.connection-row-google {
+    margin-top: 4px;
+}
+
+.connection-provider {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.connection-provider-clickup {
+    color: #fff;
+    background: linear-gradient(135deg, #49a9d7, #d444a2);
+}
+
+.connection-provider-google {
+    color: #4285f4;
+    background: #fff;
+    font-family: Georgia, serif;
+    font-size: 18px;
+}
+
+.connection-title {
+    min-width: 0;
+    flex: 1;
+}
+
+.connection-title h3,
+.connection-title strong {
+    display: block;
+    margin: 0 0 2px;
+    font-size: 13px;
+}
+
+.connection-title p,
+.connection-title span {
+    display: block;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.connection-badge,
+.connection-state {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    padding: 4px 7px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.connection-state-ok {
+    color: #79d5a7;
+    border-color: rgba(121, 213, 167, 0.28);
+}
+
+.connection-permissions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 12px 0;
+    padding: 0;
+    list-style: none;
+}
+
+.connection-permissions li {
+    padding: 5px 7px;
+    border-radius: 6px;
+    background: rgba(66, 133, 244, 0.12);
+    color: #a9c8ff;
+    font-size: 9px;
+}
+
+.btn-google {
+    color: #24549b;
+    background: #f7f9ff;
+}
+
+.btn-google:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
+.connection-status,
+.connection-privacy {
+    margin-top: 8px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.connection-privacy {
+    color: rgba(255, 255, 255, 0.42);
 }
 
 .diagnostic-card {

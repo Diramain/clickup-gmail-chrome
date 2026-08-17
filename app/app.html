@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>ClickUp Gmail Tracker</title>
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <a class="skip-link" href="#mainContent">Saltar al contenido</a>
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Navegación principal">
+            <div class="brand-lockup">
+                <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M10 32c4 6 8 8 14 8s10-2 14-8" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+                    <path d="M11 19 24 8l13 11" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <div>
+                    <strong>ClickUp Gmail</strong>
+                    <span>Nueva experiencia</span>
+                </div>
+            </div>
+
+            <nav class="primary-nav" aria-label="Secciones">
+                <a href="#inicio" data-route="inicio" aria-current="page"><span class="nav-index">01</span>Inicio</a>
+                <a href="#tareas" data-route="tareas"><span class="nav-index">02</span>Tareas</a>
+                <a href="#seguimiento" data-route="seguimiento"><span class="nav-index">03</span>Seguimiento</a>
+                <a href="#reuniones" data-route="reuniones"><span class="nav-index">04</span>Reuniones</a>
+                <a href="#conexiones" data-route="conexiones"><span class="nav-index">05</span>Conexiones</a>
+                <a href="#configuracion" data-route="configuracion"><span class="nav-index">06</span>Configuración</a>
+            </nav>
+
+            <div class="sidebar-note">
+                <span class="status-dot" aria-hidden="true"></span>
+                <div><strong>Vista previa local</strong><span>Sin OAuth ni APIs nuevas</span></div>
+            </div>
+        </aside>
+
+        <main id="mainContent" class="main-content" tabindex="-1">
+            <header class="topbar">
+                <div>
+                    <span class="topbar-label">ClickUp Gmail Tracker</span>
+                    <h1 id="pageTitle">Inicio</h1>
+                </div>
+                <div class="phase-badge"><span aria-hidden="true"></span>UX V2 · Conexiones locales</div>
+            </header>
+
+            <section class="page-section" data-page="inicio" aria-labelledby="inicioTitle">
+                <div class="hero-panel">
+                    <div class="hero-copy">
+                        <p class="section-label">Centro de trabajo</p>
+                        <h2 id="inicioTitle">Tu flujo entre Gmail y ClickUp, sin vivir dentro de un popup.</h2>
+                        <p>Esta pestaña será la nueva superficie principal. Durante la migración, las funciones actuales siguen operativas en el popup clásico.</p>
+                    </div>
+                    <div class="hero-orbit" aria-hidden="true">
+                        <div class="orbit orbit-a">Gmail</div>
+                        <div class="orbit orbit-b">ClickUp</div>
+                        <div class="orbit orbit-c">Calendar</div>
+                    </div>
+                </div>
+
+                <div class="migration-grid" aria-label="Estado de migración de módulos">
+                    <article class="module-card module-card-primary">
+                        <span class="module-kicker">Disponible ahora</span>
+                        <h3>Conexiones</h3>
+                        <p>Revisá cómo convivirán ClickUp y Google Calendar con permisos separados.</p>
+                        <a href="#conexiones">Abrir Conexiones</a>
+                    </article>
+                    <article class="module-card">
+                        <span class="module-kicker">Siguiente fase</span>
+                        <h3>Tareas y seguimiento</h3>
+                        <p>La migración conservará búsquedas, creación de tareas y timers sin duplicar lógica.</p>
+                    </article>
+                    <article class="module-card module-card-muted">
+                        <span class="module-kicker">Fallback activo</span>
+                        <h3>Popup clásico</h3>
+                        <p>Continúa siendo la interfaz funcional hasta alcanzar paridad y validar regresión.</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="page-section" data-page="tareas" aria-labelledby="tareasTitle" hidden>
+                <div class="section-heading">
+                    <div>
+                        <p class="section-label">Buscar antes de crear</p>
+                        <h2 id="tareasTitle">Tareas</h2>
+                        <p>Encontrá una tarea por título, ID o URL. La creación se incorporará después de validar esta lectura.</p>
+                    </div>
+                </div>
+
+                <div class="task-search-panel">
+                    <form id="taskSearchForm" class="task-search-form" role="search">
+                        <label for="appTaskSearch">Buscar en ClickUp</label>
+                        <div class="task-search-controls">
+                            <input id="appTaskSearch" name="query" type="search" minlength="2" maxlength="100" autocomplete="off" placeholder="Título, ID o URL de tarea" disabled aria-describedby="taskSearchHelp taskSearchState">
+                            <button id="appTaskSearchButton" type="submit" disabled>Buscar</button>
+                        </div>
+                        <p id="taskSearchHelp" class="field-help">La búsqueda real permanece bloqueada hasta un canario read-only separado.</p>
+                    </form>
+
+                    <div id="taskSearchState" class="task-search-state" data-state="blocked" role="status" aria-live="polite">
+                        <strong id="taskSearchStateTitle">Canario pendiente</strong>
+                        <span id="taskSearchStateDetail">La interfaz está lista, pero todavía no consulta ClickUp.</span>
+                    </div>
+                    <ol id="taskSearchResults" class="task-search-results" aria-label="Resultados de tareas"></ol>
+                </div>
+            </section>
+
+            <section class="page-section" data-page="seguimiento" aria-labelledby="seguimientoTitle" hidden>
+                <div class="empty-state">
+                    <span class="section-label">Migración pendiente</span>
+                    <h2 id="seguimientoTitle">Seguimiento</h2>
+                    <p>Los temporizadores y entradas manuales continúan en el popup clásico hasta que esta pantalla alcance paridad funcional.</p>
+                </div>
+            </section>
+
+            <section class="page-section" data-page="reuniones" aria-labelledby="reunionesTitle" hidden>
+                <div class="empty-state">
+                    <span class="section-label">Capacidad protegida</span>
+                    <h2 id="reunionesTitle">Reuniones</h2>
+                    <p>Meet Priority sigue funcionando con su alcance actual. Calendar y la creación coordinada permanecen desactivados.</p>
+                </div>
+            </section>
+
+            <section class="page-section" data-page="conexiones" aria-labelledby="conexionesTitle" hidden>
+                <div class="section-heading">
+                    <div>
+                        <p class="section-label">Autorizaciones separadas</p>
+                        <h2 id="conexionesTitle">Conexiones</h2>
+                        <p>Controlá qué servicios puede usar la extensión. Ninguna cuenta comparte tokens o configuración con la otra.</p>
+                    </div>
+                </div>
+
+                <div class="connections-layout">
+                    <article class="service-card service-clickup">
+                        <div class="service-head">
+                            <div class="service-icon service-icon-clickup" aria-hidden="true">C</div>
+                            <div><span class="service-type">Servicio principal</span><h3>ClickUp</h3></div>
+                            <span class="service-badge">Requerido</span>
+                        </div>
+                        <p>Crea tareas desde Gmail y administra seguimiento de tiempo.</p>
+                        <div id="clickUpConnectionState" class="service-state service-state-neutral" data-state="loading" role="status" aria-live="polite">
+                            <span aria-hidden="true"></span>
+                            <div>
+                                <strong id="clickUpConnectionLabel">Leyendo estado local…</strong>
+                                <small id="clickUpConnectionDetail">No se realizará ninguna validación por red.</small>
+                            </div>
+                        </div>
+                        <p class="service-footnote">La configuración y reconexión continúan en el popup clásico durante esta fase.</p>
+                    </article>
+
+                    <article class="service-card service-google">
+                        <div class="service-head">
+                            <div class="service-icon service-icon-google" aria-hidden="true">G</div>
+                            <div><span class="service-type">Integración opcional</span><h3>Google Calendar</h3></div>
+                            <span class="service-badge service-badge-blue">Opcional</span>
+                        </div>
+                        <p>Preparado para disponibilidad y reuniones en calendarios propios, sin acceso general a tu cuenta.</p>
+                        <ul class="permission-list" aria-label="Permisos previstos">
+                            <li>Lista de calendarios</li>
+                            <li>Disponibilidad</li>
+                            <li>Eventos propios</li>
+                        </ul>
+                        <button type="button" class="google-action" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
+                        <p id="googleDisabledStatus" class="service-footnote" role="status">OAuth permanece desactivado en esta fase.</p>
+                    </article>
+                </div>
+
+                <aside class="privacy-panel" aria-labelledby="privacyTitle">
+                    <span class="privacy-line" aria-hidden="true"></span>
+                    <div><h3 id="privacyTitle">Límite de privacidad</h3><p>La integración propuesta no lee Gmail, Drive, audio, video, chat ni participantes de Meet. Tampoco solicita email o perfil de Google.</p></div>
+                </aside>
+            </section>
+
+            <section class="page-section" data-page="configuracion" aria-labelledby="configuracionTitle" hidden>
+                <div class="empty-state">
+                    <span class="section-label">Migración pendiente</span>
+                    <h2 id="configuracionTitle">Configuración</h2>
+                    <p>Espacio de trabajo, campo personalizado, sincronización, datos y diagnóstico continúan en el popup clásico.</p>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

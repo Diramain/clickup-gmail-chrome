@@ -8,6 +8,7 @@ dist/
 background.js
 task-modal-entry.js
 popup/popup.js
+app/app.js
 src/*.js
 src/**/*.js
 diagnostics/*.js

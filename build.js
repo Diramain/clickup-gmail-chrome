@@ -27,6 +27,8 @@ const tsEntryPoints = [
     { in: 'background.ts', out: 'background' },
     // Popup
     { in: 'popup/popup.ts', out: 'popup/popup' },
+    // Full-tab application shell
+    { in: 'app/app.ts', out: 'app/app' },
     { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
     // Content scripts
     { in: 'src/logger.ts', out: 'src/logger' },
@@ -79,6 +81,7 @@ async function buildTypeScript() {
         const bundledEntryPoints = [
             { in: 'background.ts', out: 'background' },
             { in: 'popup/popup.ts', out: 'popup/popup' },
+            { in: 'app/app.ts', out: 'app/app' },
             { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
             { in: 'src/modal.ts', out: 'src/modal' },
             { in: 'src/gmail-native.ts', out: 'src/gmail-native' },

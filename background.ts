@@ -17,7 +17,7 @@ import {
     ClickUpCustomField
 } from './src/types/clickup';
 import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
-import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
+import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
 import {
@@ -687,6 +687,15 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
         case 'getStatus': // Combined status check
             return await getAuthenticationStatus();
+
+        case 'getLocalConnectionStatus': {
+            const localAuthState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+            return {
+                configured: await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG),
+                credentialPresent: await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN),
+                requiresReauth: localAuthState[STORAGE_KEYS.REAUTH_REQUIRED] === true,
+            };
+        }
 
         // DEV-H1: Functions moved to module level (lines 624+)
 

@@ -19,6 +19,14 @@
         "https://app.clickup.com/*",
         "https://meet.google.com/*"
     ],
+    "oauth2": {
+        "client_id": "1085109551140-db2i3dgveraah5vkjoadfkmf091e29h2.apps.googleusercontent.com",
+        "scopes": [
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events.freebusy",
+            "https://www.googleapis.com/auth/calendar.events.owned"
+        ]
+    },
     "background": {
         "service_worker": "background.js",
         "type": "module"

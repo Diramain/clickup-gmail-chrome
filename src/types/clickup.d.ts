@@ -313,6 +313,7 @@ export type MessageAction =
     | 'logout'
     | 'checkAuth'
     | 'getStatus'
+    | 'getLocalConnectionStatus'
     | 'getTeams'
     | 'getHierarchy'
     | 'getUser'
