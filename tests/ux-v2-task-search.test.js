@@ -17,6 +17,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
+        if (request === '../popup/popup') return {};
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
@@ -49,8 +50,14 @@ describe('CGC-UX-V2-D1 task search and results', () => {
         expect(taskView.normalizeTaskSearchQuery(`  ${'x'.repeat(120)}  `)).toHaveLength(100);
     });
 
+    test('distinguishes background failures from an empty task result', () => {
+        expect(taskView.isTaskSearchFailure({ success: false, error: 'AUTH_REQUIRED' })).toBe(true);
+        expect(taskView.isTaskSearchFailure({ requiresReauth: true })).toBe(true);
+        expect(taskView.isTaskSearchFailure({ tasks: [] })).toBe(false);
+    });
+
     test('renders untrusted task values as text nodes, never HTML', () => {
-        document.documentElement.innerHTML = source('app/app.html');
+        document.body.innerHTML = '<ol id="taskSearchResults"></ol>';
         const app = loadTsModule('app/app.ts');
 
         app.renderTaskSearchResults([{ id: 'A-1', name: '<img src=x onerror=alert(1)>', status: '<b>open</b>' }]);
@@ -62,17 +69,21 @@ describe('CGC-UX-V2-D1 task search and results', () => {
         expect(source('app/app.ts')).not.toContain('innerHTML');
     });
 
-    test('keeps real ClickUp search off until a separate read-only canary', () => {
-        document.documentElement.innerHTML = source('app/app.html');
+    test('renders a background error as recoverable error, never as no results', async () => {
+        document.body.innerHTML = '<form id="taskSearchForm"><input id="appTaskSearch"><button id="appTaskSearchButton"></button></form><div id="taskSearchState"><strong id="taskSearchStateTitle"></strong><span id="taskSearchStateDetail"></span></div><ol id="taskSearchResults"></ol>';
         const app = loadTsModule('app/app.ts');
+        app.initTaskSearch({
+            async searchTasks() { return { success: false, error: 'AUTH_REQUIRED', requiresReauth: true }; },
+        }, true);
         const input = document.getElementById('appTaskSearch');
-        const button = document.getElementById('appTaskSearchButton');
+        input.value = 'tarea';
+        document.getElementById('taskSearchForm')
+            .dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+        await Promise.resolve();
+        await Promise.resolve();
 
-        expect(app.TASK_SEARCH_RUNTIME_ENABLED).toBe(false);
-        app.initTaskSearch({ searchTasks: jest.fn() });
-        expect(input.disabled).toBe(true);
-        expect(button.disabled).toBe(true);
-        expect(document.getElementById('taskSearchState').dataset.state).toBe('blocked');
+        expect(document.getElementById('taskSearchState').dataset.state).toBe('error');
+        expect(document.getElementById('taskSearchStateTitle').textContent).toBe('No se pudo buscar');
     });
 
     test('uses the existing background action and does not add direct API access', () => {

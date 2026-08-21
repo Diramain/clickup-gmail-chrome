@@ -17,6 +17,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
+        if (request === '../popup/popup') return {};
         if (request === './link-hardening') return loadTsModule('src/link-hardening.ts');
         return require(request);
     };
@@ -70,6 +71,29 @@ describe('CGC-UX-V2-D2 destination contracts', () => {
             { id: '1', name: 'Entrada', path: 'Ops / Entrada' },
             { id: '3', name: 'Sin ruta', path: 'Sin ruta' },
         ]);
+    });
+
+    test('resolves only a cached list and replaces submitted labels with canonical values', () => {
+        const lists = [{ id: '901', name: 'Entrada', path: 'Ops / Entrada' }];
+
+        expect(config.resolveAuthorizedDestination({
+            listId: '901', listName: 'Nombre manipulado', path: 'Ruta manipulada',
+        }, lists)).toEqual({ listId: '901', listName: 'Entrada', path: 'Ops / Entrada' });
+        expect(config.resolveAuthorizedDestination({ listId: '999' }, lists)).toBeNull();
+    });
+
+    test('filters lists by complete path without case or accent sensitivity', () => {
+        const lists = [
+            { id: '1', name: 'Instalación', path: 'El Instalador > Desarrollo > Instalación' },
+            { id: '2', name: 'Soporte', path: 'Operaciones > Soporte' },
+        ];
+
+        expect(config.filterDestinationLists(lists, 'instalacion')).toEqual([lists[0]]);
+        expect(config.filterDestinationLists(lists, 'DESARROLLO')).toEqual([lists[0]]);
+        expect(config.filterDestinationLists([
+            { id: '3', name: 'Soporte - Steel Build', path: 'El Instalador > Desarrollo > Soporte - Steel Build' },
+        ], 'soporte steel')).toHaveLength(1);
+        expect(config.filterDestinationLists(lists, '')).toEqual(lists);
     });
 
     test('state classification covers the five common states', () => {
@@ -162,23 +186,57 @@ describe('CGC-UX-V2-D2 destination view', () => {
         expect(document.getElementById('destinationState').getAttribute('role')).toBe('status');
     });
 
-    test('with a populated cache the list select fills with full paths', async () => {
+    test('with a populated cache the list select fills with full paths but requires an explicit choice', async () => {
         await app.initDefaultDestination(createPort());
         const listSelect = document.getElementById('destinationList');
 
         expect(listSelect.disabled).toBe(false);
         expect([...listSelect.options].map((option) => option.textContent))
-            .toEqual(['Operaciones / Entrada general', 'Operaciones / Marketing']);
+            .toEqual(['Elegí una lista', 'Operaciones / Entrada general', 'Operaciones / Marketing']);
         expect(document.getElementById('destinationState').dataset.state).toBe('idle');
+        expect(document.getElementById('destinationSave').disabled).toBe(true);
+
+        listSelect.value = '901';
+        listSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
         expect(document.getElementById('destinationSave').disabled).toBe(false);
+    });
+
+    test('the destination search narrows the list options before selection', async () => {
+        await app.initDefaultDestination(createPort());
+        const search = document.getElementById('destinationListSearch');
+        const listSelect = document.getElementById('destinationList');
+
+        search.value = 'marketing';
+        search.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+        expect([...listSelect.options].map((option) => option.textContent))
+            .toEqual(['1 coincidencia · elegí una lista', 'Operaciones / Marketing']);
+        expect(document.getElementById('destinationSave').disabled).toBe(true);
     });
 
     test('an empty cache blocks saving and explains why', async () => {
         await app.initDefaultDestination(createPort({ options: null }));
 
         expect(document.getElementById('destinationState').dataset.state).toBe('blocked');
-        expect(document.getElementById('destinationStateDetail').textContent).toMatch(/popup clásico/);
+        expect(document.getElementById('destinationStateDetail').textContent).toMatch(/Sincronización/);
         expect(document.getElementById('destinationSave').disabled).toBe(true);
+    });
+
+    test('returning from Synchronization refreshes a cache populated after app startup', async () => {
+        let payload = null;
+        const port = createPort();
+        port.getOptions = async () => payload;
+        await app.initDefaultDestination(port);
+        expect(document.getElementById('destinationList').disabled).toBe(true);
+
+        payload = OPTIONS;
+        app.renderAppRoute('gmail');
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(document.getElementById('destinationList').disabled).toBe(false);
+        expect(document.getElementById('destinationList').options).toHaveLength(3);
+        expect(document.getElementById('destinationState').dataset.state).toBe('idle');
     });
 
     test('saving renders what the background confirmed, not what was sent', async () => {
@@ -186,6 +244,7 @@ describe('CGC-UX-V2-D2 destination view', () => {
         await app.initDefaultDestination(port);
 
         document.getElementById('destinationList').value = '902';
+        document.getElementById('destinationList').dispatchEvent(new window.Event('change', { bubbles: true }));
         document.getElementById('destinationForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
         await Promise.resolve();
         await Promise.resolve();
@@ -200,6 +259,7 @@ describe('CGC-UX-V2-D2 destination view', () => {
         await app.initDefaultDestination(port);
 
         document.getElementById('destinationList').value = '901';
+        document.getElementById('destinationList').dispatchEvent(new window.Event('change', { bubbles: true }));
         document.getElementById('destinationForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
         await Promise.resolve();
         await Promise.resolve();
@@ -215,6 +275,7 @@ describe('CGC-UX-V2-D2 destination view', () => {
         await app.initDefaultDestination(port);
 
         document.getElementById('destinationList').value = '901';
+        document.getElementById('destinationList').dispatchEvent(new window.Event('change', { bubbles: true }));
         document.getElementById('destinationForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
         await Promise.resolve();
         await Promise.resolve();
@@ -223,11 +284,10 @@ describe('CGC-UX-V2-D2 destination view', () => {
         expect(document.getElementById('destinationSave').disabled).toBe(false);
     });
 
-    test('the task search panel stays blocked and untouched by this cut', async () => {
+    test('destination initialization does not disable the native task search', async () => {
         await app.initDefaultDestination(createPort());
 
-        expect(document.getElementById('appTaskSearch').disabled).toBe(true);
-        expect(document.getElementById('taskSearchState').dataset.state).toBe('blocked');
-        expect(document.getElementById('taskSearchStateTitle').textContent).toBe('Canario pendiente');
+        expect(document.getElementById('taskSearch').disabled).toBe(false);
+        expect(document.getElementById('searchResults').textContent).toBe('');
     });
 });

@@ -15,6 +15,50 @@ body {
     min-width: 320px;
 }
 
+body.full-app-surface {
+    min-width: 0;
+    width: 100%;
+    background: #17251f;
+}
+
+.full-app-surface .popup-container {
+    padding: 0;
+}
+
+.full-app-surface .popup-header,
+.full-app-surface .tab-nav,
+.full-app-surface .popup-footer,
+.full-app-surface #openWindow {
+    display: none !important;
+}
+
+.full-app-surface #logged-in {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 18px;
+}
+
+.full-app-surface #login-required,
+.full-app-surface #safeDiagnostics {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.full-app-surface .tab-content {
+    display: flex !important;
+    flex-direction: column;
+    gap: 16px;
+}
+
+@media (max-width: 1080px) {
+    .full-app-surface #logged-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+    .full-app-surface #logged-in { grid-template-columns: 1fr; }
+}
+
 .popup-container {
     padding: 20px;
 }

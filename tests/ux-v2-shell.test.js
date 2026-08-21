@@ -17,6 +17,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
+        if (request === '../popup/popup') return {};
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
@@ -66,6 +67,10 @@ describe('CGC-UX-V2-A full-tab shell', () => {
 
         expect(routes).toEqual(['inicio', 'gmail', 'tiempo', 'meet', 'sync', 'conexion', 'datos']);
         expect(document.querySelectorAll('[data-page]')).toHaveLength(7);
+        expect(document.querySelector('.nav-index')).toBeNull();
+        for (const id of ['dashboardNowTitle', 'dashboardTimerValue', 'dashboardMeetingTitle', 'executionBoardTitle', 'toggleExecutionSelection', 'refreshExecutionBoard', 'executionOverdueTasks', 'executionTodayTasks', 'executionNextTasks', 'executionUndatedTasks', 'dashboardKpiTitle', 'kpiTasksToday', 'kpiTasksOverdue', 'kpiCompletedWeek', 'kpiTrackedToday', 'kpiGmailTasks', 'taskTimeSort', 'bulkActionRailButton', 'bulkEditDrawer', 'bulkStatus', 'bulkAssignee', 'applyBulkChanges']) {
+            expect(document.getElementById(id)).not.toBeNull();
+        }
         const googleButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Conectar Google Calendar'));
         expect(googleButton).toBeDefined();
         expect(googleButton.disabled).toBe(true);
@@ -74,14 +79,15 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(source('app/app.ts')).toContain("action: 'getLocalConnectionStatus'");
     });
 
-    test('task search panel lives inside the Gmail section', () => {
+    test('native task controls live inside the Gmail section without an iframe', () => {
         document.documentElement.innerHTML = source('app/app.html');
-        const form = document.getElementById('taskSearchForm');
+        const search = document.getElementById('taskSearch');
 
-        expect(form).not.toBeNull();
-        expect(form.closest('[data-page]').getAttribute('data-page')).toBe('gmail');
+        expect(search).not.toBeNull();
+        expect(search.closest('[data-page]').getAttribute('data-page')).toBe('gmail');
         expect(document.querySelector('[data-page="tareas"]')).toBeNull();
-        for (const id of ['appTaskSearch', 'appTaskSearchButton', 'taskSearchHelp', 'taskSearchState', 'taskSearchStateTitle', 'taskSearchStateDetail', 'taskSearchResults']) {
+        expect(document.querySelector('iframe')).toBeNull();
+        for (const id of ['taskSearch', 'searchResults', 'quickCreateTask', 'openTaskModal', 'quickCreateForm']) {
             expect(document.getElementById(id)).not.toBeNull();
         }
     });
@@ -96,8 +102,13 @@ describe('CGC-UX-V2-A full-tab shell', () => {
     test('stylesheet carries the prototype identity without remote assets', () => {
         const css = source('app/app.css');
 
-        expect(css).toContain('#ad4f32');
-        expect(css).toContain('#176b63');
+        expect(css).toContain('#6647f0');
+        expect(css).toContain('#0091ff');
+        expect(css).toContain('#17151f');
+        expect(css).toContain('.owner-theme-option[hidden]');
+        expect(css).toContain('.destination-actions');
+        expect(css).not.toContain('#f1eee6');
+        expect(css).not.toContain('#fffdf8');
         expect(css).not.toContain('#3979c6');
         expect(css).not.toMatch(/@import|url\(\s*["']?https?:/);
         for (const primitive of ['.chart', '.stat', '.progress', '.switch', '.chip', '.agenda-item', '.list-row']) {
@@ -105,10 +116,50 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         }
     });
 
-    test('popup exposes the launcher and build compiles the new app entry', () => {
-        expect(source('popup/popup.html')).toContain('id="openAppTab"');
-        expect(source('popup/popup.ts')).toContain('await openOrFocusAppTab();');
+    test('full tab owns the complete controls while the configured popup stays minimal', () => {
+        const appHtml = source('app/app.html');
+        const fullControls = source('popup/popup.html');
+        const minimal = source('popup/minimal.html');
+        const manifest = JSON.parse(source('manifest.json'));
+
+        for (const id of ['taskSearch', 'runningTimer', 'meetPriorityCard', 'syncLists', 'clickUpConnectionState', 'safeDiagnostics']) {
+            expect(appHtml).toContain(`id="${id}"`);
+        }
+        expect(appHtml).not.toContain('<iframe');
+        expect(appHtml).toContain('id="startRecorder"');
+        expect(appHtml).toContain('id="stopRecorder"');
+        expect(appHtml).not.toContain('id="openCausalRecorder"');
+        expect(source('app/app.ts')).toContain('initCausalRecorder(document)');
+        expect(appHtml).toContain('src="assets/clickup-logomark.svg"');
+        expect(appHtml).toContain('src="assets/clickup-logo-on-light.svg"');
+        expect(appHtml).toContain('src="assets/clickup-logo-on-dark.svg"');
+        expect(appHtml).toContain('src="assets/google-calendar.svg"');
+        expect(appHtml).not.toMatch(/<img[^>]+src=["']https?:/);
+        expect(manifest.action.default_popup).toBe('popup/minimal.html');
+        expect(minimal).toContain('id="miniConnection"');
+        expect(minimal).toContain('id="miniTimerDisplay"');
+        expect(minimal).toContain('00:00:00:00');
+        expect(minimal).toContain('id="miniOpenApp"');
+        expect(minimal).toContain('id="miniAutoStart"');
+        expect(minimal).toContain('id="miniAutoStop"');
+        expect(minimal).toContain('id="miniPlayTimer"');
+        expect(minimal).toContain('id="miniStopTimer"');
+        expect(minimal).toContain('id="miniMeetPriority"');
+        expect(minimal).toContain('id="miniMeetTaskSearch"');
+        expect(minimal).toContain('id="miniMeetAssign"');
+        expect(minimal).not.toContain('id="taskSearch"');
+        expect(minimal).not.toContain('id="syncLists"');
+        expect(source('popup/minimal.css')).toContain('html[data-theme="clickup"]');
+        expect(source('popup/minimal.css')).toContain('html[data-theme="spiritfox"]');
+        expect(source('src/gmail-native.ts')).toContain('class="cu-attach-btn"');
+        expect(source('src/gmail-native.ts')).toContain('Tareas vinculadas');
+    });
+
+    test('build compiles the app, full controller and minimal popup', () => {
         expect(source('build.js')).toContain("{ in: 'app/app.ts', out: 'app/app' }");
+        expect(source('build.js')).toContain("{ in: 'popup/minimal.ts', out: 'popup/minimal' }");
+        expect(source('popup/minimal.ts')).toContain('await openOrFocusAppTab();');
+        expect(source('popup/popup.ts')).toContain('IS_FULL_APP_SURFACE');
         expect(source('.gitignore')).toContain('app/app.js');
         expect(source('app/app.css')).toContain('@media (max-width: 760px)');
         expect(source('app/app.html')).toContain('class="skip-link"');

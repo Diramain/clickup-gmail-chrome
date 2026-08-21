@@ -14,9 +14,16 @@ describe('CGC-UX-V2-B safe dev extension loader', () => {
             'manifest.json',
             'popup/popup.html',
             'popup/popup.js',
+            'popup/minimal.html',
+            'popup/minimal.css',
+            'popup/minimal.js',
             'app/app.html',
             'app/app.css',
             'app/app.js',
+            'app/assets/clickup-logomark.svg',
+            'app/assets/clickup-logo-on-light.svg',
+            'app/assets/clickup-logo-on-dark.svg',
+            'app/assets/google-calendar.svg',
         ]));
         expect(source('.gitignore')).toContain('dist/');
         expect(JSON.parse(source('package.json')).scripts['build:dev-extension']).toContain('build-dev-extension.js');

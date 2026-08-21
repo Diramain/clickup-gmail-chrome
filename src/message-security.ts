@@ -1,5 +1,6 @@
 import type { ExtensionMessage } from './types/clickup';
 import { isConfirmedThreadId } from './link-hardening';
+import { isValidBulkTaskChange } from './bulk-task-update';
 
 export interface MessageValidationResult {
     ok: boolean;
@@ -12,7 +13,10 @@ const GMAIL_ACTIONS = new Set([
     'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig'
 ]);
 const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', 'createTimeEntry', 'addTimeEntry', 'updateTimerBadge', 'focusedClickUpNavigation']);
-const MEET_ACTIONS = new Set(['meetSessionEvent', 'getMeetDetectionEnabled']);
+const MEET_ACTIONS = new Set([
+    'meetSessionEvent', 'getMeetDetectionEnabled', 'getMeetTaskPromptState',
+    'suggestMeetTasks', 'assignMeetPromptTask', 'dismissMeetPrompt'
+]);
 const DIAGNOSTIC_ACTIONS = new Set(['getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics']);
 const EXTENSION_ACTIONS = new Set([
     'authenticate', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
@@ -25,7 +29,7 @@ const EXTENSION_ACTIONS = new Set([
     'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation',
     // CGC-UX-V2-D2: sólo para la app en pestaña. Fuera de GMAIL_ACTIONS y
     // CLICKUP_ACTIONS a propósito: ningún content script debe escribir destino.
-    'getDestinationOptions', 'setDefaultDestination'
+    'getDestinationOptions', 'setDefaultDestination', 'getDashboardSummary', 'refreshDashboardSummary', 'applyBulkTaskChange'
 ]);
 
 const MAX_SUBJECT = 500;
@@ -112,9 +116,29 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
         case 'focusedClickUpNavigation':
             return data === message || data === undefined || Object.keys(data).length === 0;
         case 'getMeetDetectionEnabled':
+        case 'getMeetTaskPromptState':
         case 'getEmailTaskMappings':
         case 'getDefaultListConfig':
+        case 'getDashboardSummary':
+        case 'refreshDashboardSummary':
             return hasOnlyRootKeys(message, ['action']);
+        case 'suggestMeetTasks':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.roomKey)
+                && isShortString(data.query, 100)
+                && Object.keys(data).every((key) => ['roomKey', 'query'].includes(key));
+        case 'assignMeetPromptTask':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.roomKey)
+                && isShortString(data.taskId, 100)
+                && typeof data.remember === 'boolean'
+                && Object.keys(data).every((key) => ['roomKey', 'taskId', 'remember'].includes(key));
+        case 'dismissMeetPrompt':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.roomKey)
+                && Object.keys(data).every((key) => key === 'roomKey');
+        case 'applyBulkTaskChange':
+            return hasOnlyRootKeys(message, ['action', 'data']) && isValidBulkTaskChange(data);
         case 'meetSessionEvent':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && ['candidate', 'joined', 'left', 'heartbeat'].includes(data.event)

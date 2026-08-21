@@ -288,14 +288,21 @@ function createClickUpBar(threadId: string | null): HTMLElement {
 
     bar.innerHTML = `
     <div class="cu-bar-content">
+      <div class="cu-bar-actions">
       <button class="cu-add-btn" title="${pending ? 'Esperando datos de Gmail' : 'Crear tarea de ClickUp desde este email'}" ${pending ? 'disabled aria-disabled="true"' : ''}>
         <svg width="16" height="16" viewBox="0 0 180 180" fill="currentColor">
           <path d="M25.4 129.1L49.2 110.9C61.9 127.4 75.3 135 90.3 135C105.1 135 118.2 127.5 130.3 111.1L154.4 128.9C137 152.5 115.3 165 90.3 165C65.3 165 43.4 152.6 25.4 129.1Z"/>
           <polygon points="90.2 49.8 47.8 86.4 28.2 63.6 90.3 10.2 151.8 63.7 132.2 86.3"/>
         </svg>
-        <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Agregar a ClickUp'}</span>
+        <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Crear tarea'}</span>
       </button>
-      <div class="cu-linked-tasks"></div>
+      <button class="cu-attach-btn" type="button" title="${pending ? 'Esperando datos de Gmail' : 'Vincular este email a una tarea existente'}" ${pending ? 'disabled aria-disabled="true"' : ''}>Vincular existente</button>
+      </div>
+      <section class="cu-linked-section" aria-label="Tareas vinculadas">
+        <div class="cu-linked-heading"><strong>Tareas vinculadas</strong><span class="cu-linked-count">0</span></div>
+        <p class="cu-linked-empty">Este email todavía no tiene tareas vinculadas.</p>
+        <div class="cu-linked-tasks"></div>
+      </section>
     </div>
     `;
 
@@ -304,7 +311,14 @@ function createClickUpBar(threadId: string | null): HTMLElement {
         e.preventDefault();
         const currentThreadId = bar.dataset.threadId || null;
         if (!isConfirmedThreadId(currentThreadId)) return;
-        openTaskModal(currentThreadId);
+        openTaskModal(currentThreadId, 'create');
+    });
+    const attachBtn = bar.querySelector('.cu-attach-btn') as HTMLButtonElement | null;
+    attachBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        const currentThreadId = bar.dataset.threadId || null;
+        if (!isConfirmedThreadId(currentThreadId)) return;
+        openTaskModal(currentThreadId, 'attach');
     });
 
     return bar;
@@ -314,8 +328,7 @@ function reconcileClickUpBar(bar: HTMLElement, threadId: string | null): void {
     const confirmedThreadId = isConfirmedThreadId(threadId) ? threadId : null;
     reconcileThreadBarState(bar, confirmedThreadId);
 
-    const container = bar.querySelector('.cu-linked-tasks');
-    if (container) reconcileLinkedTaskAnchors(container, confirmedThreadId ? toVisibleLinkedTasks(linkedTasks[confirmedThreadId] || []) : []);
+    reconcileLinkedTasksSection(bar, confirmedThreadId ? toVisibleLinkedTasks(linkedTasks[confirmedThreadId] || []) : []);
 
     if (confirmedThreadId) verifyThreadTasks(confirmedThreadId, bar);
 }
@@ -377,8 +390,7 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
         Logger.info(' Updating thread task statuses after validation');
         const nextTasks = currentTasks.map(task => updates.get(task.id) || task);
         linkedTasks[threadId] = nextTasks;
-        const container = barElement.querySelector('.cu-linked-tasks');
-        if (container) reconcileLinkedTaskAnchors(container, toVisibleLinkedTasks(nextTasks));
+        reconcileLinkedTasksSection(barElement, toVisibleLinkedTasks(nextTasks));
     }
 }
 
@@ -386,7 +398,7 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
 // Modal Functions
 // ============================================================================
 
-function openTaskModal(threadId: string): void {
+function openTaskModal(threadId: string, initialTab: 'create' | 'attach' = 'create'): void {
     const emailData: EmailData = {
         threadId: threadId,
         subject: getEmailSubject(),
@@ -398,7 +410,7 @@ function openTaskModal(threadId: string): void {
 
     if (typeof TaskModal !== 'undefined') {
         const modal = new TaskModal();
-        modal.show(emailData);
+        void modal.show(emailData, initialTab);
     } else {
         Logger.error('TASK_MODAL_NOT_FOUND');
         showNotification('No se pudo abrir el formulario de tarea', 'error');
@@ -429,8 +441,16 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
     const existingIndex = linkedTasks[threadId].findIndex(candidate => candidate.id === task.id);
     if (existingIndex >= 0) linkedTasks[threadId][existingIndex] = nextTask;
     else linkedTasks[threadId].push(nextTask);
-    const tasksContainer = bar.querySelector('.cu-linked-tasks');
-    if (tasksContainer) reconcileLinkedTaskAnchors(tasksContainer, toVisibleLinkedTasks(linkedTasks[threadId]));
+    reconcileLinkedTasksSection(bar, toVisibleLinkedTasks(linkedTasks[threadId]));
+}
+
+function reconcileLinkedTasksSection(barElement: Element, tasks: TaskMapping[]): void {
+    const container = barElement.querySelector('.cu-linked-tasks');
+    if (container) reconcileLinkedTaskAnchors(container, tasks);
+    const count = barElement.querySelector('.cu-linked-count');
+    if (count) count.textContent = String(tasks.length);
+    const empty = barElement.querySelector<HTMLElement>('.cu-linked-empty');
+    if (empty) empty.hidden = tasks.length > 0;
 }
 
 function showNotification(message: string, type: 'success' | 'error'): void {

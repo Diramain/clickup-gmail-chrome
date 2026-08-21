@@ -12,11 +12,13 @@
 }
 
 .cu-bar-content {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
 }
+
+.cu-bar-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 
 /* Add to ClickUp Button - ClickUp Official Gradient */
 .cu-add-btn {
@@ -51,6 +53,19 @@
     fill: currentColor;
 }
 
+.cu-attach-btn {
+    padding: 8px 11px;
+    border: 1px solid #d6d1ee;
+    border-radius: 6px;
+    color: #5f4ce4;
+    background: #fff;
+    font: 600 12px 'Google Sans', Roboto, sans-serif;
+    cursor: pointer;
+}
+
+.cu-attach-btn:hover:not(:disabled) { border-color: #7b68ee; background: #f3f0ff; }
+.cu-attach-btn:disabled { opacity: .62; cursor: wait; }
+
 /* Linked Tasks */
 .cu-linked-tasks {
     display: flex;
@@ -58,6 +73,12 @@
     flex-wrap: wrap;
     gap: 8px;
 }
+
+.cu-linked-section { min-width: 0; padding-left: 12px; border-left: 1px solid #ddd8f0; }
+.cu-linked-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; color: #464258; font: 600 11px 'Google Sans', Roboto, sans-serif; }
+.cu-linked-count { min-width: 19px; padding: 2px 6px; border-radius: 99px; color: #5f4ce4; background: #ebe7ff; font-size: 9px; text-align: center; }
+.cu-linked-empty { margin: 0; color: #777287; font: 11px/1.4 'Google Sans', Roboto, sans-serif; }
+.cu-linked-empty[hidden] { display: none; }
 
 .cu-task-link {
     display: inline-flex;
@@ -77,6 +98,11 @@
 .cu-task-link:hover {
     background: #f0eeff;
     border-color: #7B68EE;
+}
+
+@media (max-width: 680px) {
+    .cu-bar-content { grid-template-columns: 1fr; }
+    .cu-linked-section { padding-top: 10px; padding-left: 0; border-top: 1px solid #ddd8f0; border-left: 0; }
 }
 
 .cu-task-new {

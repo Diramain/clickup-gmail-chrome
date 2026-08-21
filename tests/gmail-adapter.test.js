@@ -222,6 +222,21 @@ describe('Gmail thread bar mounting', () => {
         observer.disconnect();
 
         expect(mutations).toHaveLength(0);
-        expect(bar.querySelector('.cu-add-label').textContent).toBe('Agregar a ClickUp');
+        expect(bar.querySelector('.cu-add-label').textContent).toBe('Crear tarea');
+    });
+
+    test('reconciles create and attach controls without enabling an unconfirmed thread', () => {
+        const bar = document.createElement('div');
+        bar.innerHTML = '<button class="cu-add-btn"><span class="cu-add-label"></span></button><button class="cu-attach-btn"></button><div class="cu-linked-tasks"></div>';
+
+        reconcileThreadBarState(bar, null);
+        expect(bar.querySelector('.cu-add-btn').disabled).toBe(true);
+        expect(bar.querySelector('.cu-attach-btn').disabled).toBe(true);
+        expect(bar.querySelector('.cu-add-label').textContent).toBe('Esperando datos de Gmail…');
+
+        reconcileThreadBarState(bar, 'thread-1');
+        expect(bar.querySelector('.cu-add-btn').disabled).toBe(false);
+        expect(bar.querySelector('.cu-attach-btn').disabled).toBe(false);
+        expect(bar.querySelector('.cu-attach-btn').title).toContain('Vincular');
     });
 });

@@ -10,11 +10,13 @@ import { configTab } from './tabs/config.tab';
 import { escapeHTML, safeAvatarUrl, safeClickUpUrl } from '../src/utils/sanitize.utils';
 import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from '../src/data-management';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
+import { filterDestinationLists } from '../src/destination-config';
 import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
 import { openOrFocusAppTab } from '../src/app-tab';
-import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
+import { formatSyncProgress, isSyncProgressMessage, type SyncProgressMessage } from '../src/sync-progress';
 import { selectAuthorizedTeamId } from '../src/team-selection';
+import { isTaskSearchFailure } from '../src/task-search-view';
 import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
 import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
 import {
@@ -90,6 +92,25 @@ interface SafeDiagnosticStatus {
     maxEvents: number;
 }
 
+interface LastTrackedTask {
+    id: string;
+    name: string;
+    teamId: string;
+}
+
+function sanitizeLastTrackedTask(value: unknown): LastTrackedTask | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const teamId = typeof candidate.teamId === 'string' ? candidate.teamId.trim() : '';
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(id) || !/^[A-Za-z0-9_-]{1,100}$/.test(teamId) || !name || name.length > 500) return null;
+    return { id, name, teamId };
+}
+
+const IS_FULL_APP_SURFACE = window.location.pathname.endsWith('/app/app.html');
+if (IS_FULL_APP_SURFACE) document.body.classList.add('full-app-surface');
+
 function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.MessageSender): void {
     if (sender.id !== chrome.runtime.id || !isSyncProgressMessage(message)) return;
 
@@ -106,6 +127,29 @@ function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.Mess
         : message.phase === 'complete'
             ? '#00c853'
             : '#666';
+
+    const progressId = message.scope === 'hierarchy' ? 'hierarchyProgress' : 'emailProgress';
+    const logId = message.scope === 'hierarchy' ? 'hierarchySyncLog' : 'emailSyncLog';
+    const progress = document.getElementById(progressId) as HTMLProgressElement | null;
+    const log = document.getElementById(logId);
+    if (progress) progress.value = syncProgressPercent(message);
+    if (log) {
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const previous = log.textContent === 'Esperando sincronización…' ? '' : `${log.textContent}\n`;
+        log.textContent = `${previous}[${timestamp}] ${text}`.split('\n').slice(-40).join('\n');
+        log.scrollTop = log.scrollHeight;
+    }
+}
+
+function syncProgressPercent(message: SyncProgressMessage): number {
+    if (message.phase === 'complete') return 100;
+    if (message.phase === 'error') return 0;
+    if (message.phase === 'starting') return 4;
+    if (message.current !== undefined && message.total) {
+        return Math.min(96, Math.max(8, Math.round((message.current / message.total) * 92)));
+    }
+    if (message.phase === 'fetching') return 12;
+    return 8;
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
@@ -125,6 +169,15 @@ document.addEventListener('DOMContentLoaded', init);
 function initTabNavigation(): void {
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
+
+    if (IS_FULL_APP_SURFACE) {
+        tabButtons.forEach((button) => button.classList.add('hidden'));
+        tabContents.forEach((content) => {
+            content.classList.remove('hidden');
+            content.classList.add('active');
+        });
+        return;
+    }
 
     tabButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -153,7 +206,7 @@ function initTabNavigation(): void {
 
 async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
-    const standaloneSetup = isSetupStandalone();
+    const standaloneSetup = isSetupStandalone() || IS_FULL_APP_SURFACE;
 
     chrome.storage.local.remove('draftClientSecret');
     initAppTabLauncher();
@@ -202,6 +255,7 @@ async function init(): Promise<void> {
     }
 }
 
+
 function initAppTabLauncher(): void {
     const button = document.getElementById('openAppTab') as HTMLButtonElement | null;
     if (!button) return;
@@ -227,7 +281,6 @@ async function initSafeDiagnostics(): Promise<void> {
     const toggle = document.getElementById('diagnosticToggle') as HTMLInputElement | null;
     const exportButton = document.getElementById('exportDiagnostics') as HTMLButtonElement | null;
     const clearButton = document.getElementById('clearDiagnostics') as HTMLButtonElement | null;
-    const openRecorderButton = document.getElementById('openCausalRecorder') as HTMLButtonElement | null;
     const status = document.getElementById('diagnosticStatus') as HTMLElement | null;
     if (!container || !toggle || !exportButton || !clearButton || !status) return;
 
@@ -305,9 +358,6 @@ async function initSafeDiagnostics(): Promise<void> {
         }
     });
 
-    openRecorderButton?.addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics/recorder.html') });
-    });
 }
 
 // ============================================================================
@@ -585,6 +635,20 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     let timeTrackingRefreshInFlight: Promise<void> | null = null;
     let recentRunningStart: number | null = null;
     let stopMeetPriorityUi: (() => void) | null = null;
+    const lastTrackedStore = await chrome.storage.local.get('lastTrackedTaskV1');
+    let lastTrackedTask = sanitizeLastTrackedTask(lastTrackedStore.lastTrackedTaskV1);
+
+    const renderPrimaryTimerControls = (running: boolean): void => {
+        const resume = document.getElementById('resumeLastTimer') as HTMLButtonElement | null;
+        const stop = document.getElementById('stopTimer') as HTMLButtonElement | null;
+        const label = document.getElementById('resumeLastTimerLabel');
+        if (resume) resume.disabled = running || !lastTrackedTask;
+        if (stop) stop.disabled = !running;
+        if (label) label.textContent = lastTrackedTask
+            ? `Última tarea: ${lastTrackedTask.name}`
+            : 'Todavía no hay una tarea anterior para retomar.';
+    };
+    renderPrimaryTimerControls(false);
 
     // ========== TASKS TAB HANDLERS ==========
 
@@ -593,43 +657,61 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const searchResults = document.getElementById('searchResults') as HTMLElement;
     let searchTimeout: ReturnType<typeof setTimeout>;
 
-    taskSearch?.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
-        const query = taskSearch.value.trim();
-
-        if (query.length < 2) {
-            searchResults.innerHTML = '';
-            return;
-        }
-
+    const executeTaskSearch = async (query: string): Promise<void> => {
         searchResults.innerHTML = '<p class="hint">Buscando…</p>';
-        searchTimeout = setTimeout(async () => {
-            try {
-                const result = await sendMessage<{ tasks: any[] }>({
+        try {
+                let result: { tasks: any[]; hasMore?: boolean; indexedCount?: number } = { tasks: [], hasMore: true, indexedCount: 0 };
+                for (let batch = 0; batch < 10; batch += 1) {
+                    result = await sendMessage<{ tasks: any[]; hasMore?: boolean; indexedCount?: number }>({
                     action: 'searchTasks',
                     data: { query }
-                });
+                    });
+                    if (isTaskSearchFailure(result)) throw new Error('TASK_SEARCH_FAILED');
+                    if (result.tasks.length >= 10 || !result.hasMore) break;
+                    searchResults.innerHTML = `<p class="hint">Buscando más coincidencias… ${Number(result.indexedCount) || 0} tareas revisadas.</p>`;
+                }
 
                 if (result?.tasks?.length > 0) {
-                    searchResults.innerHTML = result.tasks.slice(0, 5).map(task => `
+                    searchResults.innerHTML = result.tasks.map(task => `
                         <div class="search-result-item" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
                             <span class="task-name">${escapeHTML(task.name || '')}</span>
                             <span class="task-id">${escapeHTML(task.id || '')}</span>
                         </div>
-                    `).join('');
+                    `).join('') + (result.hasMore
+                        ? `<button type="button" class="btn task-search-more">Buscar más tareas</button><p class="hint">Índice parcial: ${Number(result.indexedCount) || 0} tareas revisadas.</p>`
+                        : result.tasks.length < 10
+                            ? `<p class="hint">Se encontraron ${result.tasks.length} coincidencia${result.tasks.length === 1 ? '' : 's'} reales en todo el índice.</p>`
+                            : '');
 
                     searchResults.querySelectorAll('.search-result-item').forEach(el => {
                         el.addEventListener('click', () => {
                             window.open(safeClickUpUrl((el as HTMLElement).dataset.url || ''), '_blank', 'noopener,noreferrer');
                         });
                     });
+                    searchResults.querySelector<HTMLButtonElement>('.task-search-more')?.addEventListener('click', () => {
+                        void executeTaskSearch(query);
+                    });
                 } else {
-                    searchResults.innerHTML = '<p class="hint">No se encontraron tareas</p>';
+                    searchResults.innerHTML = result.hasMore
+                        ? '<p class="hint">Todavía no hay coincidencias en el tramo revisado.</p><button type="button" class="btn task-search-more">Buscar en más tareas</button>'
+                        : '<p class="hint">No se encontraron tareas</p>';
+                    searchResults.querySelector<HTMLButtonElement>('.task-search-more')?.addEventListener('click', () => {
+                        void executeTaskSearch(query);
+                    });
                 }
             } catch (e) {
                 searchResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
-        }, 300);
+    };
+
+    taskSearch?.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const query = taskSearch.value.trim();
+        if (query.length < 2) {
+            searchResults.innerHTML = '';
+            return;
+        }
+        searchTimeout = setTimeout(() => { void executeTaskSearch(query); }, 300);
     });
 
     // Quick Create Button
@@ -668,10 +750,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 const teamCache = getTeamHierarchyCache(storage.hierarchyCache, teamId);
                 const lists = flattenHierarchySpaces(teamCache?.data?.spaces);
 
-                const filtered = lists.filter((list: any) =>
-                    list.name.toLowerCase().includes(query) ||
-                    (list.path && list.path.toLowerCase().includes(query))
-                ).slice(0, 10);
+                const filtered = filterDestinationLists(lists, query).slice(0, 20);
 
                 if (filtered.length > 0) {
                     listSearchResults.innerHTML = filtered.map((list: any) => `
@@ -918,6 +997,18 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         }
     });
 
+    const resumeLastTimer = document.getElementById('resumeLastTimer') as HTMLButtonElement | null;
+    resumeLastTimer?.addEventListener('click', async () => {
+        if (!lastTrackedTask) return;
+        resumeLastTimer.disabled = true;
+        try {
+            await sendMessage({ action: 'startTimer', data: { teamId: lastTrackedTask.teamId, taskId: lastTrackedTask.id } });
+            await refreshTimeTracking();
+        } catch {
+            resumeLastTimer.disabled = false;
+        }
+    });
+
     // ========== AUTO-TRACKING TOGGLES ==========
     const autoStartToggle = document.getElementById('autoStartToggle') as HTMLInputElement;
     const autoStopToggle = document.getElementById('autoStopToggle') as HTMLInputElement;
@@ -1071,7 +1162,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                         : taskName;
                     return `
                     <div class="time-entry-item${isRunning ? ' time-entry-running' : ''}">
-                        <span class="entry-task">${taskLabel}${isRunning ? ' <span class="entry-state">En curso</span>' : ''}</span>
+                        <span class="entry-task">${taskLabel}</span>
+                        <span class="entry-state${isRunning ? ' is-running' : ''}">${isRunning ? 'En curso' : 'Finalizada'}</span>
                         <span class="entry-duration"${isRunning ? ' id="recentRunningDuration"' : ''}>${formatDuration(duration)}</span>
                     </div>
                 `;
@@ -1121,6 +1213,27 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // loadTimeHistory();
 
     // ========== LOAD RUNNING TIMER ==========
+    function renderDashboardTimer(timer: TimeEntry | null): void {
+        const state = document.getElementById('dashboardTimerState');
+        const stateText = document.getElementById('dashboardTimerStateText');
+        const task = document.getElementById('dashboardTimerTask');
+        const value = document.getElementById('dashboardTimerValue') as HTMLTimeElement | null;
+        if (!state || !stateText || !task || !value) return;
+
+        if (timer) {
+            state.classList.remove('blocked');
+            stateText.textContent = 'En curso';
+            task.textContent = timer.task?.name || 'Tarea en curso';
+            return;
+        }
+
+        state.classList.add('blocked');
+        stateText.textContent = 'Sin temporizador';
+        task.textContent = 'No hay una tarea en curso';
+        value.textContent = '00:00:00';
+        value.dateTime = 'PT0S';
+    }
+
     async function loadRunningTimer(): Promise<TimeEntry | null> {
         console.log('[Timer] LOAD_RUNNING_TIMER');
         // console.trace('[Timer] Caller Trace');
@@ -1139,6 +1252,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
             if (!teamId) {
                 console.log('[Timer] NO_TEAM_ID');
+                renderDashboardTimer(null);
                 return null;
             }
 
@@ -1163,17 +1277,29 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                     timerTaskName.textContent = timer.task?.name || 'En curso…';
                 }
 
+                const taskId = String(timer.task?.id || '').trim();
+                if (taskId && teamId) {
+                    lastTrackedTask = { id: taskId, name: timer.task?.name || taskId, teamId };
+                    await chrome.storage.local.set({ lastTrackedTaskV1: lastTrackedTask });
+                }
+
                 updateTimerDisplay(toTimeEntryTimestamp(startTime));
+                renderDashboardTimer(normalizedTimer);
+                renderPrimaryTimerControls(true);
                 return normalizedTimer;
             } else {
                 runningTimerEl.classList.add('hidden');
                 noTimerEl.classList.remove('hidden');
                 recentRunningStart = null;
                 if (timerInterval) clearInterval(timerInterval);
+                if (timerDisplay) timerDisplay.textContent = '00:00:00:00';
+                renderDashboardTimer(null);
+                renderPrimaryTimerControls(false);
                 return null;
             }
         } catch (e) {
             console.error('[Timer] LOAD_RUNNING_TIMER_ERROR');
+            renderDashboardTimer(null);
             return null;
         }
     }
@@ -1190,8 +1316,14 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const hours = Math.floor(elapsed / (1000 * 60 * 60));
             const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((elapsed % (1000 * 60)) / 1000);
+            const centiseconds = Math.floor((elapsed % 1000) / 10);
 
-            timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${centiseconds.toString().padStart(2, '0')}`;
+            const dashboardTimer = document.getElementById('dashboardTimerValue') as HTMLTimeElement | null;
+            if (dashboardTimer) {
+                dashboardTimer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                dashboardTimer.dateTime = `PT${hours}H${minutes}M${seconds}S`;
+            }
             const recentDuration = document.getElementById('recentRunningDuration');
             if (recentDuration && recentRunningStart) {
                 recentDuration.textContent = formatDuration(Date.now() - recentRunningStart);
@@ -1199,7 +1331,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         };
 
         update();
-        timerInterval = setInterval(update, 1000);
+        timerInterval = setInterval(update, 50);
     }
 
     async function refreshTimeTracking(): Promise<void> {

@@ -147,14 +147,19 @@ export class TaskModal {
 
     constructor() { }
 
-    async show(emailData: EmailData): Promise<void> {
+    async show(emailData: EmailData, initialTab: 'create' | 'attach' = 'create'): Promise<void> {
         this.emailData = emailData;
         this.createModal();
         await this.loadFullHierarchy();
         await this.loadDefaultList(); // Pre-select saved default list
         await this.prefillCurrentUser(); // Pre-select current user as assignee
         document.body.appendChild(this.modal!);
-        (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).focus();
+        if (initialTab === 'attach') {
+            this.switchTab('attach');
+            (this.modal!.querySelector('#cu-task-search') as HTMLInputElement).focus();
+        } else {
+            (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).focus();
+        }
     }
 
     createModal(): void {

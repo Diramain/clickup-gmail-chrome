@@ -66,6 +66,11 @@ describe('B2 sanitizer and message security', () => {
         expect(messages.validateExtensionMessage({ action: 'createTaskFull', listId: 'list', taskData: { name: '', assignees: ['bad'] }, emailData: { threadId: 'th', subject: 's', from: 'f', html: '<p>ok</p>' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'searchTasks', data: { query: 'x'.repeat(300) } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'addTimeEntry', data: { teamId: 't', taskId: 'x', duration: -1 } }, { id: runtimeId, url: 'https://app.clickup.com/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
+        const bulkChange = { action: 'applyBulkTaskChange', data: { taskId: 'task-1', listId: 'list-1', status: 'Done', dueDate: null, assigneeId: 1 } };
+        expect(messages.validateExtensionMessage(bulkChange, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId).ok).toBe(true);
+        expect(messages.validateExtensionMessage(bulkChange, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_ORIGIN' });
+        expect(messages.validateExtensionMessage({ ...bulkChange, data: { ...bulkChange.data, extra: true } }, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
+        expect(messages.validateExtensionMessage({ action: 'applyBulkTaskChange', data: { taskId: '../bad', listId: 'list-1', status: 'Done' } }, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'attachToTask', taskId: 't', emailData: { threadId: 'th', subject: 's', from: 'f', html: '', attachments: [{ filename: 'x'.repeat(300), mimeType: 'text/plain' }] } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
     });
 

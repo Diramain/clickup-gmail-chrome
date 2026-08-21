@@ -20,6 +20,7 @@ import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorization
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
+import { resolveAuthorizedDestination } from './src/destination-config';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from './src/hierarchy-utils';
 import {
     EMAIL_TASK_MAPPINGS_V2_KEY,
@@ -49,7 +50,6 @@ import {
 import { isSyncProgressMessage, type SyncProgressMessage } from './src/sync-progress';
 import {
     extractTaskIdCandidate,
-    hasHighConfidenceTaskSearchResult,
     rankTaskSearchResults,
 } from './src/task-search';
 import { extractCurrentUserId } from './src/time-entry-history';
@@ -85,6 +85,9 @@ import {
     type SafeCausalTraceEvent,
 } from './src/causal-trace';
 import { MeetingLinkController, MEETING_FEATURE_FLAGS_KEY, type MeetingLinkWriteAction } from './src/meeting-link/meeting-link.controller';
+import { buildDashboardSummary, type DashboardSummary } from './src/dashboard-summary';
+import { applyValidatedBulkTaskChange } from './src/bulk-task-update';
+import { isCustomTaskIdCandidate } from './src/meet/meet-task-prompt';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -123,9 +126,11 @@ const EXPIRATION_TIME = 24 * 60 * 60 * 1000; // 24 hours
 const TASK_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const TASK_SEARCH_MAX_PAGES = 50;
 const TASK_SEARCH_PAGE_SIZE = 100;
-const TASK_SEARCH_RESULT_LIMIT = 10;
+const TASK_SEARCH_RESULT_LIMIT = 20;
+const TASK_SEARCH_PAGE_BUDGET = 5;
 const CURRENT_USER_VALIDATION_TTL_MS = 5 * 60 * 1000;
 const RECENT_TIME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DASHBOARD_SNAPSHOT_TTL_MS = 60 * 1000;
 const FOCUSED_TIMER_DEBOUNCE_MS = 1_200;
 const FOCUSED_TIMER_SESSION_KEY = 'focusedClickUpTimerState';
 const AUTO_START_SUPPRESSED_TASK_SESSION_KEY = 'autoStartSuppressedTaskId';
@@ -143,6 +148,8 @@ const causalTracePorts = new Map<chrome.runtime.Port, CausalTraceSanitizer>();
 const meetingLinkController = new MeetingLinkController({
     get: (key: typeof MEETING_FEATURE_FLAGS_KEY) => chrome.storage.local.get(key) as Promise<Record<typeof MEETING_FEATURE_FLAGS_KEY, unknown>>,
 });
+const dashboardSnapshotCache = new Map<string, { expiresAt: number; summary: DashboardSummary }>();
+const dashboardSnapshotInFlight = new Map<string, Promise<DashboardSummary>>();
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
@@ -263,6 +270,7 @@ const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
 let mappingWriteQueue: Promise<void> = Promise.resolve();
 let focusedTimerQueue: Promise<void> = Promise.resolve();
 let timerWriteQueue: Promise<void> = Promise.resolve();
+let bulkTaskWriteQueue: Promise<void> = Promise.resolve();
 let clickUpTaskTabIndexQueue: Promise<void> = Promise.resolve();
 let focusedTimerDebounce: ReturnType<typeof setTimeout> | null = null;
 let focusedTimerRevision = 0;
@@ -607,6 +615,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                         STORAGE_KEYS.REAUTH_REQUIRED,
                     ]);
                     currentUserValidatedAt = 0;
+                    dashboardSnapshotCache.clear();
                     await initializeAPI();
                 });
                 const user = await getFreshAuthenticatedUser();
@@ -679,6 +688,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 currentUserValidatedAt = 0;
                 hierarchyCache = {};
                 taskSearchCaches.clear();
+                dashboardSnapshotCache.clear();
             });
             await chrome.action.setBadgeText({ text: '' });
             return { success: true };
@@ -776,18 +786,40 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             };
         }
 
+        case 'getDashboardSummary':
+            return await getDashboardSummarySnapshot();
+
+        case 'refreshDashboardSummary':
+            return await getDashboardSummarySnapshot(true);
+
         // CGC-UX-V2-D2: escritura local del destino. Devuelve lo persistido para
         // que la UI confirme por read-back en lugar de asumir el éxito.
         case 'setDefaultDestination': {
             await storageLocalTrustedReady;
-            const requested = sanitizeDefaultListConfig(data);
-            if (!requested) {
-                return { ok: false, code: 'INVALID_DESTINATION' };
+            const authorizationStore = await chrome.storage.local.get([
+                STORAGE_KEYS.CACHED_TEAMS,
+                STORAGE_KEYS.CACHED_HIERARCHY,
+                STORAGE_KEYS.PREFERRED_TEAM,
+            ]);
+            const authorizationTeams = authorizationStore[STORAGE_KEYS.CACHED_TEAMS];
+            const authorizationTeamId = typeof authorizationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+                ? authorizationStore[STORAGE_KEYS.PREFERRED_TEAM]
+                : authorizationTeams?.teams?.[0]?.id;
+            const authorizationCache = getTeamHierarchyCache(
+                authorizationStore[STORAGE_KEYS.CACHED_HIERARCHY],
+                authorizationTeamId,
+            );
+            const canonicalDestination = resolveAuthorizedDestination(
+                data,
+                flattenHierarchySpaces(authorizationCache?.data?.spaces),
+            );
+            if (!canonicalDestination) {
+                return { ok: false, code: 'DESTINATION_NOT_CACHED' };
             }
 
             await chrome.storage.local.set({
-                defaultList: requested.listId,
-                defaultListConfig: requested,
+                defaultList: canonicalDestination.listId,
+                defaultListConfig: canonicalDestination,
             });
 
             const persisted = await chrome.storage.local.get('defaultListConfig');
@@ -836,6 +868,14 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
         case 'getList':
             return await clickupAPI!.getList(message.listId || (data ? data.listId : undefined));
+
+        case 'applyBulkTaskChange':
+            await ensureAPI();
+            return await runBulkTaskWrite(async () => {
+                const result = await applyValidatedBulkTaskChange(clickupAPI!, data);
+                if (result.outcome === 'applied' || result.code.startsWith('VERIFY_')) dashboardSnapshotCache.clear();
+                return result;
+            });
 
         case 'getEmailTasksSyncStatus':
             // Return persisted sync status
@@ -946,6 +986,27 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getMeetDetectionEnabled':
             const meetDetectionSettings = await chrome.storage.local.get(MEET_PRIORITY_ENABLED_KEY);
             return { enabled: meetDetectionSettings[MEET_PRIORITY_ENABLED_KEY] === true };
+
+        case 'getMeetTaskPromptState':
+            return await getMeetTaskPromptState(sender);
+
+        case 'suggestMeetTasks':
+            await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+            return await suggestMeetTasksForPrompt(data.query);
+
+        case 'assignMeetPromptTask':
+            return await runTimerWrite(async () => {
+                await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+                const teamId = await resolveFocusedTimerTeamId();
+                if (!teamId) throw new Error('MEET_TEAM_UNAVAILABLE');
+                return await assignMeetTask(data.taskId, teamId, data.remember);
+            });
+
+        case 'dismissMeetPrompt':
+            return await runTimerWrite(async () => {
+                await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+                return await ignoreMeetSession();
+            });
 
         case 'getMeetPriorityStatus':
             return await getMeetPriorityStatus();
@@ -1151,6 +1212,12 @@ function runTimerWrite<T>(operation: () => Promise<T>): Promise<T> {
     return result;
 }
 
+function runBulkTaskWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const result = bulkTaskWriteQueue.then(operation, operation);
+    bulkTaskWriteQueue = result.then(() => undefined, () => undefined);
+    return result;
+}
+
 function runClickUpTaskTabIndexMutation<T>(operation: () => Promise<T>): Promise<T> {
     const result = clickUpTaskTabIndexQueue.then(operation, operation);
     clickUpTaskTabIndexQueue = result.then(() => undefined, () => undefined);
@@ -1278,6 +1345,51 @@ async function assignMeetTask(taskId: string, teamId: string, remember: boolean)
         }
     }
     return { success: true, mappingSaved };
+}
+
+async function getMeetTaskPromptState(sender: chrome.runtime.MessageSender): Promise<Record<string, unknown>> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    const sameTab = !!session
+        && typeof sender.tab?.id === 'number'
+        && typeof sender.tab.windowId === 'number'
+        && sender.tab.id === session.tabId
+        && sender.tab.windowId === session.windowId;
+    return {
+        visible: sameTab && session?.status === 'awaiting-task',
+        status: sameTab ? session?.status : 'idle',
+    };
+}
+
+async function requireMeetPromptAuthority(
+    roomKey: string,
+    sender: chrome.runtime.MessageSender,
+    allowedStatuses: MeetPrioritySession['status'][],
+): Promise<MeetPrioritySession> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    if (!session
+        || session.roomKey !== roomKey
+        || sender.tab?.id !== session.tabId
+        || sender.tab?.windowId !== session.windowId
+        || !allowedStatuses.includes(session.status)
+        || !await isMeetSessionTabAlive(session)) {
+        throw new Error('MEET_PROMPT_UNAUTHORIZED');
+    }
+    return session;
+}
+
+async function suggestMeetTasksForPrompt(query: string): Promise<{ tasks: Array<{ id: string; name: string }> }> {
+    const result = await searchTasks(query);
+    return {
+        tasks: (Array.isArray(result.tasks) ? result.tasks : [])
+            .slice(0, 5)
+            .flatMap((task) => {
+                const id = typeof task?.id === 'string' ? task.id.trim() : '';
+                const name = typeof task?.name === 'string' ? task.name.trim().slice(0, 500) : '';
+                return /^[A-Za-z0-9_-]{1,100}$/.test(id) && name ? [{ id, name }] : [];
+            }),
+    };
 }
 
 async function ignoreMeetSession(): Promise<{ success: boolean }> {
@@ -2293,6 +2405,75 @@ async function getEmailTaskMappingsForRead(): Promise<EmailTaskMappingsV2> {
     );
 }
 
+function dashboardWeekStart(now: number): number {
+    const value = new Date(now);
+    value.setHours(0, 0, 0, 0);
+    value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+    return value.getTime();
+}
+
+async function getDashboardSummarySnapshot(forceRefresh = false): Promise<DashboardSummary & { source: 'network' | 'cache'; expiresAt: number }> {
+    const teams = await getTeams();
+    const preferredStore = await chrome.storage.local.get(STORAGE_KEYS.PREFERRED_TEAM);
+    const teamId = selectAuthorizedTeamId(teams.teams, preferredStore[STORAGE_KEYS.PREFERRED_TEAM]);
+    const currentUserId = await getValidatedCurrentUserId();
+    if (!teamId || !currentUserId || !clickupAPI) throw new Error('DASHBOARD_CONTEXT_UNAVAILABLE');
+
+    const cacheKey = `${teamId}:${currentUserId}`;
+    let now = Date.now();
+    const cached = dashboardSnapshotCache.get(cacheKey);
+    if (!forceRefresh && cached && cached.expiresAt > now) {
+        return { ...cached.summary, source: 'cache', expiresAt: cached.expiresAt };
+    }
+
+    const existing = dashboardSnapshotInFlight.get(cacheKey);
+    if (existing) {
+        if (forceRefresh) {
+            try { await existing; } catch { /* el refresh realiza su propia lectura */ }
+            dashboardSnapshotCache.delete(cacheKey);
+            now = Date.now();
+        } else {
+        const summary = await existing;
+        const current = dashboardSnapshotCache.get(cacheKey);
+        return { ...summary, source: 'cache', expiresAt: current?.expiresAt || now };
+        }
+    }
+
+    const request = (async (): Promise<DashboardSummary> => {
+        const weekStart = dashboardWeekStart(now);
+        const [openTasks, recentlyUpdatedTasks, timeEntries, runningTimer, mappings] = await Promise.all([
+            clickupAPI!.getDashboardOpenTasks(teamId, currentUserId),
+            clickupAPI!.getDashboardRecentlyUpdatedTasks(teamId, currentUserId, weekStart),
+            clickupAPI!.getTimeEntries(teamId, weekStart, now, currentUserId),
+            clickupAPI!.getRunningTimer(teamId),
+            getEmailTaskMappingsForRead(),
+        ]);
+        const gmailLinksWeek = Object.values(mappings)
+            .flat()
+            .filter((mapping) => Number(mapping.createdAt) >= weekStart && Number(mapping.createdAt) <= now)
+            .length;
+        return buildDashboardSummary({
+            openTasks,
+            recentlyUpdatedTasks,
+            timeEntries,
+            runningTimer,
+            gmailLinksWeek,
+            currentUserId,
+            now,
+        });
+    })();
+
+    dashboardSnapshotInFlight.set(cacheKey, request);
+    try {
+        const summary = await request;
+        const expiresAt = Date.now() + DASHBOARD_SNAPSHOT_TTL_MS;
+        dashboardSnapshotCache.set(cacheKey, { summary, expiresAt });
+        return { ...summary, source: 'network', expiresAt };
+    } finally {
+        dashboardSnapshotInFlight.delete(cacheKey);
+    }
+}
+
 function sanitizeDefaultListConfig(value: unknown): { listId: string; path?: string; listName?: string } | undefined {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const config = value as { listId?: unknown; path?: unknown; listName?: unknown };
@@ -2632,7 +2813,9 @@ async function searchTasks(query: string, teamId?: string) {
     const taskId = extractTaskIdCandidate(cleanQuery);
     if (taskId) {
         try {
-            const task = await clickupAPI!.getTask(taskId);
+            const task = await clickupAPI!.getTask(taskId, isCustomTaskIdCandidate(taskId)
+                ? { customTaskId: true, teamId }
+                : undefined);
             if (task && task.id) {
                 seedTaskSearchCache(teamId, [task]);
                 return { tasks: [task] };
@@ -2647,15 +2830,17 @@ async function searchTasks(query: string, teamId?: string) {
     try {
         const cache = getTaskSearchCache(teamId);
         let matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
+        let pagesLoaded = 0;
 
         while (!cache.complete
             && matches.length < TASK_SEARCH_RESULT_LIMIT
-            && !hasHighConfidenceTaskSearchResult(matches, cleanQuery)) {
+            && pagesLoaded < TASK_SEARCH_PAGE_BUDGET) {
             await loadNextTaskSearchPage(teamId, cache);
+            pagesLoaded += 1;
             matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
         }
 
-        return { tasks: matches };
+        return { tasks: matches, hasMore: !cache.complete, indexedCount: cache.tasks.size };
     } catch (e) {
         Logger.error('SEARCH_FAILED', e);
         return { tasks: [] };

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClickUp Gmail</title>
+    <link rel="stylesheet" href="minimal.css">
+</head>
+<body>
+    <main class="mini-shell">
+        <header class="mini-header">
+            <div class="mini-brand">
+                <svg class="mini-mark" viewBox="0 0 180 180" aria-hidden="true"><path d="M25.4 129.1 49.2 110.9C61.9 127.4 75.3 135 90.3 135c14.8 0 27.9-7.5 40-23.9l24.1 17.8C137 152.5 115.3 165 90.3 165s-46.9-12.4-64.9-35.9Z"/><path d="m90.2 49.8-42.4 36.6-19.6-22.8 62.1-53.4 61.5 53.5-19.6 22.6Z"/></svg>
+                <div><span class="eyebrow">CLICKUP GMAIL</span><h1>Acceso rápido</h1></div>
+            </div>
+            <span id="miniConnection" class="status" data-state="loading">Leyendo…</span>
+        </header>
+
+        <section class="mini-card timer-card" aria-labelledby="miniTimerTitle">
+            <div class="card-heading"><div><span class="eyebrow">TEMPORIZADOR</span><h2 id="miniTimerTitle">Sin temporizador activo</h2></div><span id="miniTimerState" class="live-state">Detenido</span></div>
+            <p id="miniTimerDisplay">00:00:00:00</p>
+            <p id="miniLastTask" class="subtle">Todavía no hay una tarea anterior para retomar.</p>
+            <div class="timer-actions" role="group" aria-label="Controles del temporizador">
+                <button id="miniPlayTimer" class="icon-action play" type="button" disabled aria-label="Retomar última tarea"><span aria-hidden="true">▶</span><span>Play</span></button>
+                <button id="miniStopTimer" class="icon-action stop" type="button" disabled aria-label="Detener temporizador"><span aria-hidden="true">■</span><span>Stop</span></button>
+            </div>
+        </section>
+
+        <section class="mini-card meet-quick-card" aria-labelledby="miniMeetTitle">
+            <div class="card-heading">
+                <div><span class="eyebrow">GOOGLE MEET</span><h2 id="miniMeetTitle">Vincular reunión en curso</h2></div>
+                <label class="mini-toggle compact" title="La reunión activa toma prioridad sobre otros trackeos"><span class="sr-only">Priorizar Meet</span><input id="miniMeetPriority" type="checkbox"><span aria-hidden="true"></span></label>
+            </div>
+            <p id="miniMeetStatus" class="subtle" role="status" aria-live="polite">Consultando sesión Meet…</p>
+            <div id="miniMeetChooser" class="meet-chooser" hidden>
+                <label for="miniMeetTaskSearch">Tarea para esta Meet</label>
+                <input id="miniMeetTaskSearch" type="search" autocomplete="off" placeholder="Buscar por nombre o ID…">
+                <div id="miniMeetTaskResults" class="mini-search-results"></div>
+                <label class="remember-row"><input id="miniMeetRemember" type="checkbox"> Recordar para esta sala</label>
+                <button id="miniMeetAssign" class="secondary-action" type="button" disabled>Vincular e iniciar tracking</button>
+            </div>
+            <button id="miniMeetChangeTask" class="text-action" type="button" hidden>Cambiar tarea vinculada</button>
+            <p class="privacy-note">Sólo usa la señal local de una Meet confirmada. No lee audio, video, chat, captions, participantes ni título.</p>
+        </section>
+
+        <section class="mini-card automation-card" aria-labelledby="miniAutomationTitle">
+            <span class="eyebrow">SEGUIMIENTO AUTOMÁTICO</span>
+            <h2 id="miniAutomationTitle">Preferencias rápidas</h2>
+            <label class="toggle-row">Iniciar al enfocar <span class="mini-toggle"><input id="miniAutoStart" type="checkbox"><span aria-hidden="true"></span></span></label>
+            <label class="toggle-row">Detener al cambiar/cerrar <span class="mini-toggle"><input id="miniAutoStop" type="checkbox"><span aria-hidden="true"></span></span></label>
+        </section>
+
+        <p id="miniState" class="note" role="status" aria-live="polite">La configuración completa vive en la pestaña.</p>
+        <button id="miniOpenApp" class="primary" type="button">Abrir app completa</button>
+    </main>
+    <script src="minimal.js"></script>
+</body>
+</html>

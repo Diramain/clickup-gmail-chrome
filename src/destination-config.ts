@@ -102,6 +102,42 @@ function normalizeLists(value: unknown): DestinationList[] {
     return lists;
 }
 
+export function resolveAuthorizedDestination(
+    requested: unknown,
+    authorizedLists: unknown,
+): DestinationSelection | null {
+    const selection = sanitizeDestinationSelection(requested);
+    if (!selection) return null;
+    const authorized = normalizeLists(authorizedLists)
+        .find((list) => list.id === selection.listId);
+    if (!authorized) return null;
+    return {
+        listId: authorized.id,
+        listName: authorized.name,
+        path: authorized.path,
+    };
+}
+
+export function filterDestinationLists(lists: DestinationList[], query: unknown): DestinationList[] {
+    if (!Array.isArray(lists)) return [];
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery) return [...lists];
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return lists.filter((list) => {
+        const haystack = normalizeSearchText(`${list.path} ${list.name}`);
+        return tokens.every((token) => haystack.includes(token));
+    });
+}
+
+function normalizeSearchText(value: unknown): string {
+    if (typeof value !== 'string') return '';
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLocaleLowerCase('es');
+}
+
 export function normalizeDestinationOptions(raw: unknown): DestinationOptions {
     const source = (raw && typeof raw === 'object' && !Array.isArray(raw))
         ? raw as Record<string, unknown>
@@ -141,17 +177,17 @@ export function describeDestinationState(state: DestinationState, options: Desti
         case 'blocked':
             return {
                 title: 'Falta sincronizar',
-                detail: 'Todavía no hay espacios ni listas guardados en este navegador. Sincronizá desde el popup clásico y volvé a esta pantalla.',
+                detail: 'Todavía no hay espacios ni listas guardados en este navegador. Sincronizá desde Sincronización y volvé a esta pantalla.',
             };
         case 'empty':
             return {
                 title: 'Sin listas disponibles',
-                detail: 'El workspace en caché no tiene listas accesibles. Revisá permisos o sincronizá de nuevo desde el popup.',
+                detail: 'El workspace en caché no tiene listas accesibles. Revisá permisos o sincronizá de nuevo desde Sincronización.',
             };
         case 'stale':
             return {
                 title: 'Caché vencida',
-                detail: 'Los datos locales tienen más de un día. Podés elegir igual, pero conviene sincronizar desde el popup para ver listas nuevas.',
+                detail: 'Los datos locales tienen más de un día. Podés elegir igual, pero conviene sincronizar desde Sincronización para ver listas nuevas.',
             };
         case 'ready':
             return {

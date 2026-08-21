@@ -31,6 +31,9 @@ function loadTsModule(relativePath, cache = new Map()) {
 const room = loadTsModule('src/meet/meet-room.ts');
 const detector = loadTsModule('src/meet/meet-detector.ts');
 const priority = loadTsModule('src/meet/meet-priority.ts');
+const prompt = loadTsModule('src/meet/meet-task-prompt.ts');
+const promptUi = loadTsModule('src/meet/meet-task-prompt-ui.ts');
+const apiService = loadTsModule('src/services/api.service.ts');
 const security = loadTsModule('src/message-security.ts');
 const ROOM_KEY = 'a'.repeat(64);
 
@@ -222,14 +225,80 @@ describe('Meet mappings and single-session authority', () => {
     });
 });
 
+describe('Meet task prompt', () => {
+    test('sanitizes the transient title and extracts only bounded explicit task candidates', () => {
+        expect(prompt.sanitizeMeetSearchSeed('  Revisión [86ABC12] — Google Meet  ')).toBe('Revisión [86ABC12]');
+        expect(prompt.extractMeetTaskIdCandidates('Daily ABC-123 [86ABC12] #99ZZZ')).toEqual(['99ZZZ', '86ABC12', 'ABC-123']);
+        expect(prompt.extractMeetTaskIdCandidates('Plan trimestral sin identificador')).toEqual([]);
+        expect(prompt.sanitizeMeetSearchSeed(`A${'x'.repeat(150)}`)).toHaveLength(100);
+    });
+
+    test('renders a persistent in-Meet prompt, recommends a verified result, and assigns only after click', async () => {
+        document.title = 'Revisión [86ABC12] - Google Meet';
+        const messages = [];
+        const controller = new promptUi.MeetTaskPromptController(document, async (message) => {
+            messages.push(message);
+            if (message.action === 'getMeetTaskPromptState') return { visible: true };
+            if (message.action === 'suggestMeetTasks') return { tasks: [{ id: '86abc12', name: 'Revisión semanal' }] };
+            return { success: true };
+        });
+
+        await controller.sync(ROOM_KEY);
+        const host = document.getElementById('cgc-meet-task-prompt');
+        expect(host).not.toBeNull();
+        expect(messages).toContainEqual({ action: 'suggestMeetTasks', data: { roomKey: ROOM_KEY, query: '86ABC12' } });
+        const search = host.shadowRoot.querySelector('input[type="search"]');
+        const assign = [...host.shadowRoot.querySelectorAll('button')].find((button) => button.textContent === 'Vincular e iniciar');
+        expect(search.value).toBe('Revisión [86ABC12]');
+        expect(assign.disabled).toBe(false);
+        document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(document.getElementById('cgc-meet-task-prompt')).toBe(host);
+        assign.click();
+        await Promise.resolve();
+        expect(messages).toContainEqual({ action: 'assignMeetPromptTask', data: { roomKey: ROOM_KEY, taskId: '86abc12', remember: false } });
+    });
+
+    test('resolves custom task IDs with the required workspace parameters and rejects unsafe workspace IDs', async () => {
+        const api = new apiService.ClickUpAPIWrapper('token');
+        api.request = jest.fn().mockResolvedValue({ id: 'internal-id', name: 'Custom task' });
+        await expect(api.getTask('ABC-123', { customTaskId: true, teamId: '456' })).resolves.toMatchObject({ id: 'internal-id' });
+        expect(api.request).toHaveBeenCalledWith('/task/ABC-123?custom_task_ids=true&team_id=456');
+        await expect(api.getTask('ABC-123', { customTaskId: true, teamId: 'not-numeric' })).rejects.toMatchObject({ status: 400 });
+    });
+
+    test('dismisses the persistent prompt only after the explicit discard action', async () => {
+        document.title = 'Planificación - Google Meet';
+        const messages = [];
+        const controller = new promptUi.MeetTaskPromptController(document, async (message) => {
+            messages.push(message);
+            if (message.action === 'getMeetTaskPromptState') return { visible: true };
+            if (message.action === 'suggestMeetTasks') return { tasks: [] };
+            return { success: true };
+        });
+        await controller.sync(ROOM_KEY);
+        const host = document.getElementById('cgc-meet-task-prompt');
+        const dismiss = [...host.shadowRoot.querySelectorAll('button')].find((button) => button.textContent === 'Descartar');
+        dismiss.click();
+        await Promise.resolve();
+        expect(messages).toContainEqual({ action: 'dismissMeetPrompt', data: { roomKey: ROOM_KEY } });
+        expect(document.getElementById('cgc-meet-task-prompt')).toBeNull();
+    });
+});
+
 describe('Meet privacy, message, manifest, and release guardrails', () => {
     const runtimeId = 'ext-id';
     const meetSender = { id: runtimeId, url: 'https://meet.google.com/abc-defg-hij', tab: { id: 1, windowId: 2 } };
     const popupSender = { id: runtimeId, url: 'chrome-extension://ext-id/popup/popup.html' };
 
-    test('Meet origin can send only closed room-key events and read the feature flag', () => {
+    test('Meet origin can use only the bounded prompt contract and closed room-key events', () => {
         expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY } }, meetSender, runtimeId).ok).toBe(true);
         expect(security.validateExtensionMessage({ action: 'getMeetDetectionEnabled' }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'getMeetTaskPromptState' }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'suggestMeetTasks', data: { roomKey: ROOM_KEY, query: 'ABC-123' } }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'assignMeetPromptTask', data: { roomKey: ROOM_KEY, taskId: 'task-1', remember: false } }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'dismissMeetPrompt', data: { roomKey: ROOM_KEY } }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'suggestMeetTasks', data: { roomKey: ROOM_KEY, query: 'x'.repeat(101) } }, meetSender, runtimeId).ok).toBe(false);
+        expect(security.validateExtensionMessage({ action: 'assignMeetPromptTask', data: { roomKey: ROOM_KEY, taskId: 'task-1', remember: false, teamId: 'forged' } }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'getEmailTaskMappings' }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'getDefaultListConfig' }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY, title: 'Daily' } }, meetSender, runtimeId).ok).toBe(false);
@@ -267,11 +336,14 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         }));
     });
 
-    test('runtime content script and popup do not retain or render meeting content', () => {
+    test('runtime prompt uses a transient bounded title without retaining meeting content', () => {
         const tracker = source('src/meet/meet-tracker.ts');
+        const promptSource = source('src/meet/meet-task-prompt-ui.ts');
         const popup = source('popup/popup.ts');
         const exportSource = source('src/data-management.ts');
-        expect(tracker).not.toMatch(/innerHTML|textContent|caption|participant|MediaStream|getUserMedia|audio|video|chat/i);
+        expect(tracker).not.toMatch(/innerHTML|caption|participant|MediaStream|getUserMedia|audio|video|chat/i);
+        expect(promptSource).not.toMatch(/innerHTML|caption|participant|MediaStream|getUserMedia|audio|video|chat|chrome\.storage/i);
+        expect(promptSource).toMatch(/sanitizeMeetSearchSeed\(this\.documentRoot\.title\)/);
         expect(tracker).toMatch(/data: \{ event, roomKey \}/);
         expect(popup).not.toMatch(/`[^`]*\$\{mapping\.roomKey\}/);
         expect(exportSource).not.toMatch(/meetTaskMappings|roomKey/);
@@ -298,6 +370,9 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         expect(background).toMatch(/if \(startedMeetTimer\)[\s\S]{0,220}clickupAPI!\.stopTimer\(teamId\)/);
         expect(background).toMatch(/MEET_MAX_DURATION_MS = 4 \* 60 \* 60 \* 1000/);
         expect(background).toMatch(/if \(meetPrioritySession && \['awaiting-task', 'tracking', 'paused'\]\.includes\(meetPrioritySession\.status\)\) return/);
+        expect(background).toMatch(/scheduleFocusedTimerEvaluation\('meet-ended'\)/);
+        expect(background).toMatch(/requireMeetPromptAuthority\(data\.roomKey, sender, \['awaiting-task'\]\)/);
+        expect(background).toMatch(/suggestMeetTasksForPrompt[\s\S]{0,500}tasks:[\s\S]{0,500}\{ id, name \}/);
         expect(background).toMatch(/MEET_MAPPINGS_KEY/);
         expect(background).toMatch(/async function stopCurrentTimerForUnassignedMeet\(\)[\s\S]{0,350}getRunningTimer[\s\S]{0,150}stopTimer/);
         expect(background).not.toMatch(/async function stopCurrentTimerForUnassignedMeet\(\)[\s\S]{0,180}autoStopTimer/);
