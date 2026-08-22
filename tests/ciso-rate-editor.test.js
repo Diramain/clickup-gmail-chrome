@@ -75,6 +75,36 @@ describe('CISO editor sanitization and rate governor', () => {
         expect(modal.htmlToClickUpMarkdown('<a href="https://safe.test">ok</a>')).toContain('[ok](https://safe.test)');
     });
 
+    test('ClickUp Markdown round-trips documented task description formatting safely', () => {
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        const markdown = '# Título **importante**\n\n- Uno con _énfasis_\n- Dos con `código`\n\n> Una cita\n\n[seguro](https://safe.test) [inseguro](javascript:alert(1))';
+        const html = modal.clickUpMarkdownToHtml(markdown);
+
+        expect(html).toContain('<h1>Título <strong>importante</strong></h1>');
+        expect(html).toContain('<ul><li>Uno con <em>énfasis</em></li><li>Dos con <code>código</code></li></ul>');
+        expect(html).toContain('<blockquote>Una cita</blockquote>');
+        expect(html).toContain('<a href="https://safe.test"');
+        expect(html).toContain('>seguro</a>');
+        expect(html).not.toMatch(/javascript:/i);
+        expect(modal.htmlToClickUpMarkdown(html)).toContain('# Título **importante**');
+        expect(modal.htmlToClickUpMarkdown(html)).toContain('- Uno con _énfasis_');
+    });
+
+    test('visual code insertion and pasted pre blocks produce documented inline code', () => {
+        document.body.innerHTML = '<div id="cu-editor-visual" contenteditable="true"></div>';
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.modal = document.body;
+        document.execCommand = jest.fn();
+
+        modal.insertElement('code');
+        const htmlArg = document.execCommand.mock.calls.find(call => call[0] === 'insertHTML')[2];
+        expect(htmlArg).toContain('<code>');
+        expect(htmlArg).not.toContain('<pre');
+        expect(modal.htmlToClickUpMarkdown('<pre><code>line 1\nline 2</code></pre>')).toBe('`line 1 line 2`');
+    });
+
     test('thread id helpers escape regex metacharacters and confirm real ids', () => {
         const { commentsContainThreadId, escapeRegExp, isConfirmedThreadId } = loadTsModule('src/link-hardening.ts');
         expect(escapeRegExp('a.*[b](c)')).toBe('a\\.\\*\\[b\\]\\(c\\)');

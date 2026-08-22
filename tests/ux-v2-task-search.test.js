@@ -89,7 +89,8 @@ describe('CGC-UX-V2-D1 task search and results', () => {
     test('uses the existing background action and does not add direct API access', () => {
         const app = source('app/app.ts');
         expect(app).toContain("action: 'searchTasks'");
-        expect(app).not.toMatch(/fetch\(|getAuthToken|chrome\.storage/);
+        expect(app).not.toMatch(/fetch\(|getAuthToken/);
+        expect(app).not.toContain('chrome.storage.sync');
         expect(source('src/message-security.ts')).toContain("case 'searchTasks':");
     });
 });

@@ -275,6 +275,14 @@ export interface AttachmentInfo {
     size?: number;
 }
 
+export interface GmailImageAttachmentUpload {
+    taskId: string;
+    filename: string;
+    mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+    byteLength: number;
+    base64: string;
+}
+
 export interface EmailTaskMapping {
     id: string;
     name: string;
@@ -328,6 +336,9 @@ export type MessageAction =
     | 'createTaskFromEmail'
     | 'createTaskSimple'
     | 'attachToTask'
+    | 'uploadGmailImageAttachment'
+    | 'getGmailIntegrationPreference'
+    | 'setGmailIntegrationPreference'
     | 'validateTask'
     | 'validateTaskLink'
     | 'findLinkedTasks'
@@ -343,6 +354,16 @@ export type MessageAction =
     | 'getDashboardSummary'
     | 'refreshDashboardSummary'
     | 'applyBulkTaskChange'
+    | 'getGoogleCalendarAgenda'
+    | 'connectGoogleCalendar'
+    | 'refreshGoogleCalendarAgenda'
+    | 'disconnectGoogleCalendar'
+    | 'linkGoogleCalendarEventTask'
+    | 'createGoogleCalendarEventTask'
+    | 'getCalendarTaskTypeConfig'
+    | 'getClickUpCustomTaskTypes'
+    | 'setCalendarTaskTypeConfig'
+    | 'openGoogleCalendarMeet'
     | 'getEmailTaskMappings'
     | 'getDefaultListConfig'
     | 'syncEmailTasks'

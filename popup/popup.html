@@ -99,20 +99,20 @@
                     <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                     <div class="connection-title">
                         <h3 id="googleCalendarSetupTitle">Google Calendar</h3>
-                        <p>Integración opcional para disponibilidad y reuniones propias</p>
+                        <p>Integración opcional para próximos eventos del calendario principal</p>
                     </div>
                     <span class="connection-badge">Opcional</span>
                 </div>
                 <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
-                    <li>Lista de calendarios</li>
-                    <li>Disponibilidad</li>
-                    <li>Eventos propios</li>
+                    <li>Eventos del calendario principal en modo lectura</li>
+                    <li>Próximos siete días</li>
+                    <li>Sin invitados, descripciones ni ubicaciones</li>
                 </ul>
                 <button id="connectGoogleCalendarSetup" class="btn btn-google" type="button"
                     aria-describedby="googleOAuthSetupStatus" aria-disabled="true" disabled>
                     Conectar Google Calendar
                 </button>
-                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
                 <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
             </div>
 
@@ -222,13 +222,15 @@
                         <button id="endMeetSession" class="btn btn-danger btn-small hidden">Finalizar reunión</button>
                     </div>
 
-                    <details id="meetMappingsDetails" class="meet-mappings hidden">
-                        <summary>Reuniones vinculadas</summary>
-                        <div id="meetMappingsList"></div>
-                    </details>
                 </div>
 
                 <section id="meetingLinkSection" class="card hidden" hidden aria-label="Vinculación de reuniones"></section>
+
+                <details id="meetMappingsDetails" class="card meet-mappings hidden">
+                    <summary>Vinculaciones guardadas</summary>
+                    <p class="hint">Reglas locales entre una sala de Meet y una tarea; no representan reuniones activas o programadas.</p>
+                    <div id="meetMappingsList"></div>
+                </details>
 
                 <!-- Running Timer -->
                 <div class="card timer-card">
@@ -326,20 +328,20 @@
                         <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                         <div class="connection-title">
                             <strong>Google Calendar</strong>
-                            <span>Disponibilidad y reuniones propias</span>
+                            <span>Próximos eventos del calendario principal</span>
                         </div>
                         <span class="connection-badge">Opcional</span>
                     </div>
                     <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
-                        <li>Lista de calendarios</li>
-                        <li>Disponibilidad</li>
-                        <li>Eventos propios</li>
+                        <li>Eventos del calendario principal en modo lectura</li>
+                        <li>Próximos siete días</li>
+                        <li>Sin invitados, descripciones ni ubicaciones</li>
                     </ul>
                     <button id="connectGoogleCalendarConfig" class="btn btn-google" type="button"
                         aria-describedby="googleOAuthConfigStatus" aria-disabled="true" disabled>
                         Conectar Google Calendar
                     </button>
-                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
                     <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
                 </div>
 

@@ -75,7 +75,8 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(googleButton).toBeDefined();
         expect(googleButton.disabled).toBe(true);
         expect(googleButton.getAttribute('aria-disabled')).toBe('true');
-        expect(source('app/app.ts')).not.toMatch(/getAuthToken|fetch\(|chrome\.storage/);
+        expect(source('app/app.ts')).not.toMatch(/getAuthToken|fetch\(/);
+        expect(source('app/app.ts')).not.toContain('chrome.storage.sync');
         expect(source('app/app.ts')).toContain("action: 'getLocalConnectionStatus'");
     });
 

@@ -14,7 +14,8 @@ import {
     CreateTaskPayload,
     EmailData,
     TimeEntry,
-    ClickUpCustomField
+    ClickUpCustomField,
+    ClickUpCustomTaskType
 } from './src/types/clickup';
 import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
@@ -88,12 +89,36 @@ import { MeetingLinkController, MEETING_FEATURE_FLAGS_KEY, type MeetingLinkWrite
 import { buildDashboardSummary, type DashboardSummary } from './src/dashboard-summary';
 import { applyValidatedBulkTaskChange } from './src/bulk-task-update';
 import { isCustomTaskIdCandidate } from './src/meet/meet-task-prompt';
+import { GOOGLE_CALENDAR_RUNTIME_ENABLED } from './src/calendar/calendar-capability';
+import { createCalendarSeriesKey, disabledCalendarAgendaView, type CalendarAgendaViewV1 } from './src/calendar/calendar-agenda';
+import {
+    CalendarAgendaMemoryCache,
+    canonicalMeetUrlFromCalendarAgenda,
+    createMeetMappingFromCalendarAgenda,
+} from './src/calendar/calendar-agenda-cache';
+import { GoogleCalendarAgendaRuntime } from './src/calendar/calendar-runtime';
+import { readPrimaryCalendarAgenda } from './src/calendar/google-calendar.service';
+import {
+    dateToClickUpDueDate,
+    findCustomTaskType,
+    mappingStorageKey,
+    sanitizeCalendarTaskMappings,
+    sanitizeCalendarTaskTypeSelection,
+    sanitizeCustomTaskTypesResponse,
+    type CalendarTaskLinkScope,
+    type CalendarTaskMappingStoreV1,
+} from './src/calendar/calendar-linking';
+import {
+    invalidateGoogleCalendarToken,
+    requestGoogleCalendarToken,
+} from './src/google/google-identity.service';
+import { decodeAndValidateGmailImage, type GmailImageUploadPayload } from './src/gmail-attachment-security';
+import { GMAIL_INTEGRATION_PREFERENCE_KEY, normalizeGmailIntegrationPreference } from './src/gmail-preferences';
 
 interface CreateTaskFullMessage {
     listId: string;
     taskData: CreateTaskPayload;
     emailData?: EmailData;
-    attachWithFiles?: boolean;
     timeTracked?: number;
     teamId?: string;
 }
@@ -137,6 +162,8 @@ const AUTO_START_SUPPRESSED_TASK_SESSION_KEY = 'autoStartSuppressedTaskId';
 const CLICKUP_TASK_TAB_INDEX_SESSION_KEY = 'clickUpTaskTabIndexV1';
 const MEET_PRIORITY_ENABLED_KEY = 'meetPriorityEnabled';
 const MEET_MAPPINGS_KEY = 'meetTaskMappingsV1';
+const CALENDAR_TASK_MAPPINGS_KEY = 'calendarTaskMappingsV1';
+const CALENDAR_TASK_TYPE_CONFIG_KEY = 'calendarTaskTypeConfigV1';
 const MEET_SESSION_KEY = 'meetPrioritySessionV1';
 const MEET_CONFLICT_KEY = 'meetPriorityConflictV1';
 const MEET_MAX_DURATION_MS = 4 * 60 * 60 * 1000;
@@ -150,6 +177,13 @@ const meetingLinkController = new MeetingLinkController({
 });
 const dashboardSnapshotCache = new Map<string, { expiresAt: number; summary: DashboardSummary }>();
 const dashboardSnapshotInFlight = new Map<string, Promise<DashboardSummary>>();
+const calendarAgendaCache = new CalendarAgendaMemoryCache();
+const calendarTaskCreateInFlight = new Set<string>();
+const googleCalendarRuntime = new GoogleCalendarAgendaRuntime({
+    requestToken: (interactive) => requestGoogleCalendarToken(interactive),
+    invalidateToken: (token) => invalidateGoogleCalendarToken(token),
+    readAgenda: (token) => readPrimaryCalendarAgenda(token),
+}, calendarAgendaCache);
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
@@ -936,6 +970,32 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 emailData: message.emailData || (data ? data.emailData : undefined)
             });
 
+        case 'uploadGmailImageAttachment':
+            return await uploadGmailImageAttachment(data as GmailImageUploadPayload);
+
+        case 'getGmailIntegrationPreference': {
+            const stored = await chrome.storage.local.get(GMAIL_INTEGRATION_PREFERENCE_KEY);
+            return normalizeGmailIntegrationPreference(stored[GMAIL_INTEGRATION_PREFERENCE_KEY]);
+        }
+
+        case 'setGmailIntegrationPreference': {
+            const preference = { version: 1 as const, enabled: data.enabled };
+            await chrome.storage.local.set({ [GMAIL_INTEGRATION_PREFERENCE_KEY]: preference });
+            const gmailTabs = await chrome.tabs.query({ url: 'https://mail.google.com/*' });
+            await Promise.all(gmailTabs.map(async (tab) => {
+                if (typeof tab.id !== 'number') return;
+                try {
+                    await chrome.tabs.sendMessage(tab.id, {
+                        action: 'gmailIntegrationPreferenceChanged',
+                        enabled: preference.enabled,
+                    });
+                } catch {
+                    // Gmail may still be loading or may not have the content script yet.
+                }
+            }));
+            return preference;
+        }
+
         case 'validateTask':
             // Verify if task exists and we have access
             const vTaskId = message.taskId || (data ? data.taskId : undefined);
@@ -972,6 +1032,61 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getTaskById':
             const gTaskId = message.taskId || (data ? data.taskId : undefined);
             return await getTaskById(gTaskId);
+
+        case 'getGoogleCalendarAgenda':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.getAgenda());
+
+        case 'connectGoogleCalendar':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.connect());
+
+        case 'refreshGoogleCalendarAgenda':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.refresh());
+
+        case 'disconnectGoogleCalendar':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await googleCalendarRuntime.disconnect();
+
+        case 'getCalendarTaskTypeConfig':
+            return { selection: await getCalendarTaskTypeConfig() };
+
+        case 'getClickUpCustomTaskTypes':
+            return { custom_items: await getClickUpCustomTaskTypes() };
+
+        case 'setCalendarTaskTypeConfig':
+            return { selection: await setCalendarTaskTypeConfig(data.customItemId) };
+
+        case 'linkGoogleCalendarEventTask': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            const teamId = await resolveFocusedTimerTeamId();
+            if (!teamId || !await validateFocusedTask(data.taskId, teamId)) {
+                throw new Error('CALENDAR_TASK_INVALID');
+            }
+            const mapping = await createMeetMappingFromCalendarAgenda(calendarAgendaCache, {
+                eventKey: data.eventKey,
+                taskId: data.taskId,
+                teamId,
+            });
+            if (mapping) await saveMeetMapping(mapping);
+            const task = await getTaskById(data.taskId);
+            await saveCalendarTaskMapping(data.eventKey, data.scope, { id: task.id, name: task.name });
+            return await withCalendarTaskMappings(googleCalendarRuntime.currentView());
+        }
+
+        case 'createGoogleCalendarEventTask': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await createAndMapCalendarTask(data.eventKey, data.scope, data.customItemId, data.listId, data.parentTaskId);
+        }
+
+        case 'openGoogleCalendarMeet': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            const url = canonicalMeetUrlFromCalendarAgenda(calendarAgendaCache, data.eventKey);
+            if (!url) throw new Error('CALENDAR_MEET_UNAVAILABLE');
+            await chrome.tabs.create({ url, active: true });
+            return { success: true };
+        }
 
         case 'focusedClickUpNavigation':
             if (typeof sender.tab?.id === 'number') {
@@ -1574,6 +1689,157 @@ async function saveMeetMapping(mapping: MeetTaskMappingV1): Promise<void> {
     const store = await readMeetMappings();
     store.mappings[mapping.roomKey] = mapping;
     await chrome.storage.local.set({ [MEET_MAPPINGS_KEY]: store });
+}
+
+async function readCalendarTaskMappings(): Promise<CalendarTaskMappingStoreV1> {
+    const stored = await chrome.storage.local.get(CALENDAR_TASK_MAPPINGS_KEY);
+    return sanitizeCalendarTaskMappings(stored[CALENDAR_TASK_MAPPINGS_KEY]);
+}
+
+async function withCalendarTaskMappings(view: CalendarAgendaViewV1): Promise<CalendarAgendaViewV1> {
+    const store = await readCalendarTaskMappings();
+    return {
+        ...view,
+        items: view.items.map((item) => {
+            const occurrence = store.mappings[`occurrence:${item.key}`];
+            const series = item.seriesKey ? store.mappings[`series:${item.seriesKey}`] : undefined;
+            const task = occurrence?.task || series?.task;
+            return task ? { ...item, linkedTask: { id: task.id, name: task.name } } : item;
+        }),
+    };
+}
+
+async function saveCalendarTaskMapping(eventKey: string, scope: CalendarTaskLinkScope, task: { id: string; name: string }): Promise<void> {
+    const now = Date.now();
+    let reducedKey = eventKey;
+    if (scope === 'series') {
+        const candidate = calendarAgendaCache.get(eventKey, now);
+        const seriesKey = candidate?.recurringEventId ? await createCalendarSeriesKey(candidate.recurringEventId) : null;
+        if (!seriesKey) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+        reducedKey = seriesKey;
+    }
+    const storageKey = mappingStorageKey(scope, reducedKey);
+    if (!storageKey) throw new Error('CALENDAR_MAPPING_INVALID');
+    const store = await readCalendarTaskMappings();
+    store.mappings[storageKey] = {
+        key: reducedKey,
+        scope,
+        task: { id: task.id.slice(0, 100), name: task.name.slice(0, 500) },
+        createdAt: store.mappings[storageKey]?.createdAt || now,
+        updatedAt: now,
+    };
+    await chrome.storage.local.set({ [CALENDAR_TASK_MAPPINGS_KEY]: store });
+}
+
+async function resolveCalendarTaskMappingStorageKey(eventKey: string, scope: CalendarTaskLinkScope): Promise<string> {
+    let reducedKey = eventKey;
+    if (scope === 'series') {
+        const candidate = calendarAgendaCache.get(eventKey);
+        const seriesKey = candidate?.recurringEventId ? await createCalendarSeriesKey(candidate.recurringEventId) : null;
+        if (!seriesKey) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+        reducedKey = seriesKey;
+    }
+    const storageKey = mappingStorageKey(scope, reducedKey);
+    if (!storageKey) throw new Error('CALENDAR_MAPPING_INVALID');
+    return storageKey;
+}
+
+async function createAndMapCalendarTask(
+    eventKey: string,
+    scope: CalendarTaskLinkScope,
+    customItemId: number,
+    listId: string,
+    parentTaskId?: string,
+): Promise<CalendarAgendaViewV1 & { calendarCreateStatus?: { outcome: 'created' | 'partial'; taskId: string; comment: 'added' | 'failed' | 'none' } }> {
+    const storageKey = await resolveCalendarTaskMappingStorageKey(eventKey, scope);
+    if (calendarTaskCreateInFlight.has(storageKey)) throw new Error('CALENDAR_TASK_CREATE_IN_FLIGHT');
+    const before = await readCalendarTaskMappings();
+    if (before.mappings[storageKey]) throw new Error('CALENDAR_TASK_ALREADY_LINKED');
+
+    calendarTaskCreateInFlight.add(storageKey);
+    try {
+        const result = await createTaskFromCalendarEvent(eventKey, scope, customItemId, listId, parentTaskId);
+        const task = result.task;
+        await saveCalendarTaskMapping(eventKey, scope, { id: task.id, name: task.name });
+        const view = await withCalendarTaskMappings(googleCalendarRuntime.currentView());
+        return { ...view, calendarCreateStatus: { outcome: result.commentStatus === 'failed' ? 'partial' : 'created', taskId: task.id, comment: result.commentStatus } };
+    } finally {
+        calendarTaskCreateInFlight.delete(storageKey);
+    }
+}
+
+async function getClickUpCustomTaskTypes(): Promise<ClickUpCustomTaskType[]> {
+    await ensureAPI();
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId) return [];
+    return sanitizeCustomTaskTypesResponse(await clickupAPI!.getCustomTaskTypes(teamId));
+}
+
+async function getCalendarTaskTypeConfig(): Promise<ReturnType<typeof sanitizeCalendarTaskTypeSelection>> {
+    const stored = await chrome.storage.local.get(CALENDAR_TASK_TYPE_CONFIG_KEY);
+    return sanitizeCalendarTaskTypeSelection(stored[CALENDAR_TASK_TYPE_CONFIG_KEY]);
+}
+
+async function setCalendarTaskTypeConfig(customItemId: number): Promise<NonNullable<ReturnType<typeof sanitizeCalendarTaskTypeSelection>>> {
+    const types = await getClickUpCustomTaskTypes();
+    const type = findCustomTaskType(types, customItemId);
+    if (!type) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const selection = { customItemId: type.id, name: type.name, updatedAt: Date.now() };
+    await chrome.storage.local.set({ [CALENDAR_TASK_TYPE_CONFIG_KEY]: selection });
+    return selection;
+}
+
+async function createTaskFromCalendarEvent(
+    eventKey: string,
+    scope: CalendarTaskLinkScope,
+    customItemId: number,
+    listId: string,
+    parentTaskId?: string,
+): Promise<{ task: ClickUpTask; commentStatus: 'added' | 'failed' | 'none' }> {
+    await ensureAPI();
+    const candidate = calendarAgendaCache.get(eventKey);
+    if (!candidate) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
+    if (scope === 'series' && !candidate.recurringEventId) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+    const selection = await getCalendarTaskTypeConfig();
+    if (!selection || selection.customItemId !== customItemId) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const types = await getClickUpCustomTaskTypes();
+    const type = findCustomTaskType(types, customItemId);
+    if (!type || type.name !== selection.name) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const destinationStore = await chrome.storage.local.get([
+        STORAGE_KEYS.CACHED_TEAMS,
+        STORAGE_KEYS.CACHED_HIERARCHY,
+        STORAGE_KEYS.PREFERRED_TEAM,
+    ]);
+    const teamId = typeof destinationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+        ? destinationStore[STORAGE_KEYS.PREFERRED_TEAM]
+        : destinationStore[STORAGE_KEYS.CACHED_TEAMS]?.teams?.[0]?.id;
+    const teamCache = getTeamHierarchyCache(destinationStore[STORAGE_KEYS.CACHED_HIERARCHY], teamId);
+    const destination = resolveAuthorizedDestination({ listId }, flattenHierarchySpaces(teamCache?.data?.spaces));
+    if (!destination?.listId) throw new Error('CALENDAR_DESTINATION_UNAVAILABLE');
+    if (parentTaskId && (!teamId || !await validateFocusedTask(parentTaskId, teamId))) throw new Error('CALENDAR_PARENT_TASK_INVALID');
+    const liveList = await clickupAPI!.getList(destination.listId);
+    if (String(liveList?.id || '') !== destination.listId || liveList.archived === true) {
+        throw new Error('CALENDAR_DESTINATION_UNAVAILABLE');
+    }
+    const dueDate = dateToClickUpDueDate(calendarEventDay(candidate.start));
+    const task = await clickupAPI!.createTask(destination.listId, {
+        name: candidate.title,
+        ...(dueDate !== null ? { start_date: dueDate, start_date_time: false, due_date: dueDate, due_date_time: false } : {}),
+        ...(parentTaskId ? { parent: parentTaskId } : {}),
+        custom_item_id: customItemId,
+    });
+    const meetUrl = canonicalMeetUrlFromCalendarAgenda(calendarAgendaCache, eventKey);
+    if (!meetUrl) return { task, commentStatus: 'none' };
+    try {
+        await clickupAPI!.addComment(task.id, meetUrl);
+        return { task, commentStatus: 'added' };
+    } catch {
+        return { task, commentStatus: 'failed' };
+    }
+}
+
+function calendarEventDay(value: string): string {
+    return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : value;
 }
 
 async function deleteMeetMapping(roomKey: string): Promise<{ success: boolean }> {
@@ -3061,6 +3327,14 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     }
 
     return task;
+}
+
+async function uploadGmailImageAttachment(data: GmailImageUploadPayload): Promise<{ success: true }> {
+    const bytes = decodeAndValidateGmailImage(data);
+    if (!bytes) throw new Error('INVALID_GMAIL_IMAGE_ATTACHMENT');
+    await ensureAPI();
+    await clickupAPI!.uploadBinaryAttachment(data.taskId, bytes, data.filename, data.mimeType);
+    return { success: true };
 }
 
 async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask> {

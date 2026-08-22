@@ -32,15 +32,15 @@ interface IGmailAdapter {
     SELECTORS: GmailSelectors;
     getEmailBodyElement(): Element | null;
     getAllEmailBodies(): Element[];
-    getEmailBodyHtml(): string;
-    getSenderEmail(): string;
+    getEmailBodyHtml(bodyElement?: Element | null): string;
+    getSenderEmail(scope?: Element | null): string;
     getSubject(): string;
     getThreadId(): string | null;
     getMessageContainer(bodyElement: Element): Element | null;
     getInboxRows(): NodeListOf<Element>;
     getRowLegacyThreadId(row: Element): string | null;
     getSubjectContainer(row: Element): SubjectContainer;
-    getAttachmentUrls(): { url: string; filename: string; mimeType: string }[];
+    getAttachmentUrls(scope?: Element | null): { url: string; filename: string; mimeType: string }[];
     getUserEmail(): string;
     isViewingEmail(): boolean;
     isViewingInbox(): boolean;
@@ -112,16 +112,18 @@ const GmailAdapter: IGmailAdapter = {
     /**
      * Get email body HTML content
      */
-    getEmailBodyHtml(): string {
-        const el = this.getEmailBodyElement();
+    getEmailBodyHtml(bodyElement?: Element | null): string {
+        const el = bodyElement || this.getEmailBodyElement();
         return el ? el.innerHTML : '';
     },
 
     /**
      * Get sender email address
      */
-    getSenderEmail(): string {
-        const el = document.querySelector(this.SELECTORS.senderWithEmail);
+    getSenderEmail(scope?: Element | null): string {
+        const el = scope
+            ? scope.querySelector(this.SELECTORS.senderWithEmail)
+            : document.querySelector(this.SELECTORS.senderWithEmail);
         return el ? el.getAttribute('email') || '' : '';
     },
 
@@ -208,18 +210,21 @@ const GmailAdapter: IGmailAdapter = {
      * Get attachments info from email
      * Gmail download_url format: "mimeType:filename:actualUrl"
      */
-    getAttachmentUrls(): { url: string; filename: string; mimeType: string }[] {
+    getAttachmentUrls(scope?: Element | null): { url: string; filename: string; mimeType: string }[] {
         const attachments: { url: string; filename: string; mimeType: string }[] = [];
-        const elements = document.querySelectorAll(this.SELECTORS.attachments);
+        const elements = (scope || document).querySelectorAll('[download_url]');
         elements.forEach(el => {
             const downloadUrl = el.getAttribute('download_url');
             if (downloadUrl) {
                 // Parse Gmail's download_url format: "mimeType:filename:actualUrl"
-                const parts = downloadUrl.split(':');
-                if (parts.length >= 3) {
-                    const mimeType = parts[0];
-                    const filename = parts[1];
-                    const url = parts.slice(2).join(':'); // URL may contain ':'
+                const firstSeparator = downloadUrl.indexOf(':');
+                const secondSeparator = downloadUrl.indexOf(':', firstSeparator + 1);
+                if (firstSeparator > 0 && secondSeparator > firstSeparator + 1) {
+                    const mimeType = downloadUrl.slice(0, firstSeparator).trim().toLowerCase();
+                    const filename = downloadUrl.slice(firstSeparator + 1, secondSeparator).trim();
+                    const rawUrl = downloadUrl.slice(secondSeparator + 1);
+                    let url = rawUrl;
+                    try { url = new URL(rawUrl, window.location.origin).href; } catch { /* rejected by the caller */ }
                     attachments.push({ url, filename, mimeType });
                 }
             }

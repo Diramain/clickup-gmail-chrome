@@ -1,6 +1,7 @@
 import type { ExtensionMessage } from './types/clickup';
 import { isConfirmedThreadId } from './link-hardening';
 import { isValidBulkTaskChange } from './bulk-task-update';
+import { isValidGmailImageUploadPayload } from './gmail-attachment-security';
 
 export interface MessageValidationResult {
     ok: boolean;
@@ -10,7 +11,8 @@ export interface MessageValidationResult {
 const GMAIL_ACTIONS = new Set([
     'openTaskModal', 'getStatus', 'getHierarchy', 'getHierarchyCache', 'getPreferredTeam', 'getTeams', 'getSpaces',
     'getFolders', 'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'searchTasks', 'getTaskById',
-    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig'
+    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'uploadGmailImageAttachment', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig',
+    'getGmailIntegrationPreference'
 ]);
 const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', 'createTimeEntry', 'addTimeEntry', 'updateTimerBadge', 'focusedClickUpNavigation']);
 const MEET_ACTIONS = new Set([
@@ -29,7 +31,10 @@ const EXTENSION_ACTIONS = new Set([
     'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation',
     // CGC-UX-V2-D2: sólo para la app en pestaña. Fuera de GMAIL_ACTIONS y
     // CLICKUP_ACTIONS a propósito: ningún content script debe escribir destino.
-    'getDestinationOptions', 'setDefaultDestination', 'getDashboardSummary', 'refreshDashboardSummary', 'applyBulkTaskChange'
+    'getDestinationOptions', 'setDefaultDestination', 'getDashboardSummary', 'refreshDashboardSummary', 'applyBulkTaskChange',
+    'getGoogleCalendarAgenda', 'connectGoogleCalendar', 'refreshGoogleCalendarAgenda', 'disconnectGoogleCalendar',
+    'linkGoogleCalendarEventTask', 'createGoogleCalendarEventTask', 'getCalendarTaskTypeConfig', 'getClickUpCustomTaskTypes',
+    'setCalendarTaskTypeConfig', 'openGoogleCalendarMeet', 'getGmailIntegrationPreference', 'setGmailIntegrationPreference'
 ]);
 
 const MAX_SUBJECT = 500;
@@ -49,12 +54,24 @@ export function validateExtensionMessage(message: ExtensionMessage, sender: chro
 }
 
 export function isAllowedOriginForAction(action: string, origin: string): boolean {
-    if (origin.startsWith('chrome-extension://')) return EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action);
+    if (origin.startsWith('chrome-extension://')) {
+        return action !== 'uploadGmailImageAttachment'
+            && (EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action));
+    }
     if (DIAGNOSTIC_ACTIONS.has(action)) return false;
-    if (origin.startsWith('https://mail.google.com/')) return GMAIL_ACTIONS.has(action);
-    if (origin.startsWith('https://app.clickup.com/')) return CLICKUP_ACTIONS.has(action);
-    if (origin.startsWith('https://meet.google.com/')) return MEET_ACTIONS.has(action);
+    if (hasExactHttpsHost(origin, 'mail.google.com')) return GMAIL_ACTIONS.has(action);
+    if (hasExactHttpsHost(origin, 'app.clickup.com')) return CLICKUP_ACTIONS.has(action);
+    if (hasExactHttpsHost(origin, 'meet.google.com')) return MEET_ACTIONS.has(action);
     return false;
+}
+
+function hasExactHttpsHost(value: string, hostname: string): boolean {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && url.hostname === hostname && url.port === '';
+    } catch {
+        return false;
+    }
 }
 
 export function hasValidSchema(message: ExtensionMessage): boolean {
@@ -89,6 +106,14 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return isConfirmedThreadId(data.threadId || message.threadId);
         case 'attachToTask':
             return isShortString(message.taskId || data.taskId, 100) && isValidEmailData(message.emailData || data.emailData, true);
+        case 'uploadGmailImageAttachment':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['taskId', 'filename', 'mimeType', 'byteLength', 'base64'])
+                && isValidGmailImageUploadPayload(data);
+        case 'setGmailIntegrationPreference':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['enabled'])
+                && typeof data.enabled === 'boolean';
         case 'createTaskFull':
             return isValidCreateTaskFull(message);
         case 'createTaskSimple':
@@ -118,10 +143,39 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
         case 'getMeetDetectionEnabled':
         case 'getMeetTaskPromptState':
         case 'getEmailTaskMappings':
-        case 'getDefaultListConfig':
+            case 'getDefaultListConfig':
+            case 'getGmailIntegrationPreference':
         case 'getDashboardSummary':
         case 'refreshDashboardSummary':
+        case 'getGoogleCalendarAgenda':
+        case 'connectGoogleCalendar':
+        case 'refreshGoogleCalendarAgenda':
+        case 'disconnectGoogleCalendar':
+        case 'getCalendarTaskTypeConfig':
+        case 'getClickUpCustomTaskTypes':
             return hasOnlyRootKeys(message, ['action']);
+        case 'linkGoogleCalendarEventTask':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.eventKey)
+                && isShortString(data.taskId, 100)
+                && isCalendarLinkScope(data.scope)
+                && Object.keys(data).every((key) => ['eventKey', 'taskId', 'scope'].includes(key));
+        case 'createGoogleCalendarEventTask':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.eventKey)
+                && isCalendarLinkScope(data.scope)
+                && Number.isInteger(data.customItemId) && data.customItemId > 0
+                && isShortString(data.listId, 100)
+                && (data.parentTaskId === undefined || isShortString(data.parentTaskId, 100))
+                && Object.keys(data).every((key) => ['eventKey', 'scope', 'customItemId', 'listId', 'parentTaskId'].includes(key));
+        case 'setCalendarTaskTypeConfig':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && Number.isInteger(data.customItemId) && data.customItemId > 0
+                && Object.keys(data).every((key) => key === 'customItemId');
+        case 'openGoogleCalendarMeet':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isHexRoomKey(data.eventKey)
+                && Object.keys(data).every((key) => key === 'eventKey');
         case 'suggestMeetTasks':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && isHexRoomKey(data.roomKey)
@@ -206,6 +260,10 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
 
 function isHexRoomKey(value: unknown): value is string {
     return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isCalendarLinkScope(value: unknown): value is 'occurrence' | 'series' {
+    return value === 'occurrence' || value === 'series';
 }
 
 function hasOnlyRootKeys(message: ExtensionMessage, allowed: string[]): boolean {

@@ -772,6 +772,14 @@ export class ClickUpAPIWrapper {
         return this.requestFormData(`/task/${taskId}/attachment`, formData);
     }
 
+    async uploadBinaryAttachment(taskId: string, bytes: Uint8Array, filename: string, mimeType: string): Promise<any> {
+        const formData = new FormData();
+        const blobBytes = new Uint8Array(bytes.byteLength);
+        blobBytes.set(bytes);
+        formData.append('attachment', new Blob([blobBytes], { type: mimeType }), filename);
+        return this.requestFormData(`/task/${taskId}/attachment`, formData);
+    }
+
     // ========================================================================
     // Time Tracking
     // ========================================================================

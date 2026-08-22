@@ -90,12 +90,16 @@ describe('B1 privacy hardening', () => {
     test('privacy policy matches v1.2.3 local data, work-session tracking, Meet minimization, export, and retention claims', () => {
         const policy = source('PRIVACY_POLICY.md');
 
-        expect(policy).toContain('**Last Updated:** 2026-08-13');
+        expect(policy).toContain('**Last Updated:** 2026-08-22');
         expect(policy).toMatch(/reads Gmail data only when you initiate a create or attach action/i);
         expect(policy).toMatch(/subject[\s\S]*sender[\s\S]*Gmail thread ID[\s\S]*Gmail URL/i);
         expect(policy).toMatch(/sanitized HTML representation of the email as a ClickUp task attachment/i);
         expect(policy).toMatch(/checkbox is enabled by default/i);
-        expect(policy).toMatch(/Original Gmail file attachments are disabled/i);
+        expect(policy).toMatch(/explicitly select image attachments/i);
+        expect(policy).toMatch(/PNG, JPEG, GIF, and WebP[\s\S]*SVG is excluded/i);
+        expect(policy).toMatch(/10 MiB per file and 20 MiB per action/i);
+        expect(policy).toMatch(/background service worker does not fetch Gmail attachments/i);
+        expect(policy).toMatch(/Attachment URLs and bytes are not persisted or logged/i);
         expect(policy).toMatch(/Gmail, Chatwoot, Inbox, or another non-task page does not by itself stop that timer/i);
         expect(policy).toMatch(/closing the last direct or task-specific ClickUp Inbox tab for the running task stops that timer/i);
         expect(policy).toMatch(/bounded in-memory browser-session index stores only `tabId → taskId` pairs/i);
@@ -111,7 +115,7 @@ describe('B1 privacy hardening', () => {
         expect(policy).toMatch(/does not access or capture audio, microphone, video, camera, chat, captions/i);
         expect(policy).toMatch(/stable room hash is pseudonymous metadata, not anonymous data/i);
         expect(policy).toMatch(/excludes Meet room keys and Meet task mappings/i);
-        expect(policy).toMatch(/denied direct access to `chrome\.storage\.local`/i);
+        expect(policy).toMatch(/Gmail content script reads only the versioned Gmail-controls preference directly/i);
         expect(policy).toMatch(/not allowed to run in incognito mode/i);
         expect(policy).toMatch(/clear local data[\s\S]*does not delete or modify data already sent to ClickUp/i);
         expect(policy).toMatch(/Safe Diagnostics is off by default/i);

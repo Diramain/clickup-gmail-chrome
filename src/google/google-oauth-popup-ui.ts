@@ -1,22 +1,18 @@
-import {
-    requestGoogleCalendarToken,
-    type GoogleCalendarTokenResult,
-    type GoogleIdentityPort,
-} from './google-identity.service';
+import type { GoogleIdentityPort } from './google-identity.service';
+import { GOOGLE_CALENDAR_RUNTIME_ENABLED } from '../calendar/calendar-capability';
 
-export const GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED = false;
-export const GOOGLE_OAUTH_DISABLED_COPY = 'Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.';
+export const GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED = GOOGLE_CALENDAR_RUNTIME_ENABLED;
+export const GOOGLE_OAUTH_DISABLED_COPY = 'Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.';
 
 export interface GoogleOAuthUiState {
     visible: true;
     canConnect: false;
     status: 'disabled-preview';
-    runtimeCapabilityEnabled: false;
+    runtimeCapabilityEnabled: boolean;
 }
 
 export type GoogleOAuthConnectionResult =
-    | GoogleCalendarTokenResult
-    | { ok: false; code: 'FEATURE_DISABLED'; runtimeCapabilityEnabled: false };
+    { ok: false; code: 'FEATURE_DISABLED'; runtimeCapabilityEnabled: boolean };
 
 export interface GoogleOAuthButtonLike {
     disabled: boolean;
@@ -43,13 +39,15 @@ export function getGoogleOAuthUiState(): GoogleOAuthUiState {
 }
 
 export async function beginGoogleCalendarConnection(
-    identity?: GoogleIdentityPort,
+    _identity?: GoogleIdentityPort,
 ): Promise<GoogleOAuthConnectionResult> {
-    if (!GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED) {
-        return { ok: false, code: 'FEATURE_DISABLED', runtimeCapabilityEnabled: false };
-    }
-
-    return requestGoogleCalendarToken(true, identity);
+    // Gate A: legacy popup surfaces never own Google Identity. Gate B must
+    // materialize OAuth through the background authority, not flip this path.
+    return {
+        ok: false,
+        code: 'FEATURE_DISABLED',
+        runtimeCapabilityEnabled: GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED,
+    };
 }
 
 export function initGoogleOAuthConnectionPreview(

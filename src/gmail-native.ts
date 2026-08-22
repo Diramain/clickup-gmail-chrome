@@ -19,6 +19,7 @@ import {
     type LinkValidationResult,
 } from './link-hardening';
 import { safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
+import { isAllowedGmailAttachmentUrl, isAllowedGmailImageMimeType, sanitizeGmailAttachmentFilename } from './gmail-attachment-security';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
@@ -49,7 +50,17 @@ Logger.info('Gmail content script loading...');
 
 // Listen for messages from popup immediately
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'gmailIntegrationPreferenceChanged' && typeof request.enabled === 'boolean') {
+        gmailIntegrationEnabled = request.enabled;
+        applyGmailIntegrationState();
+        sendResponse({ success: true });
+        return;
+    }
     if (request.action === 'openTaskModal') {
+        if (!gmailIntegrationEnabled) {
+            sendResponse({ success: false });
+            return;
+        }
         Logger.info(' Received openTaskModal command from popup');
         const threadId = getThreadId();
         if (threadId) {
@@ -64,6 +75,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 let linkedTasks: Record<string, TaskMapping[]> = {};
 const validationInFlight = new Map<string, Promise<void>>();
+const messageBodyByBar = new WeakMap<HTMLElement, HTMLElement>();
+let gmailIntegrationEnabled = true;
+let gmailObserver: MutationObserver | null = null;
 
 // Debounce utility
 let scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,9 +95,15 @@ function debouncedScan(): void {
 // Initialization
 // ============================================================================
 
-function initialize(): void {
+async function initialize(): Promise<void> {
     Logger.info('Initializing...');
-    startObserver();
+    try {
+        const preference = await chrome.runtime.sendMessage({ action: 'getGmailIntegrationPreference' }) as { enabled?: boolean };
+        gmailIntegrationEnabled = preference?.enabled !== false;
+    } catch {
+        gmailIntegrationEnabled = true;
+    }
+    applyGmailIntegrationState();
     loadLinkedTasks();
 
     window.addEventListener('cu-task-created', ((e: TaskCreatedEvent) => {
@@ -92,6 +112,19 @@ function initialize(): void {
     }) as EventListener);
 
 
+}
+
+function applyGmailIntegrationState(): void {
+    if (!gmailIntegrationEnabled) {
+        gmailObserver?.disconnect();
+        gmailObserver = null;
+        if (scanDebounceTimer) clearTimeout(scanDebounceTimer);
+        scanDebounceTimer = null;
+        document.querySelectorAll('.cu-email-bar, .cu-inbox-task-badge').forEach(element => element.remove());
+        document.querySelectorAll('.cu-modal-container').forEach(element => element.remove());
+        return;
+    }
+    startObserver();
 }
 
 // ============================================================================
@@ -120,12 +153,13 @@ async function loadLinkedTasks(): Promise<void> {
 // ============================================================================
 
 function startObserver(): void {
+    if (gmailObserver || !gmailIntegrationEnabled) return;
     Logger.debug('Starting MutationObserver...');
-    const observer = new MutationObserver(() => {
+    gmailObserver = new MutationObserver(() => {
         requestAnimationFrame(debouncedScan);
     });
 
-    observer.observe(document.body, {
+    gmailObserver.observe(document.body, {
         childList: true,
         subtree: true,
         attributes: true,
@@ -147,6 +181,7 @@ function startObserver(): void {
 // ============================================================================
 
 function scanEmails(): void {
+    if (!gmailIntegrationEnabled) return;
     const emailBodies = GmailAdapter.getAllEmailBodies();
     if (emailBodies.length > 0) {
         Logger.debug(`ScanEmails: found ${emailBodies.length} email bodies`);
@@ -159,7 +194,14 @@ function scanEmails(): void {
             if (!mountHost) return;
 
             const threadId = getThreadId();
-            ensureThreadBar(mountHost as HTMLElement, body as HTMLElement, threadId, createClickUpBar, reconcileClickUpBar);
+            const bar = ensureThreadBar(
+                mountHost as HTMLElement,
+                body as HTMLElement,
+                threadId,
+                (id) => createClickUpBar(id, body as HTMLElement),
+                reconcileClickUpBar,
+            );
+            messageBodyByBar.set(bar, body as HTMLElement);
         } catch (error) {
             Logger.warn('EMAIL_BODY_SCAN_FAILED');
         }
@@ -167,6 +209,7 @@ function scanEmails(): void {
 }
 
 function scanInbox(): void {
+    if (!gmailIntegrationEnabled) return;
     const inboxRows = document.querySelectorAll('tr.zA');
 
     inboxRows.forEach((row) => {
@@ -251,12 +294,12 @@ function getEmailSubject(): string {
     return GmailAdapter.getSubject();
 }
 
-function getSenderEmail(): string {
-    return GmailAdapter.getSenderEmail();
+function getSenderEmail(scope?: Element | null): string {
+    return GmailAdapter.getSenderEmail(scope);
 }
 
-function getEmailBody(): string {
-    return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml());
+function getEmailBody(body?: Element | null): string {
+    return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml(body));
 }
 
 // ============================================================================
@@ -270,7 +313,7 @@ function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: s
     if (isConfirmedThreadId(threadId)) verifyThreadTasks(threadId, bar);
 }
 
-function createClickUpBar(threadId: string | null): HTMLElement {
+function createClickUpBar(threadId: string | null, messageBody?: HTMLElement): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'cu-email-bar';
     if (isConfirmedThreadId(threadId)) {
@@ -311,14 +354,14 @@ function createClickUpBar(threadId: string | null): HTMLElement {
         e.preventDefault();
         const currentThreadId = bar.dataset.threadId || null;
         if (!isConfirmedThreadId(currentThreadId)) return;
-        openTaskModal(currentThreadId, 'create');
+        openTaskModal(currentThreadId, 'create', messageBodyByBar.get(bar) || messageBody);
     });
     const attachBtn = bar.querySelector('.cu-attach-btn') as HTMLButtonElement | null;
     attachBtn?.addEventListener('click', (event) => {
         event.preventDefault();
         const currentThreadId = bar.dataset.threadId || null;
         if (!isConfirmedThreadId(currentThreadId)) return;
-        openTaskModal(currentThreadId, 'attach');
+        openTaskModal(currentThreadId, 'attach', messageBodyByBar.get(bar) || messageBody);
     });
 
     return bar;
@@ -398,14 +441,20 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
 // Modal Functions
 // ============================================================================
 
-function openTaskModal(threadId: string, initialTab: 'create' | 'attach' = 'create'): void {
+function openTaskModal(threadId: string, initialTab: 'create' | 'attach' = 'create', messageBody?: HTMLElement): void {
+    const body = messageBody?.isConnected ? messageBody : GmailAdapter.getEmailBodyElement();
+    const messageContainer = body ? GmailAdapter.getMessageContainer(body) : null;
+    const attachments = GmailAdapter.getAttachmentUrls(messageContainer)
+        .filter(attachment => isAllowedGmailImageMimeType(attachment.mimeType)
+            && isAllowedGmailAttachmentUrl(attachment.url)
+            && sanitizeGmailAttachmentFilename(attachment.filename));
     const emailData: EmailData = {
         threadId: threadId,
         subject: getEmailSubject(),
-        from: getSenderEmail(),
-        html: getEmailBody(),
+        from: getSenderEmail(messageContainer),
+        html: getEmailBody(body),
         htmlSanitized: true,
-        attachments: GmailAdapter.getAttachmentUrls()
+        attachments,
     };
 
     if (typeof TaskModal !== 'undefined') {
@@ -506,8 +555,10 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => {
-    scanEmails();
-    scanInbox();
+    if (gmailIntegrationEnabled) {
+            scanEmails();
+            scanInbox();
+    }
 }, 5000);
 
 // ============================================================================
@@ -515,7 +566,7 @@ setInterval(() => {
 // ============================================================================
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
+    document.addEventListener('DOMContentLoaded', () => void initialize());
 } else {
-    initialize();
+    void initialize();
 }

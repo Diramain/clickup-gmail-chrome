@@ -1,6 +1,6 @@
 # Privacy Policy for ClickUp Gmail Tracker
 
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-22
 
 ## 1. Overview
 
@@ -20,7 +20,7 @@ Depending on the action you choose, the extension may use or transfer to ClickUp
 - Gmail URL for the thread;
 - relevant email content used to create task descriptions, comments, or attachments.
 
-When the sanitized HTML attachment option is selected, the extension may upload a sanitized HTML representation of the email as a ClickUp task attachment. In v1.2.0 this checkbox is enabled by default. Original Gmail file attachments are disabled in this version and are not uploaded by the extension.
+When the sanitized HTML attachment option is selected, the extension may upload a sanitized HTML representation of the email as a ClickUp task attachment. This checkbox is enabled by default. The modal also lets you explicitly select image attachments from the clicked Gmail message. Only PNG, JPEG, GIF, and WebP are accepted; SVG is excluded. Each selected image is fetched by the Gmail content script with the active Gmail session, validated before and after redirects as an HTTPS `mail.google.com` URL, limited to 10 MiB per file and 20 MiB per action, and sent one file at a time to ClickUp. The background service worker does not fetch Gmail attachments. Attachment URLs and bytes are not persisted or logged by the extension.
 
 When automatic ClickUp time tracking is enabled, the extension evaluates ClickUp tab URLs locally to identify a direct task or a task notification detail. Once a task timer is running, navigating to Gmail, Chatwoot, Inbox, or another non-task page does not by itself stop that timer. Opening another recognized task may switch the timer according to the enabled automatic controls. With Auto-Stop enabled, closing the last direct or task-specific ClickUp Inbox tab for the running task stops that timer; another tab for the same task in any Chrome window preserves it.
 
@@ -40,7 +40,15 @@ When a confirmed Meet session is assigned to a task, the extension may stop the 
 
 The extension is not allowed to run in incognito mode.
 
-## 4. ClickUp Data and OAuth
+## 4. Google Calendar Data
+
+Google Calendar is optional and connects only after you press the explicit connect control and approve Google's consent screen. The extension requests only `calendar.events.owned.readonly` and reads at most 20 events from the primary calendar within the next seven days.
+
+The extension reduces each response to the event title, start/end time, confirmed/tentative state, and whether a canonical Google Meet link exists. It does not retain or expose invitees, descriptions, locations, organizer data, attachments, full Meet URLs, or Calendar event IDs. Calendar event details remain in bounded memory for up to one minute and are cleared on disconnect, extension reload, or browser restart. Google OAuth tokens remain managed by `chrome.identity` and are not written to extension storage or diagnostics.
+
+Calendar-to-ClickUp task linking is an explicit user action. It persists only the existing pseudonymous Meet room key and ClickUp mapping described above. Disconnecting removes the known cached Google token and clears the in-memory agenda; you can also revoke access in your Google account.
+
+## 5. ClickUp Data and OAuth
 
 The extension sends requested task, comment, attachment, time-entry, and metadata operations directly to ClickUp through ClickUp APIs. Data sent to ClickUp is controlled by ClickUp after transfer and is subject to ClickUp's own policies and your workspace settings.
 
@@ -48,13 +56,13 @@ The OAuth access token and OAuth configuration are stored locally in the browser
 
 The extension does not rely on an undocumented refresh-token grant. A `401` from a specific API operation does not automatically disconnect you: safe reads may try the alternate raw/Bearer header once, and the extension confirms the current token against ClickUp's user endpoint. Only a confirmed rejection of the token that is still current removes that token and cached identity data, keeps the encrypted OAuth app configuration, pauses automatic tracking, and asks you to reconnect explicitly.
 
-## 5. Local Storage
+## 6. Local Storage
 
 The extension may store locally:
 
 - the encrypted best-effort OAuth access token and OAuth configuration;
 - Gmail-thread-to-ClickUp-task mappings and task metadata;
-- user settings;
+- user settings, including the versioned enable/disable preference for native Gmail controls;
 - hierarchy/team/user caches used to reduce repeated API calls;
 - sync status metadata such as last local sync time/count.
 - the Meet Priority opt-in setting and pseudonymous room-to-task mappings described above.
@@ -65,11 +73,11 @@ The email body is not retained as a local mapping. It may be processed temporari
 
 Mappings persist until you delete them, clear local data, or uninstall the extension. Caches may expire, be replaced, or be cleared by the user. The extension does not claim automatic time-based purging of mappings.
 
-Host content scripts for Gmail, ClickUp, and Meet are denied direct access to `chrome.storage.local`. Approved reads go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
+ClickUp and Meet host content scripts are denied direct access to `chrome.storage.local`. The Gmail content script reads only the versioned Gmail-controls preference directly so it can remove or restore injected controls immediately when that preference changes. Other approved reads and all privileged operations go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
 
 Safe Diagnostics is off by default. Its state and bounded event buffer use `chrome.storage.session` with access restricted to trusted extension contexts. Chrome keeps that area in memory and clears it when the extension is disabled, reloaded, or updated, and when the browser restarts. You can also disable capture, export the allowlisted JSON, or clear the buffer from the popup at any time.
 
-## 6. Export and Clear Controls
+## 7. Export and Clear Controls
 
 The safe export feature is intended to include Gmail mappings, task metadata, and selected non-sensitive settings. It does not include OAuth tokens, OAuth client configuration, or email HTML. It also excludes Meet room keys and Meet task mappings.
 
@@ -77,13 +85,13 @@ Safe Diagnostics has a separate export control. That JSON contains only its vers
 
 The clear local data action removes local links and non-auth caches from the extension's browser storage. It does not delete or modify data already sent to ClickUp. To remove tasks, comments, attachments, or other records in ClickUp, manage them in ClickUp.
 
-## 7. No Extension Servers or Analytics
+## 8. No Extension Servers or Analytics
 
 The extension does not send your data to servers operated by the extension author. It does not include extension-operated analytics, tracking pixels, or telemetry services.
 
-Network communication is limited to browser/Gmail/ClickUp behavior needed for the actions you initiate and the extension permissions you grant. Meet detection and room hashing occur locally in the browser; time-entry changes are sent directly to ClickUp.
+Network communication is limited to browser, Gmail, ClickUp, and the read-only Google Calendar behavior needed for the actions you initiate and the extension permissions you grant. Meet detection and room hashing occur locally in the browser; time-entry changes are sent directly to ClickUp.
 
-## 8. Your Controls
+## 9. Your Controls
 
 You can control or remove data by using:
 
@@ -92,9 +100,10 @@ You can control or remove data by using:
 - the Meet Priority opt-in toggle and individual mapping enable/delete controls;
 - the Safe Diagnostics opt-in toggle, separate JSON export, and clear-log control;
 - ClickUp OAuth revocation in your ClickUp account/workspace settings;
+- Google Calendar disconnect in the app and OAuth revocation in your Google account;
 - browser extension uninstall/removal;
 - deletion or modification of tasks, comments, attachments, and other records directly in ClickUp.
 
-## 9. Contact
+## 10. Contact
 
 For questions, contact the author via: https://leandroiramain.com.ar

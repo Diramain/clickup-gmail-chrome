@@ -9,6 +9,15 @@ import { Logger } from './logger';
 import { escapeHTML, isSafeEditorLink, safeAvatarUrl, safeClickUpUrl, safeColor, sanitizeGmailHtml } from './utils/sanitize.utils';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from './hierarchy-utils';
 import { extractTaskIdCandidate, rankTaskSearchResults } from './task-search';
+import {
+    GMAIL_ATTACHMENT_MAX_FILE_BYTES,
+    GMAIL_ATTACHMENT_MAX_TOTAL_BYTES,
+    isAllowedGmailAttachmentUrl,
+    isAllowedGmailImageMimeType,
+    sanitizeGmailAttachmentFilename,
+    type GmailAttachmentMetadata,
+    type GmailImageMimeType,
+} from './gmail-attachment-security';
 
 // ============================================================================
 // Types
@@ -19,6 +28,7 @@ interface EmailData {
     subject: string;
     from: string;
     html: string;
+    htmlSanitized?: true;
     attachments?: { url: string; filename: string; mimeType: string }[];
 }
 
@@ -144,10 +154,12 @@ export class TaskModal {
     private searchTimeout: ReturnType<typeof setTimeout> | null = null;
     private isSearching: boolean = false;
     private taskSearchSequence: number = 0;
+    private previouslyFocused: HTMLElement | null = null;
 
     constructor() { }
 
     async show(emailData: EmailData, initialTab: 'create' | 'attach' = 'create'): Promise<void> {
+        this.previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         this.emailData = emailData;
         this.createModal();
         await this.loadFullHierarchy();
@@ -166,22 +178,22 @@ export class TaskModal {
         this.modal = document.createElement('div');
         this.modal.className = 'cu-modal-container';
         this.modal.innerHTML = `
-      <div class="cu-modal-window" tabindex="0" role="dialog" aria-modal="true" aria-labelledby="cu-modal-title">
+      <div class="cu-modal-window" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="cu-modal-title">
         <div class="cu-modal-header" id="cu-modal-drag-handle">
-          <h2 id="cu-modal-title">Crear tarea en ClickUp</h2>
-          <button class="cu-modal-close" title="Cerrar (ESC)" aria-label="Cerrar formulario">x</button>
+          <div><h2 id="cu-modal-title">Crear o vincular en ClickUp</h2></div>
+          <button class="cu-modal-close" type="button" title="Cerrar (Esc)" aria-label="Cerrar formulario">×</button>
         </div>
         
-        <div class="cu-modal-tabs">
-          <button class="cu-tab cu-tab-active" data-tab="create">Crear tarea</button>
-          <button class="cu-tab" data-tab="attach">Adjuntar a existente</button>
+        <div class="cu-modal-tabs" role="tablist" aria-label="Acción de ClickUp">
+          <button id="cu-tab-create" class="cu-tab cu-tab-active" type="button" role="tab" aria-selected="true" aria-controls="cu-panel-create" data-tab="create">Crear tarea</button>
+          <button id="cu-tab-attach" class="cu-tab" type="button" role="tab" aria-selected="false" aria-controls="cu-panel-attach" data-tab="attach">Vincular existente</button>
         </div>
         
         <div class="cu-modal-body">
           <!-- Create Task Tab -->
-          <div class="cu-tab-content cu-tab-create active">
+          <div id="cu-panel-create" class="cu-tab-content cu-tab-create active" role="tabpanel" aria-labelledby="cu-tab-create">
             
-            <div class="cu-form-row">
+            <div class="cu-form-row cu-span-full">
               <label for="cu-location-input">Ubicación</label>
               <div class="cu-location-search">
                 <input type="text" id="cu-location-input" class="cu-input" 
@@ -234,8 +246,8 @@ export class TaskModal {
                   <div class="cu-assignee-dropdown hidden"></div>
                 </div>
               </div>
+              <div class="cu-selected-assignees"></div>
             </div>
-            <div class="cu-selected-assignees"></div>
             
             <div class="cu-form-row">
               <label for="cu-task-name">Nombre de la tarea</label>
@@ -243,7 +255,7 @@ export class TaskModal {
                      placeholder="Nombre de la tarea…">
             </div>
             
-            <div class="cu-form-row">
+            <div class="cu-form-row cu-span-full">
               <label>Descripción</label>
               <div class="cu-editor-container">
                 <div class="cu-editor-tabs">
@@ -251,14 +263,14 @@ export class TaskModal {
                   <button type="button" class="cu-editor-tab" data-view="source">Markdown</button>
                 </div>
                 <div class="cu-editor-toolbar">
-                  <button type="button" data-cmd="bold" title="Negrita (Ctrl+B)"><b>B</b></button>
-                  <button type="button" data-cmd="italic" title="Cursiva (Ctrl+I)"><i>I</i></button>
-                  <button type="button" data-cmd="strikeThrough" title="Tachado (Ctrl+S)"><s>S</s></button>
+                  <button type="button" data-cmd="bold" title="Negrita (Ctrl+B)" aria-label="Negrita"><b>B</b></button>
+                  <button type="button" data-cmd="italic" title="Cursiva (Ctrl+I)" aria-label="Cursiva"><i>I</i></button>
+                  <button type="button" data-cmd="strikeThrough" title="Tachado (Ctrl+S)" aria-label="Tachado"><s>S</s></button>
                   <span class="cu-toolbar-sep"></span>
                   
                   <!-- Headings Dropdown -->
                   <div class="cu-toolbar-dropdown">
-                    <button type="button" class="cu-dropdown-trigger" title="Encabezados">H▾</button>
+                    <button type="button" class="cu-dropdown-trigger" title="Encabezados" aria-label="Elegir nivel de encabezado">H▾</button>
                     <div class="cu-dropdown-menu">
                       <button type="button" data-block="h1">Título 1</button>
                       <button type="button" data-block="h2">Título 2</button>
@@ -270,23 +282,24 @@ export class TaskModal {
                   <span class="cu-toolbar-sep"></span>
                   
                   <!-- Lists -->
-                  <button type="button" data-cmd="insertUnorderedList" title="Lista con viñetas">• Lista</button>
-                  <button type="button" data-cmd="insertOrderedList" title="Lista numerada">1. Lista</button>
+                  <button type="button" data-cmd="insertUnorderedList" title="Lista con viñetas" aria-label="Lista con viñetas">• Lista</button>
+                  <button type="button" data-cmd="insertOrderedList" title="Lista numerada" aria-label="Lista numerada">1. Lista</button>
                   <span class="cu-toolbar-sep"></span>
                   
                   <!-- Code & Quote -->
-                  <button type="button" data-insert="code" title="Código">&lt;/&gt;</button>
-                  <button type="button" data-insert="quote" title="Cita">❝</button>
+                  <button type="button" data-insert="code" title="Código en línea" aria-label="Código en línea">&lt;/&gt;</button>
+                  <button type="button" data-insert="quote" title="Cita" aria-label="Cita">❝</button>
                   <span class="cu-toolbar-sep"></span>
                   
                   <!-- Link -->
-                  <button type="button" data-cmd="createLink" title="Hipervínculo (Ctrl+K)">🔗</button>
+                  <button type="button" data-cmd="createLink" title="Hipervínculo (Ctrl+K)" aria-label="Agregar enlace">🔗</button>
                 </div>
                 <div id="cu-editor-visual" class="cu-editor-visual" contenteditable="true" 
                      placeholder="Escribí o pegá contenido…" aria-label="Descripción visual"></div>
                 <textarea id="cu-editor-source" class="cu-editor-source hidden" 
-                          placeholder="Markdown: **negrita**, _cursiva_, - lista, 'código'"></textarea>
+                           placeholder="Markdown: **negrita**, _cursiva_, - lista, 'código'"></textarea>
               </div>
+              <p class="cu-editor-hint">Formato ClickUp: encabezados, énfasis, listas, enlaces, citas y código en línea.</p>
             </div>
             
             <div class="cu-form-row cu-form-row-inline">
@@ -302,23 +315,16 @@ export class TaskModal {
               </div>
             </div>
             
-            <div class="cu-form-row">
+            <div class="cu-form-row cu-email-options">
               <label class="cu-checkbox-label">
                 <input type="checkbox" id="cu-attach-email" checked>
-                Adjuntar email como archivo HTML
+                Conservar enlace a Gmail y adjuntar una copia HTML sanitizada
               </label>
-            </div>
-            <div class="cu-form-row cu-attach-files-row">
-              <label class="cu-checkbox-label">
-                <input type="checkbox" id="cu-attach-files" disabled>
-                Archivos originales del email deshabilitados en v1.2.0 <span id="cu-attach-files-count"></span>
-              </label>
-              <p class="cu-hint">Esta versión sólo admite el adjunto HTML sanitizado del email.</p>
             </div>
           </div>
           
           <!-- Attach to Existing Tab -->
-          <div class="cu-tab-content cu-tab-attach">
+          <div id="cu-panel-attach" class="cu-tab-content cu-tab-attach" role="tabpanel" aria-labelledby="cu-tab-attach" hidden>
             <div class="cu-form-row">
               <label for="cu-task-search">Buscar tarea</label>
               <div class="cu-task-search-container">
@@ -336,6 +342,13 @@ export class TaskModal {
             </div>
             <p class="cu-search-hint">Escribí al menos 4 caracteres para buscar por nombre o pegá un ID exacto de tarea.</p>
           </div>
+
+          <fieldset class="cu-attachment-picker cu-attach-files-row">
+            <legend>Imágenes adjuntas del mensaje</legend>
+            <p class="cu-hint">Elegí explícitamente qué imágenes subir. PNG, JPEG, GIF o WebP; máximo 10 MiB por archivo y 20 MiB en total. SVG no está permitido.</p>
+            <div id="cu-attachment-list" class="cu-attachment-list"></div>
+            <p id="cu-attachment-status" class="cu-hint" role="status" aria-live="polite"></p>
+          </fieldset>
         </div>
         
         <div class="cu-modal-footer">
@@ -365,16 +378,32 @@ export class TaskModal {
         (this.modal!.querySelector('#cu-start-date') as HTMLInputElement).value = today;
         (this.modal!.querySelector('#cu-due-date') as HTMLInputElement).value = today;
 
-        // Show/hide attachments checkbox based on attachment count
-        const attachCount = this.emailData.attachments?.length || 0;
+        const attachments = (this.emailData.attachments || [])
+            .map((attachment, originalIndex) => ({ attachment, originalIndex }))
+            .filter(({ attachment }) => isAllowedGmailImageMimeType(attachment.mimeType)
+                && isAllowedGmailAttachmentUrl(attachment.url)
+                && sanitizeGmailAttachmentFilename(attachment.filename));
+        const attachCount = attachments.length;
         const attachFilesRow = this.modal!.querySelector('.cu-attach-files-row') as HTMLElement;
-        const attachFilesCount = this.modal!.querySelector('#cu-attach-files-count') as HTMLElement;
+        const attachmentList = this.modal!.querySelector('#cu-attachment-list') as HTMLElement;
 
         if (attachCount > 0) {
-            attachFilesRow.style.display = '';
-            attachFilesCount.textContent = `(${attachCount} archivo${attachCount > 1 ? 's' : ''} original${attachCount > 1 ? 'es' : ''} sin adjuntar)`;
+            attachFilesRow.hidden = false;
+            attachments.forEach(({ attachment, originalIndex }) => {
+                const label = document.createElement('label');
+                label.className = 'cu-attachment-option';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.dataset.attachmentIndex = String(originalIndex);
+                const name = document.createElement('span');
+                name.textContent = attachment.filename;
+                const type = document.createElement('small');
+                type.textContent = attachment.mimeType.replace('image/', '').toUpperCase();
+                label.append(checkbox, name, type);
+                attachmentList.append(label);
+            });
         } else {
-            attachFilesRow.style.display = 'none';
+            attachFilesRow.hidden = true;
         }
     }
 
@@ -405,6 +434,7 @@ export class TaskModal {
     }
 
     setupResize(): void {
+        if (window.matchMedia('(max-width: 620px)').matches) return;
         const handle = this.modal!.querySelector('.cu-resize-handle') as HTMLElement;
         const modalWindow = this.modal!.querySelector('.cu-modal-window') as HTMLElement;
 
@@ -434,6 +464,7 @@ export class TaskModal {
     }
 
     setupDrag(): void {
+        if (window.matchMedia('(max-width: 620px)').matches) return;
         const handle = this.modal!.querySelector('#cu-modal-drag-handle') as HTMLElement;
         const modalWindow = this.modal!.querySelector('.cu-modal-window') as HTMLElement;
 
@@ -465,7 +496,9 @@ export class TaskModal {
         this.modal!.querySelector('.cu-modal-close')!.addEventListener('click', () => this.close());
         this.modal!.querySelector('.cu-btn-cancel')!.addEventListener('click', () => this.close());
         this.modal!.querySelector('.cu-modal-window')!.addEventListener('keydown', (e) => {
-            if ((e as KeyboardEvent).key === 'Escape') this.close();
+            const event = e as KeyboardEvent;
+            if (event.key === 'Escape') this.close();
+            if (event.key === 'Tab') this.trapFocus(event);
         });
 
         // Tabs
@@ -609,7 +642,7 @@ export class TaskModal {
         switch (type) {
             case 'code':
                 const codeContent = selectedText || '// Tu código aquí';
-                html = '<pre style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:monospace;overflow-x:auto;"><code>' + this.escapeHtml(codeContent) + '</code></pre><br>';
+                html = '<code>' + this.escapeHtml(codeContent.replace(/\s+/g, ' ')) + '</code>';
                 break;
             case 'quote':
                 const quoteContent = selectedText || 'Tu cita aquí';
@@ -674,20 +707,8 @@ export class TaskModal {
         temp.querySelectorAll('pre').forEach(pre => {
             const code = pre.querySelector('code');
             const text = code ? code.textContent : pre.textContent;
-            pre.replaceWith('\n```\n' + (text || '').trim() + '\n```\n');
-        });
-
-        temp.querySelectorAll('blockquote').forEach(bq => {
-            const text = (bq.textContent || '').trim();
-            const lines = text.split('\n').map(line => '> ' + line.trim()).join('\n');
-            bq.replaceWith(lines + '\n');
-        });
-
-        temp.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(h => {
-            const level = parseInt(h.tagName.charAt(1));
-            const prefix = '#'.repeat(level) + ' ';
-            const text = (h.textContent || '').trim();
-            if (text) h.replaceWith('\n' + prefix + text + '\n');
+            const inlineCode = (text || '').replace(/\s+/g, ' ').trim().replace(/`/g, '\\`');
+            pre.replaceWith(inlineCode ? `\`${inlineCode}\`` : '');
         });
 
         temp.querySelectorAll('a').forEach(a => {
@@ -716,8 +737,22 @@ export class TaskModal {
         });
 
         temp.querySelectorAll('code').forEach(el => {
-            const text = (el.textContent || '').trim();
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().replace(/`/g, '\\`');
             if (text) el.replaceWith(`\`${text}\``);
+        });
+
+        // Convert containers after inline nodes so nested emphasis and links survive.
+        temp.querySelectorAll('blockquote').forEach(bq => {
+            const text = (bq.textContent || '').trim();
+            const lines = text.split('\n').map(line => '> ' + line.trim()).join('\n');
+            bq.replaceWith(lines + '\n');
+        });
+
+        temp.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(h => {
+            const level = parseInt(h.tagName.charAt(1));
+            const prefix = '#'.repeat(level) + ' ';
+            const text = (h.textContent || '').trim();
+            if (text) h.replaceWith('\n' + prefix + text + '\n');
         });
 
         temp.querySelectorAll('ol').forEach(ol => {
@@ -756,6 +791,75 @@ export class TaskModal {
             .trim();
 
         return text;
+    }
+
+    clickUpMarkdownToHtml(markdown: string): string {
+        const renderInline = (value: string): string => {
+            const tokens: string[] = [];
+            const preserve = (html: string): string => {
+                const token = `CLICKUPTOKEN${tokens.length}END`;
+                tokens.push(html);
+                return token;
+            };
+
+            let rendered = value
+                .replace(/`([^`\n]+)`/g, (_match, code: string) => preserve(`<code>${this.escapeHtml(code)}</code>`))
+                .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, text: string, url: string) => {
+                    if (!isSafeEditorLink(url)) return this.escapeHtml(text);
+                    return preserve(`<a href="${this.escapeHtml(url)}">${this.escapeHtml(text)}</a>`);
+                });
+
+            rendered = this.escapeHtml(rendered)
+                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/~~([^~\n]+)~~/g, '<s>$1</s>')
+                .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+                .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+            tokens.forEach((html, index) => {
+                rendered = rendered.replace(`CLICKUPTOKEN${index}END`, html);
+            });
+            return rendered;
+        };
+
+        const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+        const html: string[] = [];
+        let listType: 'ul' | 'ol' | null = null;
+        const closeList = (): void => {
+            if (listType) html.push(`</${listType}>`);
+            listType = null;
+        };
+
+        lines.forEach(line => {
+            const heading = line.match(/^(#{1,6})\s+(.+)$/);
+            const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+            const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+            const quote = line.match(/^>\s?(.*)$/);
+
+            if (heading) {
+                closeList();
+                const level = heading[1].length;
+                html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+            } else if (unordered || ordered) {
+                const nextType = unordered ? 'ul' : 'ol';
+                if (listType !== nextType) {
+                    closeList();
+                    html.push(`<${nextType}>`);
+                    listType = nextType;
+                }
+                html.push(`<li>${renderInline((unordered || ordered)![1])}</li>`);
+            } else if (quote) {
+                closeList();
+                html.push(`<blockquote>${renderInline(quote[1])}</blockquote>`);
+            } else if (!line.trim()) {
+                closeList();
+            } else {
+                closeList();
+                html.push(`<p>${renderInline(line)}</p>`);
+            }
+        });
+        closeList();
+
+        return this.cleanHtmlForClickUp(html.join(''));
     }
 
     async loadFullHierarchy(): Promise<void> {
@@ -1073,11 +1177,17 @@ export class TaskModal {
     }
 
     switchTab(tab: string): void {
-        this.modal!.querySelectorAll('.cu-tab').forEach(t => t.classList.remove('cu-tab-active'));
-        this.modal!.querySelector(`[data-tab="${tab}"]`)!.classList.add('cu-tab-active');
+        this.modal!.querySelectorAll<HTMLElement>('.cu-tab').forEach(t => {
+            const active = t.dataset.tab === tab;
+            t.classList.toggle('cu-tab-active', active);
+            t.setAttribute('aria-selected', String(active));
+        });
 
-        this.modal!.querySelectorAll('.cu-tab-content').forEach(c => c.classList.remove('active'));
-        this.modal!.querySelector(`.cu-tab-${tab}`)!.classList.add('active');
+        this.modal!.querySelectorAll<HTMLElement>('.cu-tab-content').forEach(c => {
+            const active = c.classList.contains(`cu-tab-${tab}`);
+            c.classList.toggle('active', active);
+            c.hidden = !active;
+        });
 
         const submitBtn = this.modal!.querySelector('.cu-btn-submit .cu-btn-text') as HTMLElement;
         submitBtn.textContent = tab === 'create' ? 'Crear tarea' : 'Adjuntar email';
@@ -1097,6 +1207,7 @@ export class TaskModal {
             source.classList.remove('hidden');
             toolbar.classList.add('hidden');
         } else {
+            visual.innerHTML = this.clickUpMarkdownToHtml(source.value);
             visual.classList.remove('hidden');
             source.classList.add('hidden');
             toolbar.classList.remove('hidden');
@@ -1269,20 +1380,27 @@ export class TaskModal {
 
             if (timeEstimate) taskData.time_estimate = timeEstimate;
 
-            const attachWithFiles = false;
+            const emailData = this.emailData ? {
+                ...this.emailData,
+                attachments: undefined,
+                html: (this.modal!.querySelector('#cu-attach-email') as HTMLInputElement).checked ? this.emailData.html : '',
+                htmlSanitized: true as const,
+            } : null;
             const response = await chrome.runtime.sendMessage({
                 action: 'createTaskFull',
                 listId: this.selectedListId,
                 taskData: taskData,
-                emailData: (this.modal!.querySelector('#cu-attach-email') as HTMLInputElement).checked ? this.emailData : null,
-                attachWithFiles: attachWithFiles,
+                emailData,
                 timeTracked: timeTracked,
                 teamId: this.teamId
             }) as TaskResult;
 
             if (response && response.id) {
-                this.showSuccessPopup(response);
-                if ((response as any).warning) this.showToast('Tarea creada con advertencias.', 'success');
+                const uploads = await this.uploadSelectedAttachments(response.id);
+                this.showSuccessPopup(response, uploads.failed);
+                if ((response as any).warning || uploads.failed > 0) {
+                    this.showToast(`Tarea creada; ${uploads.failed > 0 ? `${uploads.failed} imagen${uploads.failed === 1 ? '' : 'es'} no se pudieron subir` : 'el email tuvo advertencias'}.`, 'error');
+                }
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
                     detail: { task: response, threadId: this.emailData!.threadId }
                 }));
@@ -1308,11 +1426,16 @@ export class TaskModal {
             const response = await chrome.runtime.sendMessage({
                 action: 'attachToTask',
                 taskId: taskId,
-                emailData: this.emailData
+                emailData: this.emailData ? { ...this.emailData, attachments: undefined, htmlSanitized: true as const } : null
             }) as TaskResult;
 
             if (response && (response.id || response.success)) {
-                this.showToast((response as any).warning ? 'Email adjuntado con advertencias.' : 'Email adjuntado.', 'success');
+                const uploads = await this.uploadSelectedAttachments(response.id || taskId);
+                const failed = uploads.failed;
+                this.showToast((response as any).warning || failed > 0
+                    ? `Email vinculado; ${failed > 0 ? `${failed} imagen${failed === 1 ? '' : 'es'} no se pudieron subir` : 'se completó con advertencias'}.`
+                    : `Email vinculado${uploads.uploaded > 0 ? ` con ${uploads.uploaded} imagen${uploads.uploaded === 1 ? '' : 'es'}` : ''}.`,
+                (response as any).warning || failed > 0 ? 'error' : 'success');
 
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
                     detail: { task: response, threadId: this.emailData!.threadId }
@@ -1337,7 +1460,73 @@ export class TaskModal {
         btn.disabled = false;
     }
 
-    showSuccessPopup(task: TaskResult): void {
+    async uploadSelectedAttachments(taskId: string): Promise<{ uploaded: number; failed: number }> {
+        if (!this.emailData) return { uploaded: 0, failed: 0 };
+        const selected = Array.from(this.modal!.querySelectorAll<HTMLInputElement>('[data-attachment-index]:checked'))
+            .map(input => this.emailData!.attachments?.[Number(input.dataset.attachmentIndex)])
+            .filter((attachment): attachment is GmailAttachmentMetadata => !!attachment);
+        const status = this.modal!.querySelector('#cu-attachment-status') as HTMLElement;
+        let totalBytes = 0;
+        let uploaded = 0;
+        let failed = 0;
+
+        for (const attachment of selected) {
+            const filename = sanitizeGmailAttachmentFilename(attachment.filename);
+            if (!filename || !isAllowedGmailImageMimeType(attachment.mimeType) || !isAllowedGmailAttachmentUrl(attachment.url)) {
+                failed++;
+                continue;
+            }
+            status.textContent = `Procesando ${uploaded + failed + 1} de ${selected.length}…`;
+            try {
+                const response = await fetch(attachment.url, { credentials: 'include', redirect: 'follow', cache: 'no-store' });
+                if (!response.ok || !isAllowedGmailAttachmentUrl(response.url)) throw new Error('ATTACHMENT_RESPONSE_REJECTED');
+                const responseMime = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+                if (!isAllowedGmailImageMimeType(responseMime) || responseMime !== attachment.mimeType.toLowerCase()) throw new Error('ATTACHMENT_MIME_REJECTED');
+                const declaredSize = Number(response.headers.get('content-length'));
+                if (Number.isFinite(declaredSize) && declaredSize > GMAIL_ATTACHMENT_MAX_FILE_BYTES) throw new Error('ATTACHMENT_TOO_LARGE');
+                const bytes = new Uint8Array(await response.arrayBuffer());
+                if (bytes.length === 0 || bytes.length > GMAIL_ATTACHMENT_MAX_FILE_BYTES || totalBytes + bytes.length > GMAIL_ATTACHMENT_MAX_TOTAL_BYTES) throw new Error('ATTACHMENT_SIZE_REJECTED');
+                totalBytes += bytes.length;
+                const uploadResponse = await chrome.runtime.sendMessage({
+                    action: 'uploadGmailImageAttachment',
+                    data: {
+                        taskId,
+                        filename,
+                        mimeType: responseMime as GmailImageMimeType,
+                        byteLength: bytes.length,
+                        base64: this.bytesToBase64(bytes),
+                    },
+                }) as { success?: boolean };
+                if (uploadResponse?.success !== true) throw new Error('ATTACHMENT_UPLOAD_REJECTED');
+                uploaded++;
+            } catch {
+                failed++;
+            }
+        }
+        status.textContent = selected.length > 0 ? `${uploaded} subida${uploaded === 1 ? '' : 's'} · ${failed} fallida${failed === 1 ? '' : 's'}` : '';
+        return { uploaded, failed };
+    }
+
+    bytesToBase64(bytes: Uint8Array): string {
+        let binary = '';
+        const chunkSize = 32 * 1024;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        }
+        return btoa(binary);
+    }
+
+    trapFocus(event: KeyboardEvent): void {
+        const focusable = Array.from(this.modal!.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])'))
+            .filter(element => !element.hidden && element.offsetParent !== null);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+
+    showSuccessPopup(task: TaskResult, failedAttachments = 0): void {
         // Remove any existing popup
         const existing = document.querySelector('.cu-success-popup');
         if (existing) existing.remove();
@@ -1347,8 +1536,9 @@ export class TaskModal {
         popup.innerHTML = `
             <div class="cu-success-popup-content">
                 <div class="cu-success-icon">✓</div>
-                <div class="cu-success-title">Tarea creada</div>
-                <div class="cu-success-task-name">${this.escapeHtml(task.name)}</div>
+                 <div class="cu-success-title">${failedAttachments > 0 ? 'Tarea creada parcialmente' : 'Tarea creada'}</div>
+                 <div class="cu-success-task-name">${this.escapeHtml(task.name)}</div>
+                 ${failedAttachments > 0 ? `<p class="cu-success-warning">La tarea y el email se guardaron, pero ${failedAttachments} imagen${failedAttachments === 1 ? '' : 'es'} fallaron.</p>` : ''}
                 <button class="cu-btn cu-btn-primary cu-success-view-btn" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
                     🔗 Ver tarea en ClickUp
                 </button>
@@ -1397,6 +1587,8 @@ export class TaskModal {
     close(): void {
         this.modal?.remove();
         this.modal = null;
+        this.previouslyFocused?.focus({ preventScroll: true });
+        this.previouslyFocused = null;
     }
 
     escapeHtml(text: string): string {

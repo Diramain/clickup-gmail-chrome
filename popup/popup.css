@@ -800,8 +800,6 @@ select option {
 
 .meet-mappings {
     margin-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 10px;
 }
 
 .meet-mappings summary {
@@ -810,23 +808,15 @@ select option {
     color: #49CCF9;
 }
 
-.meet-mapping-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    margin-top: 8px;
-    padding: 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.meet-mapping-name {
-    overflow: hidden;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.meet-mappings-table-region { max-width: 100%; overflow-x: auto; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; }
+.meet-mappings-table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: 11px; }
+.meet-mappings-table th, .meet-mappings-table td { padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); text-align: left; vertical-align: middle; }
+.meet-mappings-table th { color: rgba(255, 255, 255, 0.65); font-size: 9px; text-transform: uppercase; }
+.meet-mappings-table tbody tr:last-child td { border-bottom: 0; }
+.meet-mapping-name { max-width: 180px; overflow-wrap: anywhere; font-weight: 700; }
+.meet-mappings-table code { color: rgba(255, 255, 255, 0.7); font-size: 10px; }
+.meet-mapping-state { display: inline-flex; padding: 4px 6px; border-radius: 99px; color: #69db9b; background: rgba(105, 219, 155, 0.1); font-size: 9px; font-weight: 700; }
+.meet-mapping-state.is-inactive { color: rgba(255, 255, 255, 0.65); background: rgba(255, 255, 255, 0.06); }
 
 .meet-mapping-actions {
     display: flex;

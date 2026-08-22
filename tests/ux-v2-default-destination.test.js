@@ -19,6 +19,8 @@ function loadTsModule(relativePath) {
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
         if (request === '../popup/popup') return {};
         if (request === './link-hardening') return loadTsModule('src/link-hardening.ts');
+        if (request === './bulk-task-update') return loadTsModule('src/bulk-task-update.ts');
+        if (request === './gmail-attachment-security') return loadTsModule('src/gmail-attachment-security.ts');
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);

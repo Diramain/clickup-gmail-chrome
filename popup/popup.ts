@@ -27,6 +27,11 @@ import {
     toTimeEntryTimestamp,
 } from '../src/time-entry-history';
 import type { TimeEntry } from '../src/types/clickup';
+import {
+    MeetMappingTaskCache,
+    normalizeMeetMappingTaskDetail,
+    type MeetMappingTaskDetail,
+} from '../src/meet/meet-mapping-view';
 
 // ============================================================================
 // Types
@@ -1554,7 +1559,7 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
     let searchRevision = 0;
     let searchTimeout: ReturnType<typeof setTimeout> | null = null;
     let changingTask = false;
-    const taskNames = new Map<string, string>();
+    const taskDetails = new MeetMappingTaskCache();
 
     const setVisible = (element: Element, visible: boolean): void => {
         element.classList.toggle('hidden', !visible);
@@ -1571,29 +1576,27 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
 
     const taskLabel = (taskId: string | undefined): string => {
         if (!taskId) return 'tarea no disponible';
-        return taskNames.get(taskId) || `tarea ${taskId}`;
+        return taskDetails.get(taskId)?.name || `tarea ${taskId}`;
     };
 
-    const resolveTaskName = async (taskId: string | undefined): Promise<void> => {
-        if (!taskId || taskNames.has(taskId)) return;
+    const resolveTaskDetail = async (taskId: string): Promise<MeetMappingTaskDetail> => {
+        const cached = taskDetails.get(taskId);
+        if (cached) return cached;
+        let detail = normalizeMeetMappingTaskDetail(null, taskId);
         try {
-            const task = await sendMessage<{ id?: string; name?: string }>({
+            const task = await sendMessage<unknown>({
                 action: 'getTaskById',
                 data: { taskId },
             });
-            if (task?.id === taskId && typeof task.name === 'string' && task.name.length > 0) {
-                taskNames.set(taskId, task.name.slice(0, 500));
-            }
+            detail = normalizeMeetMappingTaskDetail(task, taskId);
         } catch {
-            // The task ID remains sufficient for local controls if name lookup is unavailable.
+            // A bounded negative cache keeps the ID usable without retrying on every render.
         }
+        taskDetails.set(detail);
+        return detail;
     };
 
     const renderMappings = async (): Promise<void> => {
-        if (!currentStatus.enabled) {
-            setVisible(mappingsDetails, false);
-            return;
-        }
         const result = await sendMessage<{ mappings: MeetTaskMappingV1[] }>({ action: 'getMeetMappings' });
         const mappings = Array.isArray(result?.mappings) ? result.mappings.slice(0, 50) : [];
         setVisible(mappingsDetails, true);
@@ -1607,14 +1610,50 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
             return;
         }
 
-        mappings.forEach((mapping, index) => {
-            const item = document.createElement('div');
-            item.className = 'meet-mapping-item';
-            const label = document.createElement('span');
-            label.className = 'meet-mapping-name';
-            label.textContent = `Reunión vinculada ${index + 1} · tarea ${mapping.taskId}`;
+        const details = new Map<string, MeetMappingTaskDetail>();
+        const taskIds = [...new Set(mappings.map((mapping) => mapping.taskId))];
+        for (let index = 0; index < taskIds.length; index += 4) {
+            const batch = taskIds.slice(index, index + 4);
+            const resolved = await Promise.all(batch.map((taskId) => resolveTaskDetail(taskId)));
+            for (const detail of resolved) details.set(detail.id, detail);
+        }
 
-            const buttonGroup = document.createElement('span');
+        const tableRegion = document.createElement('div');
+        tableRegion.className = 'meet-mappings-table-region';
+        tableRegion.tabIndex = 0;
+        tableRegion.setAttribute('role', 'region');
+        tableRegion.setAttribute('aria-label', 'Vinculaciones guardadas de Google Meet');
+        const table = document.createElement('table');
+        table.className = 'meet-mappings-table';
+        const head = document.createElement('thead');
+        const headingRow = document.createElement('tr');
+        for (const heading of ['Tarea', 'ID', 'Estado', 'Acciones']) {
+            const cell = document.createElement('th');
+            cell.scope = 'col';
+            cell.textContent = heading;
+            headingRow.append(cell);
+        }
+        head.append(headingRow);
+        const body = document.createElement('tbody');
+
+        mappings.forEach((mapping, index) => {
+            const detail = details.get(mapping.taskId) || normalizeMeetMappingTaskDetail(null, mapping.taskId);
+            const row = document.createElement('tr');
+            const taskCell = document.createElement('td');
+            taskCell.className = 'meet-mapping-name';
+            taskCell.textContent = detail.name;
+            const idCell = document.createElement('td');
+            const id = document.createElement('code');
+            id.textContent = mapping.taskId;
+            idCell.append(id);
+            const statusCell = document.createElement('td');
+            const state = document.createElement('span');
+            state.className = `meet-mapping-state ${mapping.enabled ? 'is-active' : 'is-inactive'}`;
+            state.textContent = `${mapping.enabled ? 'Activa' : 'Desactivada'} · ${detail.status}`;
+            statusCell.append(state);
+
+            const actionCell = document.createElement('td');
+            const buttonGroup = document.createElement('div');
             buttonGroup.className = 'meet-mapping-actions';
             const enabledButton = document.createElement('button');
             enabledButton.type = 'button';
@@ -1650,9 +1689,13 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
             });
 
             buttonGroup.append(enabledButton, deleteButton);
-            item.append(label, buttonGroup);
-            mappingsList.appendChild(item);
+            actionCell.append(buttonGroup);
+            row.append(taskCell, idCell, statusCell, actionCell);
+            body.append(row);
         });
+        table.append(head, body);
+        tableRegion.append(table);
+        mappingsList.append(tableRegion);
     };
 
     const renderStatus = async (): Promise<void> => {
@@ -1681,12 +1724,12 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
                 ? 'Hay otra sala abierta. Sólo la pestaña Meet enfocada puede tomar prioridad.'
                 : 'No hay una tarea vinculada. Elegí una o ignorá esta sesión.');
         } else if (tracking) {
-            await resolveTaskName(status.taskId);
+            if (status.taskId) await resolveTaskDetail(status.taskId);
             const elapsed = status.joinedAt ? formatMeetElapsed(Date.now() - status.joinedAt) : '00:00:00';
             const conflictNote = status.conflict ? ' · otra sala quedó sin autoridad' : '';
             setStatusCopy('Reunión en curso', `${taskLabel(status.taskId)} · ${elapsed}${conflictNote}`);
         } else if (paused) {
-            await resolveTaskName(status.taskId);
+            if (status.taskId) await resolveTaskDetail(status.taskId);
             setStatusCopy('Reunión pausada', `${taskLabel(status.taskId)} · confirmá para continuar.`);
         } else if (ignored) {
             setStatusCopy('Reunión ignorada', 'El tracking normal puede continuar; esta sesión no volverá a preguntar.');
@@ -1745,7 +1788,6 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
                     item.append(name, id);
                     item.addEventListener('click', () => {
                         selectedTask = { id: task.id!, name: task.name! };
-                        taskNames.set(task.id!, task.name!);
                         searchInput.value = task.name!;
                         searchResults.replaceChildren();
                         assignButton.disabled = false;

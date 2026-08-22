@@ -79,6 +79,20 @@ describe('GmailAdapter production selectors', () => {
 
         expect(GmailAdapter.getThreadId()).toBeNull();
     });
+
+    test('scopes sender, body, and attachment metadata to the clicked Gmail message container', () => {
+        document.body.innerHTML = `
+            <div class="gs" id="first"><span class="gD" email="first@example.test"></span><div class="a3s aiL">first</div><a download_url="image/png:first.png:https://mail.google.com/mail/u/0/?att=1"></a></div>
+            <div class="gs" id="second"><span class="gD" email="second@example.test"></span><div class="a3s aiL">second</div><a download_url="image/jpeg:second.jpg:https://mail.google.com/mail/u/0/?att=2"></a></div>`;
+        const secondBody = document.querySelector('#second .a3s');
+        const second = GmailAdapter.getMessageContainer(secondBody);
+
+        expect(GmailAdapter.getSenderEmail(second)).toBe('second@example.test');
+        expect(GmailAdapter.getEmailBodyHtml(secondBody)).toBe('second');
+        expect(GmailAdapter.getAttachmentUrls(second)).toEqual([
+            { mimeType: 'image/jpeg', filename: 'second.jpg', url: 'https://mail.google.com/mail/u/0/?att=2' },
+        ]);
+    });
 });
 
 describe('Gmail thread bar mounting', () => {

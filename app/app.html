@@ -26,7 +26,7 @@
                 </a>
                 <a href="#gmail" data-route="gmail">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM3 7l9 7 9-7"/></svg>
-                    <span class="nav-text">Gmail → ClickUp</span>
+                    <span class="nav-text">Integración con Gmail</span>
                 </a>
                 <a href="#tiempo" data-route="tiempo">
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg>
@@ -91,7 +91,7 @@
                     </article>
                     <article class="operation-card">
                         <h3>Google Calendar</h3>
-                        <p>Integración opcional para disponibilidad y reuniones propias.</p>
+                        <p>Integración opcional para próximos eventos del calendario principal.</p>
                         <button id="connectGoogleCalendarSetup" type="button" disabled aria-disabled="true">Conectar Google Calendar</button>
                         <p id="googleOAuthSetupStatus" class="field-help">OAuth permanece desactivado.</p>
                     </article>
@@ -216,10 +216,37 @@
             <section class="page-section" data-page="gmail" aria-labelledby="gmailTitle" hidden>
                 <div class="section-heading">
                     <div>
-                        <p class="section-label">Gmail → ClickUp</p>
-                        <h2 id="gmailTitle">Convertí conversación en trabajo concreto.</h2>
-                        <p>Definí dónde se crean las tareas y buscá una existente para vincular un correo, sin convertir el correo en una fuente de vigilancia.</p>
+                        <p class="section-label">Integración con Gmail</p>
+                        <h2 id="gmailTitle">Convertí conversaciones en trabajo concreto.</h2>
+                        <p>Controlá los botones que aparecen dentro de Gmail y cómo se vinculan los correos con ClickUp.</p>
                     </div>
+                </div>
+
+                <div class="operation-grid two-columns gmail-integration-overview">
+                    <article class="operation-card">
+                        <h3>Controles dentro de Gmail</h3>
+                        <label class="toggle-line" for="gmailIntegrationToggle"><span>Mostrar controles de ClickUp en Gmail</span><input id="gmailIntegrationToggle" type="checkbox" aria-describedby="gmailIntegrationStatus"></label>
+                        <p id="gmailIntegrationStatus" class="field-help" role="status" aria-live="polite">Leyendo preferencia local…</p>
+                        <p class="field-help">El cambio se aplica a las pestañas de Gmail abiertas: quita o vuelve a insertar las barras sin recargar la página.</p>
+                    </article>
+                    <article class="operation-card">
+                        <h3>Qué podés hacer</h3>
+                        <ul class="instruction-steps gmail-feature-list">
+                            <li>Crear una tarea desde el mensaje que estás leyendo.</li>
+                            <li>Vincular el correo con una tarea existente.</li>
+                            <li>Conservar el enlace a Gmail y una copia HTML sanitizada.</li>
+                            <li>Elegir imágenes adjuntas para subirlas de forma explícita.</li>
+                        </ul>
+                    </article>
+                    <article class="operation-card">
+                        <h3>Campo Gmail Thread ID</h3>
+                        <p>Permite reconocer qué tarea ya está vinculada con un hilo sin depender del texto de la descripción.</p>
+                        <ol class="instruction-steps"><li>Creá en ClickUp un campo personalizado de tipo texto.</li><li>Usá el mismo nombre en las listas donde vinculás correos.</li><li>Guardá abajo el nombre exacto; por defecto se usa <strong>Gmail Thread ID</strong>.</li></ol>
+                        <label class="toggle-line" for="useCustomFieldToggle"><span>Usar campo para Gmail Thread ID</span><input id="useCustomFieldToggle" type="checkbox" checked></label>
+                        <label for="customFieldName">Nombre exacto del campo</label>
+                        <input id="customFieldName" type="text" placeholder="Gmail Thread ID" maxlength="200">
+                        <button id="saveCustomFieldConfig" class="btn" type="button">Guardar nombre del campo</button>
+                    </article>
                 </div>
 
                 <div class="destination-panel">
@@ -291,12 +318,30 @@
                     <article class="operation-card"><h3>Seguimiento automático</h3><label class="toggle-line">Iniciar al enfocar una tarea <input id="autoStartToggle" type="checkbox"></label><label class="toggle-line">Detener al cambiar o cerrar <input id="autoStopToggle" type="checkbox"></label><label class="toggle-line">Priorizar reuniones Google Meet <input id="meetPriorityToggle" type="checkbox"></label></article>
                     <article class="operation-card"><h3>Iniciar temporizador</h3><input id="trackTaskSearch" type="search" placeholder="Buscar tarea…"><div id="trackSearchResults" class="search-results"></div><button id="startTimerBtn" class="btn primary" type="button" disabled>Iniciar temporizador</button></article>
                     <article class="operation-card"><h3>Entrada manual</h3><input id="manualTaskSearch" type="search" placeholder="Buscar tarea…"><div id="manualSearchResults" class="search-results"></div><label for="durationInput">Duración</label><input id="durationInput" type="text" placeholder="1h 30m"><button id="addManualTime" class="btn" type="button" disabled>Agregar tiempo</button></article>
+                    <article class="operation-card work-schedule-card">
+                        <h3>Jornada objetivo</h3>
+                        <p class="field-help">Configuración local para orientar tus objetivos de tiempo. No se envía a ClickUp.</p>
+                        <fieldset class="workday-selector">
+                            <legend>Días laborables</legend>
+                            <label><input type="checkbox" data-workday="monday"> Lun</label>
+                            <label><input type="checkbox" data-workday="tuesday"> Mar</label>
+                            <label><input type="checkbox" data-workday="wednesday"> Mié</label>
+                            <label><input type="checkbox" data-workday="thursday"> Jue</label>
+                            <label><input type="checkbox" data-workday="friday"> Vie</label>
+                            <label><input type="checkbox" data-workday="saturday"> Sáb</label>
+                            <label><input type="checkbox" data-workday="sunday"> Dom</label>
+                        </fieldset>
+                        <label for="dailyTrackedHoursTarget">Objetivo diario de horas registradas</label>
+                        <input id="dailyTrackedHoursTarget" type="number" min="0.5" max="24" step="0.5" inputmode="decimal">
+                        <div class="work-schedule-total"><span>Objetivo semanal</span><strong id="weeklyTrackedHoursTarget">40 h por semana</strong></div>
+                        <p id="workScheduleStatus" class="field-help" role="status" aria-live="polite">Leyendo jornada local…</p>
+                    </article>
                 </div>
                 <article class="operation-card recent-entries-card"><h3>Entradas recientes</h3><div id="timeHistory" class="time-history"><p class="field-help">Cargando entradas…</p></div></article>
             </section>
 
             <section class="page-section" data-page="meet" aria-labelledby="meetTitle" hidden>
-                <div class="section-heading"><div><p class="section-label">Calendar y Meet</p><h2 id="meetTitle">Planificá la reunión y dejá su tarea preparada.</h2><p>Meet mantiene su alcance local. Calendar continúa visible pero bloqueado.</p></div></div>
+                <div class="section-heading"><div><p class="section-label">Calendar y Meet</p><h2 id="meetTitle">Planificá la reunión y dejá su tarea preparada.</h2><p>Meet mantiene su alcance local. Calendar se conecta sólo cuando vos lo autorizás.</p></div></div>
                 <div class="operation-grid two-columns">
                     <article id="meetPriorityCard" class="operation-card">
                         <h3>Prioridad Google Meet</h3>
@@ -305,16 +350,29 @@
                         <div id="meetPriorityStatus" class="task-search-state"><p>Prioridad Meet desactivada</p></div>
                         <div id="meetTaskChooser" class="stack hidden"><label for="meetTaskSearch">Tarea para esta reunión</label><input id="meetTaskSearch" type="search"><div id="meetTaskResults" class="search-results"></div><label><input id="meetRememberToggle" type="checkbox"> Recordar para esta sala</label><button id="assignMeetTask" class="btn primary" type="button" disabled>Usar tarea seleccionada</button></div>
                         <div id="meetActions" class="inline-actions hidden"><button id="usePreviousMeetTask" class="btn hidden" type="button">Usar anterior</button><button id="changeMeetTask" class="btn hidden" type="button">Cambiar</button><button id="resumeMeetSession" class="btn hidden" type="button">Reanudar</button><button id="ignoreMeetSession" class="btn hidden" type="button">Ignorar</button><button id="endMeetSession" class="btn danger hidden" type="button">Finalizar</button></div>
-                        <details id="meetMappingsDetails" class="hidden"><summary>Reuniones vinculadas</summary><div id="meetMappingsList"></div></details>
                     </article>
-                    <article class="operation-card">
-                        <h3>Google Calendar</h3><p>Disponibilidad y reuniones propias.</p>
-                        <ul class="permission-list"><li>Lista de calendarios</li><li>Disponibilidad</li><li>Eventos propios</li></ul>
-                        <button id="connectGoogleCalendarConfig" type="button" disabled aria-disabled="true">Conectar Google Calendar</button>
-                        <p id="googleOAuthConfigStatus" class="field-help">OAuth permanece desactivado.</p>
+                    <article id="calendarAgendaCard" class="operation-card calendar-agenda-card" aria-labelledby="calendarAgendaTitle">
+                        <div class="calendar-agenda-head">
+                            <div><h3 id="calendarAgendaTitle">Próximos eventos</h3><p>Calendario principal · próximos 7 días · sólo lectura.</p></div>
+                            <span class="service-badge service-badge-blue">Opcional</span>
+                        </div>
+                        <div id="calendarAgendaState" class="service-state service-state-neutral" data-state="disabled" role="status" aria-live="polite">
+                            <span aria-hidden="true"></span>
+                            <div><strong id="calendarAgendaStateTitle">Calendar desactivado</strong><small id="calendarAgendaStateDetail">OAuth permanece apagado hasta el canario autorizado.</small></div>
+                        </div>
+                        <div class="inline-actions calendar-agenda-actions">
+                            <a id="calendarConnectionLink" href="#conexion" class="now-link" hidden>Conectar Calendar</a>
+                            <button id="refreshGoogleCalendarAgenda" class="btn small" type="button" hidden disabled>Resincronizar calendario</button>
+                        </div>
+                        <ul id="calendarAgendaList" class="calendar-agenda-list" aria-label="Próximos eventos"></ul>
                     </article>
                 </div>
                 <section id="meetingLinkSection" class="operation-card hidden" hidden aria-label="Vinculación de reuniones"></section>
+                <details id="meetMappingsDetails" class="operation-card meet-mappings-card hidden">
+                    <summary>Vinculaciones guardadas</summary>
+                    <p class="field-help">Reglas locales entre una sala de Meet y una tarea. No indican que haya una reunión activa o programada.</p>
+                    <div id="meetMappingsList"></div>
+                </details>
             </section>
 
             <section class="page-section" data-page="sync" aria-labelledby="syncTitle" hidden>
@@ -360,14 +418,17 @@
                             <div><span class="service-type">Integración opcional</span><h3>Google Calendar</h3></div>
                             <span class="service-badge service-badge-blue">Opcional</span>
                         </div>
-                        <p>Preparado para disponibilidad y reuniones en calendarios propios, sin acceso general a tu cuenta.</p>
+                        <p>Preparado para leer próximos eventos del calendario principal, sin acceso general a tu cuenta.</p>
                         <ul class="permission-list" aria-label="Permisos previstos">
-                            <li>Lista de calendarios</li>
-                            <li>Disponibilidad</li>
-                            <li>Eventos propios</li>
+                            <li>Eventos del calendario principal en modo lectura</li>
+                            <li>Ventana limitada a los próximos siete días</li>
+                            <li>Sin invitados, descripciones ni ubicaciones</li>
                         </ul>
-                        <button id="connectGoogleCalendarConnectionPreview" type="button" class="google-action" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
-                        <p id="googleDisabledStatus" class="service-footnote" role="status">OAuth permanece desactivado en esta fase.</p>
+                        <div class="inline-actions google-calendar-connection-actions">
+                            <button id="connectGoogleCalendarConnectionPreview" type="button" class="btn primary" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
+                            <button id="disconnectGoogleCalendar" class="btn" type="button" disabled aria-describedby="googleDisabledStatus">Desconectar</button>
+                        </div>
+                        <p id="googleDisabledStatus" class="service-footnote" role="status">Comprobando el estado de Calendar…</p>
                     </article>
                 </div>
 
@@ -377,7 +438,7 @@
                 </aside>
 
                 <div class="operation-grid two-columns connection-settings">
-                    <article class="operation-card"><h3>Campo personalizado</h3><p>Permite reconocer qué tarea ya está vinculada con un hilo de Gmail sin depender del texto de la descripción.</p><ol class="instruction-steps"><li>Creá en ClickUp un campo personalizado de tipo texto.</li><li>Usá el mismo nombre en las listas donde vinculás correos.</li><li>Escribí ese nombre abajo y guardalo; por defecto se usa <strong>Gmail Thread ID</strong>.</li></ol><label class="toggle-line">Usar campo para Gmail Thread ID <input id="useCustomFieldToggle" type="checkbox" checked></label><label for="customFieldName">Nombre exacto del campo</label><input id="customFieldName" type="text" placeholder="Gmail Thread ID"><button id="saveCustomFieldConfig" class="btn" type="button">Guardar nombre</button></article>
+                    <article class="operation-card"><h3>Calendar y creación</h3><label class="toggle-line">Mostrar eventos de todo el día <input id="calendarShowAllDayToggle" type="checkbox"></label><label for="calendarTaskTypeSearch">Tipo de tarea para reuniones</label><input id="calendarTaskTypeSearch" type="search" autocomplete="off" placeholder="Filtrar tipos retornados por ClickUp…"><select id="calendarTaskTypeSelect" aria-describedby="calendarTaskTypeStatus" disabled><option value="">Sin tipos disponibles</option></select><p id="calendarTaskTypeStatus" class="field-help" role="status" aria-live="polite">Consultando tipos de tarea…</p></article>
                     <article class="operation-card"><h3>Sesión de ClickUp</h3><p>La desconexión elimina la sesión local y requiere volver a autorizar.</p><button id="signOut" class="btn danger" type="button">Cerrar sesión</button></article>
                 </div>
             </section>
