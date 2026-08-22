@@ -3,8 +3,6 @@
  * With WYSIWYG editor and space avatars
  */
 
-// Modal Components (for future use - gradual migration)
-import { LocationSearch, AssigneeSelector } from './modal/components';
 import { Logger } from './logger';
 import { escapeHTML, isSafeEditorLink, safeAvatarUrl, safeClickUpUrl, safeColor, sanitizeGmailHtml } from './utils/sanitize.utils';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from './hierarchy-utils';
@@ -102,18 +100,6 @@ interface TaskResult {
     success?: boolean;
 }
 
-interface TeamsResponse {
-    teams: Array<{
-        id: string;
-        name: string;
-        members?: Member[];
-    }>;
-}
-
-interface SpacesResponse {
-    spaces: Space[];
-}
-
 interface FoldersResponse {
     folders: Folder[];
 }
@@ -145,14 +131,10 @@ export class TaskModal {
         allLists: []
     };
     private selectedListId: string | null = null;
-    private selectedListPath: string = '';
     private selectedTaskId: string | null = null;
-    private selectedTaskData: TaskResult | null = null;
     private isResizing: boolean = false;
     private teamId: string | null = null;
-    private listCache: Map<string, ListItem[]> = new Map();
     private searchTimeout: ReturnType<typeof setTimeout> | null = null;
-    private isSearching: boolean = false;
     private taskSearchSequence: number = 0;
     private previouslyFocused: HTMLElement | null = null;
 
@@ -1108,7 +1090,6 @@ export class TaskModal {
 
     async selectLocation(listId: string, path: string): Promise<void> {
         this.selectedListId = listId;
-        this.selectedListPath = path;
 
         const input = this.modal!.querySelector('#cu-location-input') as HTMLInputElement;
         const selectedDiv = this.modal!.querySelector('.cu-selected-location') as HTMLElement;
@@ -1166,7 +1147,6 @@ export class TaskModal {
 
     clearLocation(): void {
         this.selectedListId = null;
-        this.selectedListPath = '';
 
         const input = this.modal!.querySelector('#cu-location-input') as HTMLInputElement;
         const selectedDiv = this.modal!.querySelector('.cu-selected-location') as HTMLElement;
@@ -1669,7 +1649,6 @@ export class TaskModal {
 
     selectTask(task: TaskResult): void {
         this.selectedTaskId = task.id;
-        this.selectedTaskData = task;
 
         const input = this.modal!.querySelector('#cu-task-search') as HTMLInputElement;
         const resultsContainer = this.modal!.querySelector('.cu-task-search-results') as HTMLElement;
@@ -1689,7 +1668,6 @@ export class TaskModal {
 
     clearSelectedTask(): void {
         this.selectedTaskId = null;
-        this.selectedTaskData = null;
 
         const input = this.modal!.querySelector('#cu-task-search') as HTMLInputElement;
         const selectedContainer = this.modal!.querySelector('.cu-selected-task') as HTMLElement;

@@ -7,6 +7,7 @@
 
 // Storage key for the encryption key
 const ENCRYPTION_KEY_STORAGE = 'encryptionKey';
+let encryptionKeyPromise: Promise<CryptoKey> | null = null;
 
 interface EncryptedData {
     iv: string;      // Base64 encoded IV
@@ -19,6 +20,16 @@ interface EncryptedData {
  * Key is derived from extension ID + random salt for uniqueness
  */
 async function getOrCreateEncryptionKey(): Promise<CryptoKey> {
+    if (encryptionKeyPromise) return encryptionKeyPromise;
+    encryptionKeyPromise = loadOrCreateEncryptionKey();
+    try {
+        return await encryptionKeyPromise;
+    } finally {
+        encryptionKeyPromise = null;
+    }
+}
+
+async function loadOrCreateEncryptionKey(): Promise<CryptoKey> {
     const stored = await chrome.storage.local.get(ENCRYPTION_KEY_STORAGE);
 
     if (stored[ENCRYPTION_KEY_STORAGE]) {

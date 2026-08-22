@@ -49,7 +49,7 @@ interface TaskCreatedEvent extends CustomEvent<{ task: TaskMapping; threadId: st
 Logger.info('Gmail content script loading...');
 
 // Listen for messages from popup immediately
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'gmailIntegrationPreferenceChanged' && typeof request.enabled === 'boolean') {
         gmailIntegrationEnabled = request.enabled;
         applyGmailIntegrationState();
@@ -300,17 +300,6 @@ function getSenderEmail(scope?: Element | null): string {
 
 function getEmailBody(body?: Element | null): string {
     return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml(body));
-}
-
-// ============================================================================
-// ClickUp Bar Injection
-// ============================================================================
-
-function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: string | null): void {
-    const bar = createClickUpBar(threadId);
-    body.parentElement?.insertBefore(bar, body);
-    Logger.info(' Bar injected');
-    if (isConfirmedThreadId(threadId)) verifyThreadTasks(threadId, bar);
 }
 
 function createClickUpBar(threadId: string | null, messageBody?: HTMLElement): HTMLElement {

@@ -31,11 +31,12 @@ describe('B2 sanitizer and message security', () => {
         const html = sanitizer.sanitizeGmailHtml(`
             <div onclick="evil()" style="background:url(https://x.test/a)">Hi<script>x()</script></div>
             <iframe srcdoc="<script>x()</script>"></iframe><form action="https://x.test"><input></form>
-            <svg onload="x()"></svg><math></math><img src="https://tracker.test/pixel.png" onerror="x()">
-            <a href="javascript:alert(1)">bad</a><a href="https://example.com/message">ok</a>
+            <style>.x{background:url(https://tracker.test/css)}</style>
+            <svg onload="x()"></svg><math></math><img src="https://tracker.test/pixel.png" srcset="https://tracker.test/2x.png 2x" onerror="x()">
+            <a href="javascript:alert(1)">bad</a><a href="https://example.com/message" ping="https://tracker.test/ping">ok</a>
         `);
 
-        expect(html).not.toMatch(/script|iframe|form|input|svg|math|onclick|onerror|srcdoc|javascript:|tracker\.test|url\(/i);
+        expect(html).not.toMatch(/script|iframe|form|input|svg|math|style|onclick|onerror|srcdoc|srcset|ping=|javascript:|tracker\.test|url\(/i);
         expect(html).toContain('https://example.com/message');
         expect(html).toContain('rel="noopener noreferrer nofollow"');
     });

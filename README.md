@@ -2,33 +2,34 @@
 
 > 🤖 **Built with AI**: This extension was developed by [**Leandro Iramain**](https://leandroiramain.com.ar) with the assistance of AI.
 
-A Chrome extension to create ClickUp tasks directly from Gmail emails with time tracking, email-task linking, safer local data handling, and local-first build validation.
+A Chrome extension that connects Gmail, Google Calendar, Google Meet, and ClickUp for task creation, linking, agenda planning, and time tracking.
 
 ![Chrome](https://img.shields.io/badge/Chrome-MV3-green.svg)
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
 ![Tests](https://img.shields.io/badge/Tests-local%20suite-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-1.2.3-blue.svg)
+![Version](https://img.shields.io/badge/Version-2.0.0--beta.1-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🆕 What's New in v1.2.3
+## 🆕 What's New in v2.0.0-beta.1
 
-- **Task Work Sessions** - A running task continues while you work in Gmail, Chatwoot, documentation, or another non-task tab.
-- **Atomic Task Switching** - Opening another valid ClickUp task validates the destination before stopping the previous timer and starting the new one.
-- **Last Task-Tab Stop** - With Auto-Stop enabled, closing the last direct or ClickUp Inbox detail tab for the running task stops that timer; another tab for the same task keeps it running.
-- **Manual Stop Guard** - Stopping manually prevents the same focused task from immediately restarting; another task or an explicit start clears the guard.
-- **Stable Gmail Task Links** - Repeated Gmail scans preserve unchanged linked-task anchor nodes, so hover, keyboard focus, and clicks remain stable.
-- **Meet-Aware Stops** - A confirmed Meet without a linked task stops the current task and waits for selection; a linked Meet keeps or switches to its mapped task.
+- **Full-tab app** - The toolbar popup now opens a responsive application for dashboard, tasks, agenda, tracking, and settings.
+- **Calendar agenda** - Read-only Agenda and Week views cover seven days, overlapping events, declined-event dimming, and explicit task destinations.
+- **Meet mappings** - Calendar occurrences or recurring series can be linked to ClickUp tasks and reused by Meet Priority.
+- **Gmail controls** - The Gmail integration can be shown or hidden, and task creation supports explicit safe image attachments.
+- **Work schedule** - Configure working days and daily hour targets with a calculated weekly objective.
+- **Compact task modal** - A denser responsive form includes ClickUp-compatible Markdown with reversible visual/source editing.
+- **Release hardening** - API requests have bounded timeouts, startup is race-safe, Gmail HTML uses an attribute allowlist, and generated releases include the full application.
 
-Meet Priority remains opt-in and off by default. The v1.2.x delta adds only the exact `https://meet.google.com/*` host needed by its minimal detector; it adds no audio, video, microphone, camera, capture, participant, chat, captions, history, notification, or Calendar permission.
+Meet Priority remains opt-in and off by default. Calendar access is read-only and limited to events owned by the signed-in Google account. The extension does not request audio, video, microphone, camera, capture, participant, chat, captions, history, or notification permissions.
 
 - ✅ **Link reliability:** Gmail thread links now use a safer V2 state model with validation, retries, and less accidental unlinking.
 - 🔐 **Message and render hardening:** Runtime messages are origin/schema checked; Gmail HTML and high-risk UI sinks are sanitized before use.
 - 💾 **Safer local data tools:** Exports are versioned and limited to link/settings data; clear requires a recent export and explicit confirmation.
 - 🩺 **Safe Diagnostics:** An off-by-default, 200-event browser-session log can be exported or cleared separately; closed allowlists exclude tokens, headers, URLs, account/task identifiers, names, emails, payloads, and Gmail/Meet content.
-- 📦 **Release preflight:** Added local release build/validation scripts with an explicit allowlist and blocked-file checks. No ZIP/signing is performed by default.
+- 📦 **Release preflight:** Local release builds use an exact allowlist and blocked-file checks; GitHub prerelease assets are unsigned ZIP files for unpacked installation.
 - ✍️ **Author metadata:** Extension metadata and popup footer now identify Leandro Iramain as author.
 
 
@@ -53,6 +54,8 @@ Meet Priority remains opt-in and off by default. The v1.2.x delta adds only the 
 - **Auto-Stop** - Stop when another ClickUp task is opened or the last tab representing the running task is closed
 - **Toggle Settings** - Enable/disable auto-tracking per preference
 - **Google Meet Priority** - Optionally link a confirmed Meet session to a ClickUp task without capturing meeting content
+- **Google Calendar Agenda** - View seven days as agenda or week and create/link ClickUp tasks from events
+- **Work Schedule** - Configure workdays and daily/weekly hour goals
 
 ### Performance
 - **List Cache** - Pre-load all spaces/folders/lists for instant modal loading
@@ -61,7 +64,8 @@ Meet Priority remains opt-in and off by default. The v1.2.x delta adds only the 
 ### Sync & Migration
 - **Email Tasks Sync** - Sync existing email-task links when migrating PC/browser
 - **Thread ID Tracking** - Email links stored in task description for efficient sync
-- **Sanitized Email HTML Attachment** - Attach a sanitized HTML snapshot of the email to ClickUp tasks. Original Gmail file attachments are disabled in v1.2.0.
+- **Sanitized Email HTML Attachment** - Attach a sanitized HTML snapshot of the email to ClickUp tasks
+- **Explicit Image Attachments** - Select PNG, JPEG, GIF, or WebP images with per-file and per-operation limits
 
 ---
 
@@ -75,7 +79,7 @@ This extension reduces common local-extension risks but is not a security bounda
 | **Production-safe logger** | Debug and sensitive payload logging is suppressed in normal builds |
 | **Message validation** | Runtime messages are checked by sender origin and expected shape |
 | **Sanitized Gmail HTML** | Email HTML is sanitized before being attached or rendered through extension flows |
-| **Narrower permissions** | Runtime host permissions are limited to Gmail, ClickUp API/app, and the exact `meet.google.com` origin |
+| **Narrower permissions** | Runtime hosts are limited to Gmail, ClickUp API/app, Meet, and Google APIs required by the read-only Calendar scope |
 | **Meet data minimization** | Only a namespaced SHA-256 room hash and ClickUp mapping metadata are stored; multimedia and meeting content are not captured |
 | **Trusted local storage** | Host content scripts cannot read extension local storage directly |
 | **No analytics** | No telemetry or analytics code is included |
@@ -98,8 +102,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 | Document | Description |
 |----------|-------------|
-| [User Guide](USER_GUIDE.md) | Usage guide; this README and the changelog are authoritative for v1.2.3 changes |
-| [Technical Docs](TECHNICAL_DOCS.md) | Architecture reference; implementation and release docs are authoritative for v1.2.3 |
+| [User Guide](USER_GUIDE.md) | Usage guide for v2.0 |
+| [Technical Docs](TECHNICAL_DOCS.md) | Current architecture and security boundaries |
 | [Changelog](CHANGELOG.md) | Version history and changes |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
 | [Security](SECURITY.md) | Security policy |
@@ -145,7 +149,7 @@ npm test
 # 4. Select this folder
 ```
 
-Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are intentionally ignored and are not part of the v1.2.3 release process.
+Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are not part of the v2.0 release process.
 
 ---
 
@@ -156,7 +160,8 @@ Only `npm run build:release` plus `npm run validate:release` is supported for th
 3. Enter **Client ID** and **Client Secret**
 4. Click **Sign in with ClickUp**
 5. Select your preferred workspace (optional)
-6. To use Meet Priority, enable **Detectar sesiones Google Meet** in the Tracking tab and choose a test task when a confirmed session is detected
+6. Connect Google Calendar from the full app if you want Agenda and Week views
+7. To use Meet Priority, enable **Detectar sesiones Google Meet** and choose a task when a confirmed session is detected
 
 Chrome 102 or newer is required. Meet Priority is off by default and the extension is not allowed in incognito mode.
 
@@ -171,16 +176,15 @@ clickup-gmail-chrome/
 ├── src/
 │   ├── services/          # API, Auth, Crypto, Storage, Timer
 │   ├── clickup-tracker.ts # Auto time tracking on ClickUp.com
+│   ├── calendar/          # Read-only agenda, event cache, mappings, and Calendar runtime
 │   ├── meet/              # Minimal Meet detector, private room identity, and priority state
 │   ├── gmail-native.ts    # Gmail DOM integration
 │   ├── gmail-adapter.ts   # DOM abstraction layer
 │   ├── modal.ts           # Task creation modal (59KB)
 │   ├── logger.ts          # Structured logging
 │   └── types/             # TypeScript definitions
-├── popup/
-│   ├── popup.html         # 3-tab UI (Tasks, Tracking, Config)
-│   ├── popup.ts
-│   └── popup.css
+├── app/                   # Responsive full-tab application
+├── popup/                 # Minimal launcher plus durable setup surface
 ├── styles/
 │   └── modal.css
 ├── tests/                 # Jest suites for service, UI, privacy, and release checks
@@ -207,8 +211,8 @@ clickup-gmail-chrome/
 ├─────────────────────────────────────────────────────────────┤
 │  ClickUpAPIWrapper                                          │
 │  - OAuth flow (encrypted tokens)                            │
-│  - API retry (exponential backoff)                          │
-│  - Token refresh on 401                                     │
+│  - API retry, rate governor, and bounded timeout             │
+│  - Explicit reconnection after confirmed authentication loss │
 │  - Task CRUD, Time Tracking                                 │
 └─────────────────────────────────────────────────────────────┘
                            ↓

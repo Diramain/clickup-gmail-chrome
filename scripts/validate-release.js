@@ -26,7 +26,6 @@ function listFiles(dir, prefix = '') {
 const manifest = readJson('manifest.json');
 const packageJson = readJson('package.json');
 const packageLock = readJson('package-lock.json');
-if (manifest.version !== '1.2.3' || packageJson.version !== '1.2.3') fail('Version must be 1.2.3 in manifest.json and package.json');
 if (manifest.version !== packageJson.version) fail('Manifest/package version mismatch');
 if (packageLock.version !== manifest.version || packageLock.packages?.['']?.version !== manifest.version) fail('Package lock version mismatch');
 if (manifest.author !== 'Leandro Iramain') fail('Manifest author mismatch');

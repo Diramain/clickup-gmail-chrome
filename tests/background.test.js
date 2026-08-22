@@ -210,7 +210,8 @@ describe('Background-owned local data clear', () => {
         expect(background).toMatch(/await chrome\.storage\.local\.remove\(\[/);
         expect(background).toMatch(/await chrome\.storage\.local\.set\(\{\s*\[STORAGE_KEYS\.EMAIL_TASK_MAPPINGS_V2\]: \{\}/);
         expect(background).toMatch(/const schemaVersion = resolveSchemaVersion\(store\.schemaVersion\)/);
-        expect(background).toMatch(/hierarchyCache = \{\}/);
+        expect(background).toMatch(/taskSearchCaches\.clear\(\)/);
+        expect(background).toMatch(/dashboardSnapshotCache\.clear\(\)/);
         expect(background).not.toMatch(/lastEmailSync:\s*undefined|lastEmailSyncCount:\s*undefined/);
     });
 

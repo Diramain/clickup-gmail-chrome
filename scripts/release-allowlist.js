@@ -2,6 +2,15 @@ const RELEASE_DIR = 'dist/extension';
 
 const RELEASE_FILES = [
     'background.js',
+    'app/app.css',
+    'app/app.html',
+    'app/app.js',
+    'app/assets/clickup-logomark.svg',
+    'app/assets/clickup-logo-on-light.svg',
+    'app/assets/clickup-logo-on-dark.svg',
+    'app/assets/google-calendar.svg',
+    'app/fonts/bricolage-grotesque-latin.woff2',
+    'app/fonts/fragment-mono-latin.woff2',
     'diagnostics/recorder.css',
     'diagnostics/recorder.html',
     'diagnostics/recorder.js',

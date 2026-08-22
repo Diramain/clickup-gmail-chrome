@@ -36,7 +36,6 @@ export class TrackingTab {
     private timeHistory: HTMLElement | null = null;
 
     private selectedTaskId: string = '';
-    private selectedTaskName: string = '';
     private searchTimeout!: ReturnType<typeof setTimeout>;
     private timerInterval: number | null = null;
 
@@ -213,7 +212,6 @@ export class TrackingTab {
 
     private selectTask(taskId: string, taskName: string): void {
         this.selectedTaskId = taskId;
-        this.selectedTaskName = taskName;
         if (this.taskSearch) this.taskSearch.value = taskName;
         if (this.taskSearchResults) this.taskSearchResults.innerHTML = '';
         this.checkManualEnabled();

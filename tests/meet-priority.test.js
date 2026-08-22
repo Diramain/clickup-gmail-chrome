@@ -320,7 +320,7 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
 
     test('manifest adds only exact Meet access and explicitly blocks incognito/capture permissions', () => {
         const manifest = JSON.parse(source('manifest.json'));
-        expect(manifest.version).toBe('1.2.3');
+        expect(manifest.version).toBe('2.0.0');
         expect(manifest.minimum_chrome_version).toBe('102');
         expect(manifest.incognito).toBe('not_allowed');
         expect(manifest.host_permissions).toContain('https://meet.google.com/*');

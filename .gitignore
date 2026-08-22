@@ -8,6 +8,7 @@ dist/
 background.js
 task-modal-entry.js
 popup/popup.js
+popup/minimal.js
 app/app.js
 src/*.js
 src/**/*.js
@@ -37,6 +38,11 @@ clickup-gmail-backup-*.json
 
 # Internal AI capsule / operational evidence (repository is public)
 docs/ai/
+
+# Local agent/browser review artifacts
+.playwright-mcp/
+opencode.json
+*-layout-review.png
 
 # OS files
 .DS_Store

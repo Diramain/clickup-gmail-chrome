@@ -1,7 +1,7 @@
 # ClickUp Gmail Chrome Extension
 ## User Guide
 
-**Version:** 1.2.3
+**Version:** 2.0.0-beta.1
 **Last Updated:** August 2026
 
 ---
@@ -10,9 +10,10 @@
 
 ## Installation
 
-1. Download the extension from Chrome Web Store
-2. Click "Add to Chrome"
-3. Pin the extension to your toolbar for easy access
+1. Download and extract the ZIP from GitHub Releases
+2. Open `chrome://extensions` and enable Developer mode
+3. Choose **Load unpacked** and select the extracted folder
+4. Pin the extension to your toolbar for easy access
 
 ## Initial Setup
 
@@ -72,11 +73,17 @@ The modal includes:
 | **B** | Bold | Ctrl+B |
 | *I* | Italic | Ctrl+I |
 | ~~S~~ | Strikethrough | - |
-| `</>` | Code | - |
+| `</>` | Inline code | - |
 | 🔗 | Link | - |
 | • | Bullet List | - |
 | 1. | Numbered List | - |
 | > | Quote | - |
+
+The Markdown tab and visual editor stay synchronized. Supported task-description formats are headings, emphasis, ordered/unordered lists, links, quotes, and inline code.
+
+### Image Attachments
+
+The task form lists eligible Gmail images explicitly. Nothing is uploaded unless selected. PNG, JPEG, GIF, and WebP are supported; SVG is rejected. Limits are 10 MiB per file and 20 MiB per operation.
 
 ---
 
@@ -97,12 +104,24 @@ Tasks linked to an email appear:
 
 ---
 
+## 📅 Google Calendar and Meet
+
+1. Open the full app from the extension icon.
+2. Connect Google Calendar from **Agenda**.
+3. Switch between Agenda and Week views.
+4. Create a task using an explicit ClickUp List, or link an existing task.
+5. Choose occurrence or series scope for recurring events.
+
+Calendar access is read-only. Event details remain in an expiring in-memory cache; saved mappings contain only reduced event/series keys and ClickUp task metadata.
+
+---
+
 ## ⏱️ Time Tracking
 
-### From Popup
+### From the Full App
 
-1. Click the extension icon
-2. Go to **Tracking** tab
+1. Click the extension icon to open the full app
+2. Go to **Tracking**
 3. Search for a task
 4. Click "▶️ Start Timer"
 5. Click "⏹️ Stop" when done

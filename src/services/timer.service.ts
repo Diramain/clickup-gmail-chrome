@@ -30,8 +30,6 @@ const BADGE_STATES: Record<BadgeState, BadgeConfig> = {
 // Timer Service Class
 // ============================================================================
 
-type ApiMethod<T> = () => Promise<T>;
-
 class TimerService {
     private currentState: BadgeState = 'stopped';
 

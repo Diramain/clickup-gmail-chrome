@@ -87,7 +87,7 @@ describe('B1 privacy hardening', () => {
         expect(result.draftClientSecret).toBeUndefined();
     });
 
-    test('privacy policy matches v1.2.3 local data, work-session tracking, Meet minimization, export, and retention claims', () => {
+    test('privacy policy matches v2.0.0 local data, work-session tracking, Meet minimization, export, and retention claims', () => {
         const policy = source('PRIVACY_POLICY.md');
 
         expect(policy).toContain('**Last Updated:** 2026-08-22');
@@ -115,7 +115,7 @@ describe('B1 privacy hardening', () => {
         expect(policy).toMatch(/does not access or capture audio, microphone, video, camera, chat, captions/i);
         expect(policy).toMatch(/stable room hash is pseudonymous metadata, not anonymous data/i);
         expect(policy).toMatch(/excludes Meet room keys and Meet task mappings/i);
-        expect(policy).toMatch(/Gmail content script reads only the versioned Gmail-controls preference directly/i);
+        expect(policy).toMatch(/Gmail, ClickUp, and Meet host content scripts are denied direct access to `chrome\.storage\.local`/i);
         expect(policy).toMatch(/not allowed to run in incognito mode/i);
         expect(policy).toMatch(/clear local data[\s\S]*does not delete or modify data already sent to ClickUp/i);
         expect(policy).toMatch(/Safe Diagnostics is off by default/i);

@@ -157,6 +157,27 @@ describe('CISO editor sanitization and rate governor', () => {
         expect(absurd.getState().blockedUntil).toBe(0);
     });
 
+    test('API requests abort after the bounded timeout', async () => {
+        jest.useFakeTimers();
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn((_input, init) => new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        }));
+        try {
+            const { ClickUpAPIWrapper } = loadTsModule('src/services/api.service.ts');
+            const api = new ClickUpAPIWrapper('synthetic-token', {
+                reserve: async () => undefined,
+                observe: () => undefined,
+            });
+            const rejection = expect(api.request('/team')).rejects.toMatchObject({ name: 'TimeoutError' });
+            await jest.advanceTimersByTimeAsync(30_000);
+            await rejection;
+        } finally {
+            global.fetch = originalFetch;
+            jest.useRealTimers();
+        }
+    });
+
     test('429 Retry-After defers the governor globally before local retry sleep', async () => {
         const { ClickUpAPIWrapper, ClickUpRateGovernor } = loadTsModule('src/services/api.service.ts');
         let now = 1000;

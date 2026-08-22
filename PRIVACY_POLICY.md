@@ -4,9 +4,9 @@
 
 ## 1. Overview
 
-ClickUp Gmail Tracker is a Chrome extension that helps you create or attach ClickUp tasks from Gmail. The extension runs locally in your browser and does not operate its own servers or analytics service.
+ClickUp Gmail Tracker is a Chrome extension that connects Gmail, optional Google Calendar and Meet workflows, and ClickUp task/time tracking. The extension runs locally in your browser and does not operate its own servers or analytics service.
 
-This policy describes what the extension handles for version 1.2.3. It does not replace the privacy policies of Google/Gmail, ClickUp, Chrome, or your browser profile provider.
+This policy describes what the extension handles for version 2.0.0. It does not replace the privacy policies of Google/Gmail, ClickUp, Chrome, or your browser profile provider.
 
 ## 2. Gmail Data
 
@@ -32,7 +32,7 @@ Google Meet Priority is optional and off by default. A minimal content script is
 
 Before any room identity leaves the Meet content script, the extension computes `SHA-256("cgc-meet-v1:" + roomCode)`. Runtime messages contain only a closed event type and the resulting 64-character room key. The raw room code, full URL, URL parameters, fragment, meeting title, Calendar event, invitees, and participants are not sent to the background worker, persisted, or logged by this feature.
 
-The feature does not access or capture audio, microphone, video, camera, chat, captions, transcripts, screen content, screenshots, or participant lists. It does not request audio/video/tab/desktop capture, history, notifications, or Google Calendar permissions.
+The feature does not access or capture audio, microphone, video, camera, chat, captions, transcripts, screen content, screenshots, or participant lists. It does not request audio/video/tab/desktop capture, history, or notifications. Google Calendar uses the separate optional read-only scope described below.
 
 If you choose to remember a room association, local storage contains only the pseudonymous room key, ClickUp task ID, workspace ID, creation/last-use timestamps, and enabled state. A stable room hash is pseudonymous metadata, not anonymous data. You can disable or delete each association in the popup, remove all local mappings with the clear-data control, or uninstall the extension.
 
@@ -46,7 +46,7 @@ Google Calendar is optional and connects only after you press the explicit conne
 
 The extension reduces each response to the event title, start/end time, confirmed/tentative state, and whether a canonical Google Meet link exists. It does not retain or expose invitees, descriptions, locations, organizer data, attachments, full Meet URLs, or Calendar event IDs. Calendar event details remain in bounded memory for up to one minute and are cleared on disconnect, extension reload, or browser restart. Google OAuth tokens remain managed by `chrome.identity` and are not written to extension storage or diagnostics.
 
-Calendar-to-ClickUp task linking is an explicit user action. It persists only the existing pseudonymous Meet room key and ClickUp mapping described above. Disconnecting removes the known cached Google token and clears the in-memory agenda; you can also revoke access in your Google account.
+Calendar-to-ClickUp task linking is an explicit user action. It persists reduced SHA-256 occurrence or recurring-series keys plus ClickUp task ID/name metadata; a Meet mapping may also be saved when the event has a canonical Meet room. Raw Calendar event IDs and full Meet URLs are not persisted. Disconnecting removes the known cached Google token and clears the in-memory agenda; you can also revoke access in your Google account.
 
 ## 5. ClickUp Data and OAuth
 
@@ -73,7 +73,7 @@ The email body is not retained as a local mapping. It may be processed temporari
 
 Mappings persist until you delete them, clear local data, or uninstall the extension. Caches may expire, be replaced, or be cleared by the user. The extension does not claim automatic time-based purging of mappings.
 
-ClickUp and Meet host content scripts are denied direct access to `chrome.storage.local`. The Gmail content script reads only the versioned Gmail-controls preference directly so it can remove or restore injected controls immediately when that preference changes. Other approved reads and all privileged operations go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
+Gmail, ClickUp, and Meet host content scripts are denied direct access to `chrome.storage.local`. Approved reads and all privileged operations go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
 
 Safe Diagnostics is off by default. Its state and bounded event buffer use `chrome.storage.session` with access restricted to trusted extension contexts. Chrome keeps that area in memory and clears it when the extension is disabled, reloaded, or updated, and when the browser restarts. You can also disable capture, export the allowlisted JSON, or clear the buffer from the popup at any time.
 

@@ -1,20 +1,11 @@
 import {
     ClickUpTask,
-    ClickUpList,
-    ClickUpFolder,
-    ClickUpSpace,
-    ClickUpTeam,
-    ClickUpUser,
     ClickUpUserResponse,
     ClickUpTeamsResponse,
-    ClickUpSpacesResponse,
-    ClickUpFoldersResponse,
-    ClickUpListsResponse,
     ExtensionMessage,
     CreateTaskPayload,
     EmailData,
     TimeEntry,
-    ClickUpCustomField,
     ClickUpCustomTaskType
 } from './src/types/clickup';
 import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
@@ -62,7 +53,6 @@ import {
     executeFocusedTimerAction,
     removeClickUpTaskTabIndexEntry,
     resolveClickUpFocusContext,
-    updateClickUpTaskTabIndex,
     type FocusedTabSnapshot,
     type TimerAutoSettings,
 } from './src/clickup-focus';
@@ -228,11 +218,6 @@ function emitSyncProgress(message: SyncProgressMessage): void {
     void chrome.runtime.sendMessage(message).catch(() => undefined);
 }
 
-interface CacheEntry<T> {
-    data: T;
-    timestamp: number;
-}
-
 interface TaskSearchCache {
     tasks: Map<string, ClickUpTask>;
     nextPage: number;
@@ -291,15 +276,10 @@ async function loadNextTaskSearchPage(teamId: string, cache: TaskSearchCache): P
     }
 }
 
-interface HierarchyData {
-    spaces: ClickUpSpace[];
-    lists?: ClickUpList[];
-}
-
 let clickupAPI: ClickUpAPIWrapper | null = null;
+let apiInitializationPromise: Promise<void> | null = null;
 let authenticationStateQueue: Promise<void> = Promise.resolve();
 let currentUserValidatedAt = 0;
-let hierarchyCache: Record<string, CacheEntry<HierarchyData>> = {};
 const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
 let mappingWriteQueue: Promise<void> = Promise.resolve();
 let focusedTimerQueue: Promise<void> = Promise.resolve();
@@ -312,6 +292,10 @@ let meetPrioritySession: MeetPrioritySession | null = null;
 let logoutInProgress = false;
 const customFieldUpdateQueues = new Map<string, Promise<void>>();
 const HIERARCHY_FOLDER_CONCURRENCY = 3;
+const API_REQUIRED_MESSAGE_ACTIONS = new Set<string>([
+    'getMembers', 'getList', 'startTimer', 'stopTimer', 'getRunningTimer',
+    'createTimeEntry', 'addTimeEntry', 'getTimeEntries',
+]);
 
 // Default badge state
 const BADGE_STATES = {
@@ -448,7 +432,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // Initialize API wrapper
-async function initializeAPI() {
+async function initializeAPI(): Promise<void> {
+    if (apiInitializationPromise) return apiInitializationPromise;
+    apiInitializationPromise = initializeAPIOnce();
+    try {
+        await apiInitializationPromise;
+    } finally {
+        apiInitializationPromise = null;
+    }
+}
+
+async function initializeAPIOnce(): Promise<void> {
     recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'started' });
     const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
@@ -507,7 +501,6 @@ async function invalidateAuthenticationSession(rejectedToken: string): Promise<b
         }
         clickupAPI = null;
         currentUserValidatedAt = 0;
-        hierarchyCache = {};
         taskSearchCaches.clear();
         await chrome.storage.local.set({ [STORAGE_KEYS.REAUTH_REQUIRED]: true });
         await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
@@ -542,7 +535,7 @@ function runAuthenticationStateMutation<T>(operation: () => Promise<T>): Promise
     return result;
 }
 
-initializeAPI();
+void initializeAPI().catch((error) => Logger.error('API_INITIALIZATION_FAILED', error));
 initializeLinkStorageShadow().catch((e) => {
     Logger.error('LINK_STORAGE_SHADOW_MIGRATION_SKIPPED', e);
 });
@@ -589,6 +582,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 
 async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.MessageSender) {
     const { action, data } = message;
+    if (API_REQUIRED_MESSAGE_ACTIONS.has(action)) await ensureAPI();
 
     switch (action) {
         case 'authenticate':
@@ -720,7 +714,6 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 ]);
                 clickupAPI = null;
                 currentUserValidatedAt = 0;
-                hierarchyCache = {};
                 taskSearchCaches.clear();
                 dashboardSnapshotCache.clear();
             });
@@ -921,7 +914,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             };
 
         case 'createTask': // Action used by Gmail Button (Default List)
-            return await createTaskFromEmail(message.emailData || data);
+            return await createTaskFromEmail();
 
         case 'createTaskSimple': // Action used by Quick Create Form (Manual List Selection)
             return await createTaskSimple(data);
@@ -1060,6 +1053,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
         case 'linkGoogleCalendarEventTask': {
             if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            if (!await ensureCalendarAgendaEvent(data.eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
             const teamId = await resolveFocusedTimerTeamId();
             if (!teamId || !await validateFocusedTask(data.taskId, teamId)) {
                 throw new Error('CALENDAR_TASK_INVALID');
@@ -1082,6 +1076,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
         case 'openGoogleCalendarMeet': {
             if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            if (!await ensureCalendarAgendaEvent(data.eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
             const url = canonicalMeetUrlFromCalendarAgenda(calendarAgendaCache, data.eventKey);
             if (!url) throw new Error('CALENDAR_MEET_UNAVAILABLE');
             await chrome.tabs.create({ url, active: true });
@@ -1709,6 +1704,13 @@ async function withCalendarTaskMappings(view: CalendarAgendaViewV1): Promise<Cal
     };
 }
 
+async function ensureCalendarAgendaEvent(eventKey: string): Promise<boolean> {
+    if (calendarAgendaCache.get(eventKey)) return true;
+    const refreshed = await googleCalendarRuntime.refresh();
+    if (refreshed.state !== 'ready' && refreshed.state !== 'empty') return false;
+    return calendarAgendaCache.get(eventKey) !== null;
+}
+
 async function saveCalendarTaskMapping(eventKey: string, scope: CalendarTaskLinkScope, task: { id: string; name: string }): Promise<void> {
     const now = Date.now();
     let reducedKey = eventKey;
@@ -1751,6 +1753,7 @@ async function createAndMapCalendarTask(
     listId: string,
     parentTaskId?: string,
 ): Promise<CalendarAgendaViewV1 & { calendarCreateStatus?: { outcome: 'created' | 'partial'; taskId: string; comment: 'added' | 'failed' | 'none' } }> {
+    if (!await ensureCalendarAgendaEvent(eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
     const storageKey = await resolveCalendarTaskMappingStorageKey(eventKey, scope);
     if (calendarTaskCreateInFlight.has(storageKey)) throw new Error('CALENDAR_TASK_CREATE_IN_FLIGHT');
     const before = await readCalendarTaskMappings();
@@ -2603,55 +2606,6 @@ async function getCachedHierarchy(teamId: string) {
 // Task Linking Logic
 // ============================================================================
 
-const EMAIL_REGEX = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/;
-
-// Check if a task is linked to this email thread
-// Check if a task is linked to this email thread
-function isTaskLinked(task: any, threadId: string, customFieldName: string = 'gmail thread id'): boolean {
-    const extractedId = extractThreadId(task, customFieldName);
-    return extractedId === threadId;
-}
-
-function extractThreadId(task: any, customFieldName: string): string | null {
-    // 1. Check for Configured Custom Field
-    if (task.custom_fields && Array.isArray(task.custom_fields)) {
-        const threadIdField = task.custom_fields.find((field: any) =>
-            field.name.toLowerCase() === customFieldName && field.value
-        );
-        if (threadIdField) {
-            return threadIdField.value; // It's a text field
-        }
-    }
-
-    // Pattern: Thread ID: xxxxxxxxxxxx or threadId=xxxxxxxxxxxx
-    const patterns = [
-        /_Thread ID: ([a-f0-9]+)_/i,
-        /Thread ID: ([a-f0-9]+)/i,
-        /threadId=([a-f0-9]+)/i,
-        /inbox\/([a-f0-9]+)/i
-    ];
-
-    // Check task name
-    for (const pattern of patterns) {
-        const match = task.name?.match(pattern);
-        if (match) return match[1];
-    }
-
-    // Check description
-    for (const pattern of patterns) {
-        const match = task.description?.match(pattern);
-        if (match) return match[1];
-    }
-
-    // Check text_content
-    for (const pattern of patterns) {
-        const match = task.text_content?.match(pattern);
-        if (match) return match[1];
-    }
-
-    return null;
-}
-
 async function findLinkedTasks(threadId: string): Promise<ClickUpTask[]> {
     if (!isConfirmedThreadId(threadId)) return [];
     const mappings = await getEmailTaskMappingsForRead();
@@ -2807,7 +2761,8 @@ async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ s
             [STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]: {},
             schemaVersion,
         });
-        hierarchyCache = {};
+        taskSearchCaches.clear();
+        dashboardSnapshotCache.clear();
     });
 
     mappingWriteQueue = next.catch(() => undefined);
@@ -3231,7 +3186,7 @@ async function updateTimerBadge(state: 'playing' | 'stopped' | 'paused' | 'meeti
 // Task Creation Functions
 // ============================================================================
 
-async function createTaskFromEmail(emailData: EmailData): Promise<ClickUpTask> {
+async function createTaskFromEmail(): Promise<ClickUpTask> {
     await ensureAPI();
     // With Default List removed, this function requires a list target.
     throw new Error('Usá el formulario de tarea para crear tareas.');

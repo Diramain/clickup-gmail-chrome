@@ -189,6 +189,7 @@ export class ClickUpAPIWrapper {
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_STATUS_CODES = [429, 500, 502, 503, 504];
+    private static readonly REQUEST_TIMEOUT_MS = 30_000;
 
     constructor(
         token: string,
@@ -333,9 +334,20 @@ export class ClickUpAPIWrapper {
 
     private async fetchWithGovernor(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
         await this.governor.reserve();
-        const response = await fetch(input, init);
-        this.governor.observe(response.headers);
-        return response;
+        const controller = new AbortController();
+        const callerSignal = init?.signal;
+        const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+        if (callerSignal?.aborted) abortFromCaller();
+        else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+        const timeout = setTimeout(() => controller.abort(new DOMException('ClickUp request timed out', 'TimeoutError')), ClickUpAPIWrapper.REQUEST_TIMEOUT_MS);
+        try {
+            const response = await fetch(input, { ...init, signal: controller.signal });
+            this.governor.observe(response.headers);
+            return response;
+        } finally {
+            clearTimeout(timeout);
+            callerSignal?.removeEventListener('abort', abortFromCaller);
+        }
     }
 
     private async createReauthenticationError(): Promise<ApiError> {

@@ -154,6 +154,14 @@ describe('CGC-CALENDAR-014 read-only agenda local canary', () => {
         }
     });
 
+    test('refreshes an expired Calendar event before create, link, or Meet actions', () => {
+        const background = source('background.ts');
+        expect(background).toContain('async function ensureCalendarAgendaEvent(eventKey: string)');
+        expect(background).toMatch(/case 'linkGoogleCalendarEventTask':[\s\S]{0,240}ensureCalendarAgendaEvent\(data\.eventKey\)/);
+        expect(background).toMatch(/case 'openGoogleCalendarMeet':[\s\S]{0,240}ensureCalendarAgendaEvent\(data\.eventKey\)/);
+        expect(background).toMatch(/async function createAndMapCalendarTask[\s\S]{0,500}ensureCalendarAgendaEvent\(eventKey\)/);
+    });
+
     test('reduces recurringEventId to a stable series key and resolves future synthetic instances by series', async () => {
         const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
         const previousTextEncoder = globalThis.TextEncoder;

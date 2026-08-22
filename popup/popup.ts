@@ -3,10 +3,6 @@
  * TypeScript version with Tab Modules
  */
 
-// Tab Modules
-import { tasksTab } from './tabs/tasks.tab';
-import { trackingTab } from './tabs/tracking.tab';
-import { configTab } from './tabs/config.tab';
 import { escapeHTML, safeAvatarUrl, safeClickUpUrl } from '../src/utils/sanitize.utils';
 import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from '../src/data-management';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
@@ -55,16 +51,6 @@ interface ClickUpUser {
 }
 
 interface ClickUpTeam {
-    id: string;
-    name: string;
-}
-
-interface ClickUpSpace {
-    id: string;
-    name: string;
-}
-
-interface ClickUpList {
     id: string;
     name: string;
 }
@@ -661,8 +647,10 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const taskSearch = document.getElementById('taskSearch') as HTMLInputElement;
     const searchResults = document.getElementById('searchResults') as HTMLElement;
     let searchTimeout: ReturnType<typeof setTimeout>;
+    let taskSearchSequence = 0;
 
     const executeTaskSearch = async (query: string): Promise<void> => {
+        const sequence = ++taskSearchSequence;
         searchResults.innerHTML = '<p class="hint">Buscando…</p>';
         try {
                 let result: { tasks: any[]; hasMore?: boolean; indexedCount?: number } = { tasks: [], hasMore: true, indexedCount: 0 };
@@ -671,6 +659,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                     action: 'searchTasks',
                     data: { query }
                     });
+                    if (sequence !== taskSearchSequence) return;
                     if (isTaskSearchFailure(result)) throw new Error('TASK_SEARCH_FAILED');
                     if (result.tasks.length >= 10 || !result.hasMore) break;
                     searchResults.innerHTML = `<p class="hint">Buscando más coincidencias… ${Number(result.indexedCount) || 0} tareas revisadas.</p>`;
@@ -705,6 +694,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                     });
                 }
             } catch (e) {
+                if (sequence !== taskSearchSequence) return;
                 searchResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
     };
@@ -713,6 +703,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         clearTimeout(searchTimeout);
         const query = taskSearch.value.trim();
         if (query.length < 2) {
+            taskSearchSequence++;
             searchResults.innerHTML = '';
             return;
         }
@@ -2001,68 +1992,6 @@ async function loadTeams(): Promise<void> {
     } catch (error) {
         console.error('[Popup] LOAD_TEAMS_ERROR');
         teamSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
-    }
-}
-
-async function loadSpaces(teamId: string, selectSpaceId?: string, selectListId?: string): Promise<void> {
-    const spaceSelect = document.getElementById('spaceSelect') as HTMLSelectElement;
-    const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
-
-    spaceSelect.innerHTML = '<option value="">Cargando…</option>';
-    spaceSelect.classList.remove('hidden');
-    listSelect.classList.add('hidden');
-
-    try {
-        const spaces = await sendMessage<{ spaces: ClickUpSpace[] }>({
-            action: 'getSpaces',
-            data: { teamId }
-        });
-
-        spaceSelect.innerHTML = '<option value="">Seleccionar espacio…</option>';
-        spaces.spaces.forEach(space => {
-            const option = document.createElement('option');
-            option.value = space.id;
-            option.textContent = space.name;
-            spaceSelect.appendChild(option);
-        });
-
-        if (selectSpaceId) {
-            spaceSelect.value = selectSpaceId;
-            await loadLists(selectSpaceId, selectListId);
-        }
-    } catch (error) {
-        console.error('[Popup] LOAD_SPACES_ERROR');
-        spaceSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
-    }
-}
-
-async function loadLists(spaceId: string, selectListId?: string): Promise<void> {
-    const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
-
-    listSelect.innerHTML = '<option value="">Cargando…</option>';
-    listSelect.classList.remove('hidden');
-
-    try {
-        const lists = await sendMessage<{ lists: ClickUpList[] }>({
-            action: 'getLists',
-            data: { spaceId }
-        });
-
-        listSelect.innerHTML = '<option value="">Seleccionar lista…</option>';
-        lists.lists.forEach(list => {
-            const option = document.createElement('option');
-            option.value = list.id;
-            option.textContent = list.name;
-            listSelect.appendChild(option);
-        });
-
-        if (selectListId) {
-            listSelect.value = selectListId;
-            listSelect.style.borderColor = '#00c853';
-        }
-    } catch (error) {
-        console.error('[Popup] LOAD_LISTS_ERROR');
-        listSelect.innerHTML = '<option value="">No se pudieron cargar las listas</option>';
     }
 }
 

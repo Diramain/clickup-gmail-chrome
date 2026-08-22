@@ -1116,7 +1116,7 @@ export function sanitizeThemeChoice(value: unknown): AppTheme {
  * lo que habilita a la hoja de estilos a seguir `prefers-color-scheme`. Una
  * elección explícita gana siempre, incluso contra el sistema.
  */
-export function resolveInitialTheme(stored: unknown, prefersDark = false, ownerUnlocked = false): ResolvedTheme {
+export function resolveInitialTheme(stored: unknown, _prefersDark = false, ownerUnlocked = false): ResolvedTheme {
     if (typeof stored !== 'string' || stored.trim() === '') {
         return { theme: DEFAULT_THEME, source: 'auto' };
     }

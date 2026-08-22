@@ -68,7 +68,7 @@ const Logger: ILogger = {
     /**
      * Debug log - only shown when DEBUG is true
      */
-    debug(message: string, data: unknown = null): void {
+    debug(message: string, _data: unknown = null): void {
         if (!this.DEBUG || this.PRODUCTION) return;
 
         const prefix = `${this.PREFIX} [${this._timestamp()}] DEBUG:`;
@@ -78,7 +78,7 @@ const Logger: ILogger = {
     /**
      * Info log (suppressed in PRODUCTION mode)
      */
-    info(message: string, data: unknown = null): void {
+    info(message: string, _data: unknown = null): void {
         if (this.PRODUCTION) return;  // SEC-M3: Skip in production
 
         const prefix = `${this.PREFIX}`;
@@ -88,7 +88,7 @@ const Logger: ILogger = {
     /**
      * Warning log
      */
-    warn(message: string, data: unknown = null): void {
+    warn(message: string, _data: unknown = null): void {
         const prefix = `${this.PREFIX} ⚠️`;
         if (this.PRODUCTION) {
             console.warn(`%c${prefix} ${message}`, this.STYLES.warn);
