@@ -224,13 +224,12 @@ funcionales.
 - [x] B1.4. Generar `dist/chrome` y `dist/firefox` sin mezclar archivos.
 - [x] B1.5. Mantener allowlists y validadores separados por target.
 - [x] B1.6. Producir ZIP independientes y hashes SHA-256.
-- [~] B1.7. Agregar `web-ext lint` para Firefox. Job fijado a `web-ext@10.6.0`;
-  ejecucion local bloqueada por politica y pendiente de CI.
+- [x] B1.7. Agregar `web-ext lint` para Firefox. Job fijado a `web-ext@10.6.0`
+  y validado en CI.
 - [x] B1.8. Agregar jobs CI separados para Chrome y Firefox.
 
-**Gate B1:** `AMARILLO_CI_AND_TEMP_LOAD_PENDING`; ambos paquetes son
-reproducibles y Chrome conserva suite verde. Falta `web-ext lint` en CI y carga
-temporal Firefox sin errores de manifiesto.
+**Gate B1:** `VERDE`; ambos paquetes son reproducibles, Chrome conserva suite
+verde y Firefox instala temporalmente sin errores de manifiesto o startup.
 
 ### Fase B2: Adaptador WebExtensions
 
@@ -343,7 +342,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B1_IMPLEMENTED_VALIDATION_PENDING`.
+**Estado Plan B:** `B1_GREEN_B2_READY`.
 
 ---
 
@@ -374,6 +373,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | A30 | Gate A integrado | PR #2 con CI verde; merge commit `92a54437c993fecba37943d2b59ec1c500080108` en `main` | `v2.0.1` preservado |
 | 2026-08-23 | B0 | Contrato y matriz multi-browser cerrados | Inventario estatico del repo y documentacion MDN vigente; rama `feat/firefox-port` creada desde el merge de A30 | No aplica |
 | 2026-08-23 | B1.1-B1.6, B1.8 | Build multi-browser implementado | 34 archivos por target; runtime compartido byte-identico; 540/540 pruebas; Calendar fail-closed en `moz-extension:`; ZIP Chrome `32f630cca218df21987f81401e5de233cc076d15eabc98a8e3de096060cec41c`, Firefox `5f4fc62a96901b2770cbf303baa4f16610b07785c22b5120c19677151607b4e5`; integridad ZIP verde | Rebuild determinista con hashes identicos |
+| 2026-08-23 | B1.7 y Gate B1 | CI y carga temporal Firefox verdes | PR #3: tests, Chrome release y Firefox release con `web-ext lint` verdes; Firefox 154 en perfil descartable instalo y desinstalo el Gecko ID esperado con cero errores de startup | Perfil temporal terminado; sin persistencia ni publicacion |
 
 ## Registro De Decisiones
 
@@ -395,7 +395,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B1_IMPLEMENTED_VALIDATION_PENDING`.
+- Plan B: `B1_GREEN_B2_READY`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
