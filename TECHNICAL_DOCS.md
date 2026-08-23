@@ -1,4 +1,4 @@
-# ClickUp Gmail Tracker 2.0
+# TaskBridge for ClickUp 2.0
 
 Technical reference for the Chrome Manifest V3 extension.
 
@@ -6,12 +6,12 @@ Technical reference for the Chrome Manifest V3 extension.
 
 The extension has four runtime surfaces:
 
-1. `background.ts`: trusted service worker, OAuth boundary, ClickUp API client, Calendar runtime, mappings, timers, and message authorization.
+1. `background.ts`: trusted service worker, ClickUp personal-token/OAuth boundary, ClickUp API client, Calendar runtime, mappings, timers, and message authorization.
 2. `app/`: responsive full-tab application for dashboard, tasks, agenda, tracking, connections, and settings.
 3. `src/gmail-native.ts` and `src/modal.ts`: Gmail content integration and create/link task form.
 4. `src/clickup-tracker.ts` and `src/meet/meet-tracker.ts`: minimal host observers that send reduced events to the background worker.
 
-The toolbar uses `popup/minimal.html` only as a launcher. `popup/popup.html` remains the durable OAuth setup surface and its implementation is reused by the full app.
+The toolbar uses `popup/minimal.html` only as a launcher. `popup/popup.html` remains the durable ClickUp setup surface and its implementation is reused by the full app.
 
 ## Trust Boundaries
 
@@ -20,7 +20,7 @@ Host pages are untrusted. Gmail, ClickUp, and Meet content scripts cannot read `
 The service worker owns:
 
 - ClickUp and Google API calls.
-- OAuth token and client-secret access.
+- personal-token, OAuth-token, and client-secret access.
 - persistent task, Calendar, and Meet mappings.
 - timer writes and concurrency controls.
 - attachment upload validation.
@@ -37,6 +37,8 @@ No token, OAuth secret, raw Calendar event ID, Meet room code, Gmail HTML, or at
 - a 30-second request timeout;
 - confirmed authentication invalidation;
 - task, hierarchy, time-entry, comment, and attachment operations.
+
+The default connection accepts an individual `pk_` personal token only from the trusted setup pages, validates `/user` before encrypted persistence, and sets raw authorization explicitly. Advanced OAuth stores a locally encrypted BYO Client Secret and sets Bearer authorization. Successful method changes remove the previous credential boundary and account-derived caches. No credential is hardcoded or included in release assets.
 
 Task descriptions are sent through `markdown_description`. The editor supports ClickUp-documented headings, emphasis, ordered/unordered lists, links, blockquotes, and inline code.
 
@@ -67,7 +69,7 @@ The sanitized HTML email copy uses an element and attribute allowlist. Remote im
 
 ## Local Storage
 
-Persistent storage contains configuration, encrypted OAuth material, reduced mappings, safe preferences, and bounded caches. Session storage contains diagnostics, focused-task coordination, and transient timer guards.
+Persistent storage contains configuration, encrypted ClickUp credential material, the selected authentication method, reduced mappings, safe preferences, and bounded caches. Session storage contains diagnostics, focused-task coordination, and transient timer guards.
 
 AES-GCM reduces accidental credential exposure in local snapshots. The encryption key resides in the same browser profile and does not protect against a compromised profile or device.
 

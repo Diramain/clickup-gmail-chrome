@@ -245,6 +245,41 @@ body.full-app-surface {
     border-color: rgba(121, 213, 167, 0.28);
 }
 
+.auth-primary-card {
+    border-color: rgba(73, 204, 249, 0.32);
+    background: linear-gradient(145deg, rgba(73, 204, 249, 0.09), rgba(137, 48, 253, 0.06));
+}
+
+.auth-primary-card .connection-badge {
+    display: inline-block;
+    margin-bottom: 10px;
+    color: #8fe3ff;
+    border-color: rgba(73, 204, 249, 0.35);
+}
+
+.credential-note {
+    margin: 10px 0;
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.auth-primary-card > a {
+    color: #8fe3ff;
+    font-size: 11px;
+}
+
+.auth-advanced-card > summary {
+    color: #d9c8ff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.auth-advanced-card[open] > summary {
+    margin-bottom: 14px;
+}
+
 .connection-permissions {
     display: flex;
     flex-wrap: wrap;

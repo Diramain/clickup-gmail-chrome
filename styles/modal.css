@@ -594,8 +594,9 @@
 /* Visual Editor (WYSIWYG) */
 .cu-editor-visual {
     min-height: 76px;
-    max-height: 160px;
+    max-height: min(50vh, 420px);
     overflow-y: auto;
+    resize: vertical;
     padding: 8px 10px;
     border: 1px solid #ddd;
     border-radius: 0 0 5px 5px;

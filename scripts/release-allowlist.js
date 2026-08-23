@@ -9,6 +9,7 @@ const RELEASE_FILES = [
     'app/assets/clickup-logo-on-light.svg',
     'app/assets/clickup-logo-on-dark.svg',
     'app/assets/google-calendar.svg',
+    'app/assets/spiritfox-logo.webp',
     'app/fonts/bricolage-grotesque-latin.woff2',
     'app/fonts/fragment-mono-latin.woff2',
     'diagnostics/recorder.css',

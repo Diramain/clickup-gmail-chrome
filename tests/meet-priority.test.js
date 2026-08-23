@@ -283,6 +283,28 @@ describe('Meet task prompt', () => {
         expect(messages).toContainEqual({ action: 'dismissMeetPrompt', data: { roomKey: ROOM_KEY } });
         expect(document.getElementById('cgc-meet-task-prompt')).toBeNull();
     });
+
+    test('continues paginated name search until a Meet task is found', async () => {
+        document.title = 'Daily - Google Meet';
+        let searchCalls = 0;
+        const controller = new promptUi.MeetTaskPromptController(document, async (message) => {
+            if (message.action === 'getMeetTaskPromptState') return { visible: true };
+            if (message.action === 'suggestMeetTasks') {
+                searchCalls += 1;
+                return searchCalls === 1
+                    ? { tasks: [], hasMore: true }
+                    : { tasks: [{ id: 'daily-1', name: 'Daily' }], hasMore: true };
+            }
+            return { success: true };
+        });
+
+        await controller.sync(ROOM_KEY);
+
+        const host = document.getElementById('cgc-meet-task-prompt');
+        expect(searchCalls).toBe(2);
+        expect(host.shadowRoot.textContent).toContain('Daily');
+        expect(host.shadowRoot.textContent).toContain('Revisá la recomendación o seguí buscando.');
+    });
 });
 
 describe('Meet privacy, message, manifest, and release guardrails', () => {
@@ -320,7 +342,7 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
 
     test('manifest adds only exact Meet access and explicitly blocks incognito/capture permissions', () => {
         const manifest = JSON.parse(source('manifest.json'));
-        expect(manifest.version).toBe('2.0.0');
+        expect(manifest.version).toBe('2.0.1');
         expect(manifest.minimum_chrome_version).toBe('102');
         expect(manifest.incognito).toBe('not_allowed');
         expect(manifest.host_permissions).toContain('https://meet.google.com/*');
@@ -373,6 +395,7 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         expect(background).toMatch(/scheduleFocusedTimerEvaluation\('meet-ended'\)/);
         expect(background).toMatch(/requireMeetPromptAuthority\(data\.roomKey, sender, \['awaiting-task'\]\)/);
         expect(background).toMatch(/suggestMeetTasksForPrompt[\s\S]{0,500}tasks:[\s\S]{0,500}\{ id, name \}/);
+        expect(background).toContain('hasMore: result.hasMore === true');
         expect(background).toMatch(/MEET_MAPPINGS_KEY/);
         expect(background).toMatch(/async function stopCurrentTimerForUnassignedMeet\(\)[\s\S]{0,350}getRunningTimer[\s\S]{0,150}stopTimer/);
         expect(background).not.toMatch(/async function stopCurrentTimerForUnassignedMeet\(\)[\s\S]{0,180}autoStopTimer/);

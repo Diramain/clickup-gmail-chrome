@@ -35,6 +35,15 @@ describe('CGC-CALENDAR-014 read-only agenda local canary', () => {
     const agendaCache = loadTsModule('src/calendar/calendar-agenda-cache.ts');
     const linking = loadTsModule('src/calendar/calendar-linking.ts');
 
+    beforeEach(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     test('reduces Google authorization to one owned-events read-only scope and the exact API origin', () => {
         const manifest = JSON.parse(source('manifest.json'));
         const identity = loadTsModule('src/google/google-identity.service.ts');

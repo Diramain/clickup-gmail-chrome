@@ -15,11 +15,11 @@ html[data-theme="clickup"] {
     --shadow: 0 18px 48px rgba(0,0,0,.34);
 }
 html[data-theme="spiritfox"] {
-    --canvas: #0b0e13; --surface: #141922; --surface-muted: #1c2330;
-    --border: rgba(244,239,226,.1); --text: #f3efe5; --muted: #a3ada6;
+    --canvas: #f7f9ff; --surface: #ffffff; --surface-muted: #edf3ff;
+    --border: rgba(16,19,24,.12); --text: #101318; --muted: #536078;
     --primary: #2367ff; --accent-soft: rgba(35,103,255,.16); --blue: #49c8ff;
-    --ready: #4fb286; --danger: #ff7b72; --focus: rgba(73,200,255,.5);
-    --shadow: 0 18px 48px rgba(0,0,0,.4);
+    --ready: #1d9a6c; --danger: #d64045; --focus: rgba(73,200,255,.5);
+    --shadow: 0 18px 42px rgba(22,57,116,.12);
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 390px; max-width: 430px; color: var(--text); background: var(--canvas); font: 13px/1.45 var(--sans); }
@@ -31,6 +31,24 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--focus); out
 .mini-header { gap: 12px; margin-bottom: 14px; }
 .mini-brand { min-width: 0; gap: 10px; }
 .mini-mark { width: 31px; height: 31px; flex: 0 0 auto; fill: var(--blue); }
+.mini-spiritfox-logo { display: none; width: 142px; height: auto; }
+html[data-theme="spiritfox"] body {
+    background-image:
+        radial-gradient(circle at 88% 0, rgba(35,103,255,.13), transparent 15rem),
+        linear-gradient(rgba(35,103,255,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(35,103,255,.045) 1px, transparent 1px);
+    background-size: auto, 32px 32px, 32px 32px;
+}
+html[data-theme="spiritfox"] .mini-clickup-mark,
+html[data-theme="spiritfox"] .mini-clickup-copy { display: none; }
+html[data-theme="spiritfox"] .mini-spiritfox-logo { display: block; }
+html[data-theme="spiritfox"] .mini-card { border-radius: 24px; box-shadow: var(--shadow); }
+html[data-theme="spiritfox"] button { border-radius: 999px; }
+html[data-theme="spiritfox"] .primary,
+html[data-theme="spiritfox"] .secondary-action {
+    border: 2px solid #101318;
+    box-shadow: 3px 3px 0 #101318;
+}
 h1, h2, p { margin: 0; }
 h1 { font-size: 19px; letter-spacing: -.03em; }
 h2 { margin-top: 3px; font-size: 14px; letter-spacing: -.015em; }
@@ -77,5 +95,8 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .privacy-note { margin-top: 11px; font-size: 9px; line-height: 1.45; }
 .note { min-height: 18px; margin: 11px 2px; font-size: 10px; }
 .primary { width: 100%; color: #fff; background: var(--primary); box-shadow: var(--shadow); }
+.mini-footer-links { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 13px; color: var(--muted); font-size: 10px; }
+.mini-footer-links a { color: var(--muted); font-weight: 700; text-underline-offset: 3px; }
+.mini-footer-links a:hover { color: var(--primary); }
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

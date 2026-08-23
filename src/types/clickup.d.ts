@@ -298,8 +298,9 @@ export interface EmailTaskMapping {
 }
 
 export interface StorageData {
-    clickupToken?: string;
+    clickupToken?: string | { iv: string; data: string; version: number };
     clickupRefreshToken?: string | null;
+    clickupAuthMethod?: 'personal-token' | 'oauth';
     oauthConfig?: {
         clientId: string;
         clientSecret: string;
@@ -318,6 +319,7 @@ export interface StorageData {
 
 export type MessageAction =
     | 'authenticate'
+    | 'authenticatePersonalToken'
     | 'logout'
     | 'checkAuth'
     | 'getStatus'
@@ -442,6 +444,7 @@ export interface CachedListItem {
 export interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    authMethod?: 'personal-token' | 'oauth';
     requiresReauth?: boolean;
     authUnavailable?: boolean;
     user?: ClickUpUserResponse | ClickUpUser;

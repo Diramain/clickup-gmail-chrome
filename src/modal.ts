@@ -144,9 +144,6 @@ export class TaskModal {
         this.previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         this.emailData = emailData;
         this.createModal();
-        await this.loadFullHierarchy();
-        await this.loadDefaultList(); // Pre-select saved default list
-        await this.prefillCurrentUser(); // Pre-select current user as assignee
         document.body.appendChild(this.modal!);
         if (initialTab === 'attach') {
             this.switchTab('attach');
@@ -154,6 +151,13 @@ export class TaskModal {
         } else {
             (this.modal!.querySelector('#cu-task-name') as HTMLInputElement).focus();
         }
+
+        // Render first: a cold hierarchy preload can take several seconds.
+        void Promise.allSettled([
+            this.loadFullHierarchy(),
+            this.loadDefaultList(),
+            this.prefillCurrentUser(),
+        ]);
     }
 
     createModal(): void {
@@ -847,6 +851,12 @@ export class TaskModal {
     async loadFullHierarchy(): Promise<void> {
         try {
             Logger.info('MODAL_LOAD_HIERARCHY_START');
+
+            const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
+            if (status?.authenticated !== true) {
+                Logger.warn('MODAL_HIERARCHY_AUTH_REQUIRED');
+                return;
+            }
 
             // Get preferred team ID first
             const prefTeam = await chrome.runtime.sendMessage({ action: 'getPreferredTeam' });

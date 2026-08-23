@@ -109,7 +109,9 @@ describe('B1 privacy hardening', () => {
         expect(policy).toMatch(/does not operate its own servers or analytics service/i);
         expect(policy).toMatch(/email body is not retained as a local mapping/i);
         expect(policy).toMatch(/Mappings persist until you delete them, clear local data, or uninstall the extension/i);
-        expect(policy).toMatch(/safe export[\s\S]*does not include OAuth tokens, OAuth client configuration, or email HTML/i);
+        expect(policy).toMatch(/safe export[\s\S]*does not include personal tokens, OAuth tokens, OAuth client configuration, authentication method state, or email HTML/i);
+        expect(policy).toMatch(/personal token[\s\S]*validated against ClickUp before it replaces the current connection/i);
+        expect(policy).toMatch(/No ClickUp token, Client ID, or Client Secret is hardcoded/i);
         expect(policy).toMatch(/does not rely on an undocumented refresh-token grant/i);
         expect(policy).toMatch(/off by default[\s\S]*SHA-256\(\"cgc-meet-v1:/i);
         expect(policy).toMatch(/does not access or capture audio, microphone, video, camera, chat, captions/i);
@@ -136,6 +138,8 @@ describe('B1 privacy hardening', () => {
         expect(security).toMatch(/does not protect against a compromised host or compromised browser profile/i);
         expect(security).toMatch(/decrypted only when needed for OAuth or token exchange with ClickUp/i);
         expect(security).toMatch(/backend OAuth proxy remains recommended/i);
+        expect(security).toMatch(/validates it against ClickUp's `\/user` endpoint before persistence/i);
+        expect(security).toMatch(/must not be shared as an organization-wide credential/i);
         expect(security).toMatch(/Google Meet Priority Boundary/);
         expect(security).toMatch(/Safe Diagnostics Boundary/);
         expect(security).toMatch(/at most 200 events in `chrome\.storage\.session`/i);

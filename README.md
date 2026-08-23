@@ -71,11 +71,11 @@ Meet Priority remains opt-in and off by default. Calendar access is read-only an
 
 ## 🔐 Security
 
-This extension reduces common local-extension risks but is not a security boundary against a compromised browser profile, machine, or malicious extension. OAuth credentials and tokens are handled locally; token storage uses Web Crypto helpers to reduce accidental exposure, not to provide absolute protection if the local profile is compromised.
+This extension reduces common local-extension risks but is not a security boundary against a compromised browser profile, machine, or malicious extension. Personal tokens, OAuth credentials, and OAuth tokens are handled locally; credential storage uses Web Crypto helpers to reduce accidental exposure, not to provide absolute protection if the local profile is compromised.
 
 | Feature | Description |
 |---------|-------------|
-| **Local token handling** | OAuth tokens are stored through Web Crypto helper routines where available |
+| **Local token handling** | Personal tokens, OAuth tokens, and OAuth client secrets are encrypted with local Web Crypto helpers before persistence |
 | **Production-safe logger** | Debug and sensitive payload logging is suppressed in normal builds |
 | **Message validation** | Runtime messages are checked by sender origin and expected shape |
 | **Sanitized Gmail HTML** | Email HTML is sanitized before being attached or rendered through extension flows |
@@ -107,7 +107,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 | [Changelog](CHANGELOG.md) | Version history and changes |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
 | [Security](SECURITY.md) | Security policy |
-| [Wiki](https://github.com/Diramain/clickup-gmail-chrome/wiki) | Online documentation |
+| [Wiki](https://github.com/Diramain/taskbridge-for-clickup/wiki) | Online documentation |
 
 ---
 
@@ -115,7 +115,7 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ### From Release (Recommended)
 
-1. Download the latest release from [Releases](https://github.com/Diramain/clickup-gmail-chrome/releases)
+1. Download the latest release from [Releases](https://github.com/Diramain/taskbridge-for-clickup/releases)
 2. Extract the ZIP file
 3. Go to `chrome://extensions`
 4. Enable "Developer mode"
@@ -126,8 +126,8 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ```bash
 # Clone the repo
-git clone https://github.com/Diramain/clickup-gmail-chrome.git
-cd clickup-gmail-chrome
+git clone https://github.com/Diramain/taskbridge-for-clickup.git
+cd taskbridge-for-clickup
 
 # Install dependencies
 npm install
@@ -155,13 +155,14 @@ Only `npm run build:release` plus `npm run validate:release` is supported for th
 
 ## ⚙️ Configuration
 
-1. **Create ClickUp OAuth App** at https://app.clickup.com/settings/integrations
-2. Click the extension icon
-3. Enter **Client ID** and **Client Secret**
-4. Click **Sign in with ClickUp**
-5. Select your preferred workspace (optional)
-6. Connect Google Calendar from the full app if you want Agenda and Week views
-7. To use Meet Priority, enable **Detectar sesiones Google Meet** and choose a task when a confirmed session is detected
+1. Open [ClickUp API settings](https://app.clickup.com/settings/apps) and generate your own personal token.
+2. Click the extension icon, paste the token under **Conexión rápida**, and connect. The token is validated before encrypted local persistence and is never saved as a draft.
+3. For an administrator-managed deployment, expand **Configuración avanzada con OAuth**, create a ClickUp OAuth app, and enter its Client ID and Client Secret.
+4. Select your preferred workspace (optional).
+5. Connect Google Calendar from the full app if you want Agenda and Week views.
+6. To use Meet Priority, enable **Detectar sesiones Google Meet** and choose a task when a confirmed session is detected.
+
+Use one personal token per ClickUp user. Do not share a workspace-wide token. OAuth client secrets remain best-effort protected local credentials; use an author-managed backend OAuth exchange for broad public distribution that must keep a client secret outside browser profiles.
 
 Chrome 102 or newer is required. Meet Priority is off by default and the extension is not allowed in incognito mode.
 
@@ -170,7 +171,7 @@ Chrome 102 or newer is required. Meet Priority is off by default and the extensi
 ## 📁 Project Structure
 
 ```
-clickup-gmail-chrome/
+taskbridge-for-clickup/
 ├── manifest.json          # Chrome MV3 manifest
 ├── background.ts          # Service worker (ClickUp API)
 ├── src/
@@ -210,7 +211,8 @@ clickup-gmail-chrome/
 │                   background.ts (Service Worker)            │
 ├─────────────────────────────────────────────────────────────┤
 │  ClickUpAPIWrapper                                          │
-│  - OAuth flow (encrypted tokens)                            │
+│  - Personal token and advanced OAuth flows                  │
+│  - Validate before encrypted credential persistence         │
 │  - API retry, rate governor, and bounded timeout             │
 │  - Explicit reconnection after confirmed authentication loss │
 │  - Task CRUD, Time Tracking                                 │

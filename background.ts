@@ -104,6 +104,7 @@ import {
 } from './src/google/google-identity.service';
 import { decodeAndValidateGmailImage, type GmailImageUploadPayload } from './src/gmail-attachment-security';
 import { GMAIL_INTEGRATION_PREFERENCE_KEY, normalizeGmailIntegrationPreference } from './src/gmail-preferences';
+import { normalizePersonalToken, resolveClickUpAuthMethod, type ClickUpAuthMethod } from './src/clickup-auth';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -131,6 +132,7 @@ const STORAGE_KEYS = {
     HIERARCHY_PRELOAD_STATUS: 'hierarchyPreloadStatus',
     RATE_GOVERNOR_STATE: 'clickupRateGovernorState',
     REAUTH_REQUIRED: 'clickupReauthRequired',
+    AUTH_METHOD: 'clickupAuthMethod',
     AUTHORIZATION_MODE: 'clickupAuthorizationMode',
     CURRENT_USER_VALIDATED_AT: 'clickupCurrentUserValidatedAt',
     DRAFT_CLIENT_ID: 'draftClientId',
@@ -585,6 +587,63 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
     if (API_REQUIRED_MESSAGE_ACTIONS.has(action)) await ensureAPI();
 
     switch (action) {
+        case 'authenticatePersonalToken': {
+            recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'started' });
+            const token = normalizePersonalToken(data?.token);
+            if (!token) return { success: false, error: 'invalid_token_format' };
+
+            try {
+                const candidateApi = new ClickUpAPIWrapper(token, new ClickUpRateGovernor(), 'raw');
+                const user = await candidateApi.getUser();
+                const validatedAt = Date.now();
+
+                await runAuthenticationStateMutation(async () => {
+                    clickupAPI = null;
+                    await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token);
+                    await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                    await chrome.storage.local.set({
+                        [STORAGE_KEYS.AUTH_METHOD]: 'personal-token' satisfies ClickUpAuthMethod,
+                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw',
+                        [STORAGE_KEYS.CACHED_USER]: user,
+                        [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: validatedAt,
+                    });
+                    await chrome.storage.local.remove([
+                        STORAGE_KEYS.OAUTH_CONFIG,
+                        STORAGE_KEYS.DRAFT_CLIENT_ID,
+                        STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                        STORAGE_KEYS.CACHED_TEAMS,
+                        STORAGE_KEYS.CACHED_HIERARCHY,
+                        STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
+                        STORAGE_KEYS.REAUTH_REQUIRED,
+                    ]);
+                    currentUserValidatedAt = validatedAt;
+                    taskSearchCaches.clear();
+                    dashboardSnapshotCache.clear();
+                    await initializeAPI();
+                });
+
+                await getTeams(true);
+                logoutInProgress = false;
+                if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
+                    await refreshMeetPriorityBadge().catch(() => undefined);
+                } else {
+                    await restoreNormalTimerBadge().catch(() => undefined);
+                }
+                scheduleFocusedTimerEvaluation('authenticated');
+                recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'success' });
+                return { success: true, user, authMethod: 'personal-token' as ClickUpAuthMethod };
+            } catch (error) {
+                recordDiagnostic('auth_state', {
+                    stage: 'personal-token',
+                    outcome: 'failure',
+                    failureClass: classifyDiagnosticFailure(error),
+                });
+                Logger.error('AUTH_FAILED', error);
+                return { success: false, error: Logger.sanitizeError(error) };
+            }
+        }
+
         case 'authenticate':
             recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'started' });
             try {
@@ -630,8 +689,13 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                     throw new Error('Access token missing from OAuth response');
                 }
                 await runAuthenticationStateMutation(async () => {
+                    clickupAPI = null;
                     await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
                     await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                    await chrome.storage.local.set({
+                        [STORAGE_KEYS.AUTH_METHOD]: 'oauth' satisfies ClickUpAuthMethod,
+                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'bearer',
+                    });
                     await chrome.storage.local.remove([
                         STORAGE_KEYS.DRAFT_CLIENT_ID,
                         STORAGE_KEYS.DRAFT_CLIENT_SECRET,
@@ -640,6 +704,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                         STORAGE_KEYS.CACHED_HIERARCHY,
                         STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
                         STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
                         STORAGE_KEYS.REAUTH_REQUIRED,
                     ]);
                     currentUserValidatedAt = 0;
@@ -657,7 +722,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 scheduleFocusedTimerEvaluation('authenticated');
                 recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'success' });
 
-                return { success: true, user };
+                return { success: true, user, authMethod: 'oauth' as ClickUpAuthMethod };
             } catch (e) {
                 recordDiagnostic('auth_state', {
                     stage: 'oauth',
@@ -705,10 +770,15 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
                 await chrome.storage.local.remove([
                     STORAGE_KEYS.OAUTH_CONFIG,
+                    STORAGE_KEYS.AUTH_METHOD,
+                    STORAGE_KEYS.AUTHORIZATION_MODE,
+                    STORAGE_KEYS.RATE_GOVERNOR_STATE,
                     STORAGE_KEYS.DRAFT_CLIENT_ID,
                     STORAGE_KEYS.DRAFT_CLIENT_SECRET,
                     STORAGE_KEYS.CACHED_USER,
                     STORAGE_KEYS.CACHED_TEAMS,
+                    STORAGE_KEYS.CACHED_HIERARCHY,
+                    STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
                     STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
                     STORAGE_KEYS.REAUTH_REQUIRED,
                 ]);
@@ -727,11 +797,17 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await getAuthenticationStatus();
 
         case 'getLocalConnectionStatus': {
-            const localAuthState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+            const oauthConfigured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+            const credentialPresent = await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+            const localAuthState = await chrome.storage.local.get([
+                STORAGE_KEYS.REAUTH_REQUIRED,
+                STORAGE_KEYS.AUTH_METHOD,
+            ]);
             return {
-                configured: await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG),
-                credentialPresent: await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN),
+                configured: oauthConfigured || credentialPresent,
+                credentialPresent,
                 requiresReauth: localAuthState[STORAGE_KEYS.REAUTH_REQUIRED] === true,
+                authMethod: resolveClickUpAuthMethod(localAuthState[STORAGE_KEYS.AUTH_METHOD], oauthConfigured),
             };
         }
 
@@ -1265,21 +1341,26 @@ async function getAuthenticationStatus(): Promise<{
     authenticated: boolean;
     configured: boolean;
     requiresReauth: boolean;
+    authMethod?: ClickUpAuthMethod;
     authUnavailable?: boolean;
     user?: ClickUpUserResponse;
 }> {
     const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    const authState = await chrome.storage.local.get([
+        STORAGE_KEYS.REAUTH_REQUIRED,
+        STORAGE_KEYS.AUTH_METHOD,
+    ]);
+    const authMethod = resolveClickUpAuthMethod(authState[STORAGE_KEYS.AUTH_METHOD], configured);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
         recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
-        return { authenticated: false, configured, requiresReauth: true };
+        return { authenticated: false, configured, requiresReauth: true, authMethod };
     }
 
     try {
         if (!clickupAPI) await initializeAPI();
         if (!clickupAPI) {
             recordDiagnostic('auth_state', { stage: 'status', outcome: 'no-token' });
-            return { authenticated: false, configured, requiresReauth: false };
+            return { authenticated: false, configured, requiresReauth: false, authMethod };
         }
         const cache = await chrome.storage.local.get([
             STORAGE_KEYS.CACHED_USER,
@@ -1295,16 +1376,17 @@ async function getAuthenticationStatus(): Promise<{
                 authenticated: true,
                 configured,
                 requiresReauth: false,
+                authMethod,
                 user: cache[STORAGE_KEYS.CACHED_USER] as ClickUpUserResponse,
             };
         }
         const user = await getFreshAuthenticatedUser();
         recordDiagnostic('auth_state', { stage: 'status', outcome: 'remote' });
-        return { authenticated: true, configured, requiresReauth: false, user };
+        return { authenticated: true, configured, requiresReauth: false, authMethod, user };
     } catch (error) {
         if (isReauthenticationRequired(error)) {
             recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
-            return { authenticated: false, configured, requiresReauth: true };
+            return { authenticated: false, configured, requiresReauth: true, authMethod };
         }
         recordDiagnostic('auth_state', {
             stage: 'status',
@@ -1312,7 +1394,7 @@ async function getAuthenticationStatus(): Promise<{
             failureClass: classifyDiagnosticFailure(error),
         });
         Logger.warn('AUTHENTICATION_STATUS_UNAVAILABLE');
-        return { authenticated: false, configured, requiresReauth: false, authUnavailable: true };
+        return { authenticated: false, configured, requiresReauth: false, authMethod, authUnavailable: true };
     }
 }
 
@@ -1489,7 +1571,7 @@ async function requireMeetPromptAuthority(
     return session;
 }
 
-async function suggestMeetTasksForPrompt(query: string): Promise<{ tasks: Array<{ id: string; name: string }> }> {
+async function suggestMeetTasksForPrompt(query: string): Promise<{ tasks: Array<{ id: string; name: string }>; hasMore: boolean }> {
     const result = await searchTasks(query);
     return {
         tasks: (Array.isArray(result.tasks) ? result.tasks : [])
@@ -1499,6 +1581,7 @@ async function suggestMeetTasksForPrompt(query: string): Promise<{ tasks: Array<
                 const name = typeof task?.name === 'string' ? task.name.trim().slice(0, 500) : '';
                 return /^[A-Za-z0-9_-]{1,100}$/.test(id) && name ? [{ id, name }] : [];
             }),
+        hasMore: result.hasMore === true,
     };
 }
 

@@ -17,22 +17,26 @@
 
 ## Initial Setup
 
-### Step 1: Create ClickUp OAuth App
+### Step 1: Choose a ClickUp Connection
 
-1. Go to [ClickUp Settings → Integrations](https://app.clickup.com/settings/integrations)
-2. Click "Create an App"
-3. Enter a name (e.g., "Gmail Tracker")
-4. Copy the **Redirect URL** from the extension popup
-5. Paste it in ClickUp
-6. Copy the **Client ID** and **Client Secret**
+For the simplest setup, generate your own token in [ClickUp API settings](https://app.clickup.com/settings/apps). Personal tokens are long-lived credentials with the same ClickUp access as their owner. Do not share a token between users.
 
-### Step 2: Configure Extension
+For an administrator-managed deployment, create an OAuth app in ClickUp and use the advanced setup. Only a Workspace owner or admin can create that app.
+
+### Step 2: Connect the Extension
 
 1. Click the extension icon
-2. Paste your **Client ID** and **Client Secret**
-3. Click "Save Configuration"
-4. Click "Sign in with ClickUp"
-5. Authorize the app in the popup
+2. Paste your personal token under **Conexión rápida**
+3. Click **Conectar con token personal**
+4. Wait for ClickUp validation; invalid or unavailable credentials are not persisted
+
+To use OAuth instead:
+
+1. Expand **Configuración avanzada con OAuth**
+2. Copy the Redirect URL into your ClickUp OAuth app
+3. Paste its **Client ID** and **Client Secret**
+4. Save the encrypted local configuration and click **Iniciar sesión con ClickUp**
+5. Authorize the required Workspaces
 
 ---
 
@@ -243,8 +247,8 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 
 | Data | Location | Encryption |
 |------|----------|------------|
-| Access Token | Local | AES-256-GCM |
-| Client Secret | Local | AES-256-GCM |
+| Personal or OAuth Access Token | Local | AES-256-GCM best-effort local encryption |
+| OAuth Client Secret | Local | AES-256-GCM best-effort local encryption |
 | Email-Task Links | Local | No |
 | User Info | Local | No |
 | Safe Diagnostics (opt-in) | Browser session memory | Allowlisted fields only |
@@ -268,7 +272,7 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 # FAQ
 
 **Q: Can I use this without an OAuth app?**
-A: No, OAuth is required for security. ClickUp Personal API tokens are not supported.
+A: Yes. Use your own ClickUp personal token under **Conexión rápida**. OAuth remains available as an advanced option for owners or admins who manage their own app.
 
 **Q: Does this work with Google Workspace?**
 A: Yes, as long as you have access to Gmail.
@@ -283,7 +287,7 @@ A: No, data is stored locally per browser.
 
 # Support
 
-- **GitHub:** [github.com/diramain/clickup-gmail-chrome](https://github.com/diramain/clickup-gmail-chrome)
+- **GitHub:** [github.com/Diramain/taskbridge-for-clickup](https://github.com/Diramain/taskbridge-for-clickup)
 - **Issues:** Report bugs on GitHub Issues
 - **Feature Requests:** Create a GitHub Issue with "Feature" label
 

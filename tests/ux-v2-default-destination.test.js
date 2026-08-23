@@ -21,6 +21,7 @@ function loadTsModule(relativePath) {
         if (request === './link-hardening') return loadTsModule('src/link-hardening.ts');
         if (request === './bulk-task-update') return loadTsModule('src/bulk-task-update.ts');
         if (request === './gmail-attachment-security') return loadTsModule('src/gmail-attachment-security.ts');
+        if (request === './clickup-auth') return loadTsModule('src/clickup-auth.ts');
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);

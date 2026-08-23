@@ -1,0 +1,48 @@
+name: Proponer una mejora
+description: Sugiere una capacidad o cambio de experiencia para TaskBridge.
+title: "[Mejora]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe el problema y el resultado deseado. No incluyas credenciales, emails, IDs, contenido privado de Gmail o Meet ni datos personales.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema que quieres resolver
+      description: Explica la necesidad sin proponer todavía una implementación.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado deseado
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Área relacionada
+      options:
+        - Gmail
+        - ClickUp
+        - Calendar y Meet
+        - Seguimiento de tiempo
+        - Panel o popup
+        - Privacidad y seguridad
+        - Otra
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Confirmación de privacidad
+      options:
+        - label: La propuesta no contiene credenciales, emails, IDs, contenido privado ni datos personales.
+          required: true

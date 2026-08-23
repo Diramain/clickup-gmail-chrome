@@ -107,6 +107,11 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(css).toContain('#0091ff');
         expect(css).toContain('#17151f');
         expect(css).toContain('.owner-theme-option[hidden]');
+        for (const spiritfoxToken of ['#0b0e13', '#171c24', '#202734', '#f7f9ff', '#2367ff', '#49c8ff', '#ffd35c', '#1d9a6c', '#d64045']) {
+            expect(css).toContain(spiritfoxToken);
+        }
+        expect(css).toContain('"Avenir Next", Avenir, "Segoe UI", "Trebuchet MS", sans-serif');
+        expect(css).toContain('border-radius: 24px');
         expect(css).toContain('.destination-actions');
         expect(css).not.toContain('#f1eee6');
         expect(css).not.toContain('#fffdf8');
@@ -132,9 +137,12 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(appHtml).not.toContain('id="openCausalRecorder"');
         expect(source('app/app.ts')).toContain('initCausalRecorder(document)');
         expect(appHtml).toContain('src="assets/clickup-logomark.svg"');
+        expect(appHtml).toContain('src="assets/spiritfox-logo.webp"');
         expect(appHtml).toContain('src="assets/clickup-logo-on-light.svg"');
         expect(appHtml).toContain('src="assets/clickup-logo-on-dark.svg"');
         expect(appHtml).toContain('src="assets/google-calendar.svg"');
+        expect(appHtml).toContain('https://github.com/Diramain/taskbridge-for-clickup/issues/new/choose');
+        expect(appHtml).toContain('Ver proyecto en GitHub');
         expect(appHtml).not.toMatch(/<img[^>]+src=["']https?:/);
         expect(manifest.action.default_popup).toBe('popup/minimal.html');
         expect(minimal).toContain('id="miniConnection"');
@@ -148,10 +156,16 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         expect(minimal).toContain('id="miniMeetPriority"');
         expect(minimal).toContain('id="miniMeetTaskSearch"');
         expect(minimal).toContain('id="miniMeetAssign"');
+        expect(minimal).toContain('src="../app/assets/spiritfox-logo.webp"');
+        expect(minimal).toContain('Enviar feedback');
+        expect(minimal).toContain('https://github.com/Diramain/taskbridge-for-clickup');
         expect(minimal).not.toContain('id="taskSearch"');
         expect(minimal).not.toContain('id="syncLists"');
         expect(source('popup/minimal.css')).toContain('html[data-theme="clickup"]');
-        expect(source('popup/minimal.css')).toContain('html[data-theme="spiritfox"]');
+        const minimalCss = source('popup/minimal.css');
+        expect(minimalCss).toContain('html[data-theme="spiritfox"]');
+        expect(minimalCss).toContain('--canvas: #f7f9ff');
+        expect(minimalCss).toContain('.mini-spiritfox-logo { display: block; }');
         expect(source('src/gmail-native.ts')).toContain('class="cu-attach-btn"');
         expect(source('src/gmail-native.ts')).toContain('Tareas vinculadas');
     });

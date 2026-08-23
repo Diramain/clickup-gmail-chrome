@@ -6,6 +6,7 @@ import {
 } from './meet-task-prompt';
 
 type SendMeetMessage = <T>(message: unknown) => Promise<T>;
+const MEET_SEARCH_BATCH_LIMIT = 10;
 
 interface PromptUi {
     host: HTMLElement;
@@ -154,11 +155,17 @@ export class MeetTaskPromptController {
     private async fetchSuggestions(query: string, revision: number): Promise<MeetTaskSuggestion[]> {
         if (!this.roomKey || revision !== this.searchRevision) return [];
         try {
-            const response = await this.sendMessage<{ tasks?: unknown }>({
-                action: 'suggestMeetTasks',
-                data: { roomKey: this.roomKey, query: query.slice(0, 100) },
-            });
-            return revision === this.searchRevision ? sanitizeMeetTaskSuggestions(response.tasks) : [];
+            for (let batch = 0; batch < MEET_SEARCH_BATCH_LIMIT; batch += 1) {
+                const response = await this.sendMessage<{ tasks?: unknown; hasMore?: unknown }>({
+                    action: 'suggestMeetTasks',
+                    data: { roomKey: this.roomKey, query: query.slice(0, 100) },
+                });
+                if (revision !== this.searchRevision) return [];
+                const tasks = sanitizeMeetTaskSuggestions(response.tasks);
+                if (tasks.length > 0 || response.hasMore !== true) return tasks;
+                this.setStatus('Buscando en más tareas…');
+            }
+            return [];
         } catch {
             if (revision === this.searchRevision) this.setStatus('No se pudo buscar. Podés volver a intentarlo.');
             return [];

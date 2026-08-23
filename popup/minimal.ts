@@ -1,8 +1,9 @@
 import { openOrFocusAppTab } from '../src/app-tab';
 import { toTimeEntryTimestamp } from '../src/time-entry-history';
 import type { TimeEntry } from '../src/types/clickup';
+import type { ClickUpAuthMethod } from '../src/clickup-auth';
 
-interface ExtensionStatus { authenticated?: boolean; configured?: boolean; requiresReauth?: boolean }
+interface ExtensionStatus { authenticated?: boolean; configured?: boolean; requiresReauth?: boolean; authMethod?: ClickUpAuthMethod }
 interface LastTrackedTask { id: string; name: string; teamId: string }
 interface MeetPriorityStatus {
     enabled: boolean;
@@ -164,7 +165,11 @@ export async function initMinimalPopup(): Promise<void> {
         connection.textContent = status.authenticated ? 'ClickUp conectado' : 'Sin conexión';
         connection.dataset.state = status.authenticated ? 'connected' : 'blocked';
         if (!status.authenticated) {
-            state.textContent = status.requiresReauth ? 'La sesión requiere reconexión desde la app completa.' : 'Configurá ClickUp desde la app completa.';
+            state.textContent = status.requiresReauth
+                ? status.authMethod === 'personal-token'
+                    ? 'Reemplazá el token personal desde la app completa.'
+                    : 'La sesión OAuth requiere reconexión desde la app completa.'
+                : 'Configurá ClickUp desde la app completa.';
             play.disabled = true;
             stop.disabled = true;
         }

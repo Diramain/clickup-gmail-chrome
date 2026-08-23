@@ -1,0 +1,59 @@
+name: Reportar un error
+description: Informa un problema reproducible sin compartir datos sensibles.
+title: "[Error]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por ayudar a mejorar TaskBridge. No incluyas tokens, secretos OAuth, emails, IDs de ClickUp, contenido de Gmail o Meet, URLs privadas ni capturas con información personal.
+  - type: input
+    id: version
+    attributes:
+      label: Versión de TaskBridge
+      placeholder: "Ejemplo: 2.0.1"
+    validations:
+      required: true
+  - type: input
+    id: chrome
+    attributes:
+      label: Versión de Chrome y sistema operativo
+      placeholder: "Ejemplo: Chrome 140, Linux"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir el problema
+      description: Usa datos ficticios y describe sólo las acciones necesarias.
+      placeholder: |
+        1. Abrir...
+        2. Seleccionar...
+        3. Observar...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Resultado observado
+    validations:
+      required: true
+  - type: textarea
+    id: safe_diagnostics
+    attributes:
+      label: Diagnóstico seguro opcional
+      description: Revisa el archivo antes de adjuntarlo. No publiques información que pueda identificar tu cuenta o espacio de trabajo.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Confirmación de privacidad
+      options:
+        - label: Revisé el reporte y no contiene credenciales, emails, IDs, contenido privado ni datos personales.
+          required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reportar una vulnerabilidad
+    url: https://github.com/Diramain/taskbridge-for-clickup/security/advisories/new
+    about: No publiques vulnerabilidades, tokens ni datos privados en un Issue.
+  - name: Documentación de seguridad
+    url: https://github.com/Diramain/taskbridge-for-clickup/security/policy
+    about: Consulta la política y los límites de seguridad de TaskBridge.

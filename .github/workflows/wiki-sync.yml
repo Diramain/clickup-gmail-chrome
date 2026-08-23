@@ -41,9 +41,9 @@ jobs:
 
           ## 🔗 Quick Links
 
-          - [GitHub Repository](https://github.com/Diramain/clickup-gmail-chrome)
-          - [Releases](https://github.com/Diramain/clickup-gmail-chrome/releases)
-          - [Issues](https://github.com/Diramain/clickup-gmail-chrome/issues)
+          - [GitHub Repository](https://github.com/Diramain/taskbridge-for-clickup)
+          - [Releases](https://github.com/Diramain/taskbridge-for-clickup/releases)
+          - [Issues](https://github.com/Diramain/taskbridge-for-clickup/issues)
           EOF
 
       - name: Sync Documents to Wiki

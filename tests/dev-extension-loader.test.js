@@ -21,6 +21,7 @@ describe('CGC-UX-V2-B safe dev extension loader', () => {
             'app/app.css',
             'app/app.js',
             'app/assets/clickup-logomark.svg',
+            'app/assets/spiritfox-logo.webp',
             'app/assets/clickup-logo-on-light.svg',
             'app/assets/clickup-logo-on-dark.svg',
             'app/assets/google-calendar.svg',

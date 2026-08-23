@@ -1,10 +1,10 @@
-# Privacy Policy for ClickUp Gmail Tracker
+# Privacy Policy for TaskBridge for ClickUp
 
 **Last Updated:** 2026-08-22
 
 ## 1. Overview
 
-ClickUp Gmail Tracker is a Chrome extension that connects Gmail, optional Google Calendar and Meet workflows, and ClickUp task/time tracking. The extension runs locally in your browser and does not operate its own servers or analytics service.
+TaskBridge for ClickUp is a Chrome extension that connects Gmail, optional Google Calendar and Meet workflows, and ClickUp task/time tracking. The extension runs locally in your browser and does not operate its own servers or analytics service.
 
 This policy describes what the extension handles for version 2.0.0. It does not replace the privacy policies of Google/Gmail, ClickUp, Chrome, or your browser profile provider.
 
@@ -48,19 +48,21 @@ The extension reduces each response to the event title, start/end time, confirme
 
 Calendar-to-ClickUp task linking is an explicit user action. It persists reduced SHA-256 occurrence or recurring-series keys plus ClickUp task ID/name metadata; a Meet mapping may also be saved when the event has a canonical Meet room. Raw Calendar event IDs and full Meet URLs are not persisted. Disconnecting removes the known cached Google token and clears the in-memory agenda; you can also revoke access in your Google account.
 
-## 5. ClickUp Data and OAuth
+## 5. ClickUp Data and Authentication
 
 The extension sends requested task, comment, attachment, time-entry, and metadata operations directly to ClickUp through ClickUp APIs. Data sent to ClickUp is controlled by ClickUp after transfer and is subject to ClickUp's own policies and your workspace settings.
 
-The OAuth access token and OAuth configuration are stored locally in the browser profile. The extension encrypts these values using local best-effort encryption before storage where the secure helpers are used. The encryption key also lives in the same browser profile, so this protects primarily against casual at-rest inspection and does not protect a compromised device or browser profile.
+You can connect with your own ClickUp personal token or, as an advanced owner/admin option, with a ClickUp OAuth app that you manage. A personal token is validated against ClickUp before it replaces the current connection. It is not saved while you type and is not persisted if its shape is invalid, ClickUp rejects it, or validation is unavailable.
 
-The extension does not rely on an undocumented refresh-token grant. A `401` from a specific API operation does not automatically disconnect you: safe reads may try the alternate raw/Bearer header once, and the extension confirms the current token against ClickUp's user endpoint. Only a confirmed rejection of the token that is still current removes that token and cached identity data, keeps the encrypted OAuth app configuration, pauses automatic tracking, and asks you to reconnect explicitly.
+The selected personal or OAuth access token and any OAuth client configuration are stored locally in the browser profile. The extension encrypts these values using local best-effort AES-256-GCM encryption before persistence. The encryption key also lives in the same browser profile, so this protects primarily against casual at-rest inspection and does not protect a compromised device or browser profile. No ClickUp token, Client ID, or Client Secret is hardcoded into the extension package.
+
+The extension does not rely on an undocumented refresh-token grant. A `401` from a specific API operation does not automatically disconnect you: safe reads may try the alternate raw/Bearer header once, and the extension confirms the current token against ClickUp's user endpoint. Only a confirmed rejection of the token that is still current removes that token and cached identity data, pauses automatic tracking, and asks you to replace a personal token or reconnect OAuth explicitly. OAuth configuration is retained only for an OAuth reconnection.
 
 ## 6. Local Storage
 
 The extension may store locally:
 
-- the encrypted best-effort OAuth access token and OAuth configuration;
+- the encrypted best-effort personal or OAuth access token and, when selected, OAuth configuration;
 - Gmail-thread-to-ClickUp-task mappings and task metadata;
 - user settings, including the versioned enable/disable preference for native Gmail controls;
 - hierarchy/team/user caches used to reduce repeated API calls;
@@ -79,7 +81,7 @@ Safe Diagnostics is off by default. Its state and bounded event buffer use `chro
 
 ## 7. Export and Clear Controls
 
-The safe export feature is intended to include Gmail mappings, task metadata, and selected non-sensitive settings. It does not include OAuth tokens, OAuth client configuration, or email HTML. It also excludes Meet room keys and Meet task mappings.
+The safe export feature is intended to include Gmail mappings, task metadata, and selected non-sensitive settings. It does not include personal tokens, OAuth tokens, OAuth client configuration, authentication method state, or email HTML. It also excludes Meet room keys and Meet task mappings.
 
 Safe Diagnostics has a separate export control. That JSON contains only its versioned, allowlisted session events and summary counts; it does not include the regular backup data or any of the excluded values listed above.
 
@@ -99,7 +101,7 @@ You can control or remove data by using:
 - the extension's clear local data control;
 - the Meet Priority opt-in toggle and individual mapping enable/delete controls;
 - the Safe Diagnostics opt-in toggle, separate JSON export, and clear-log control;
-- ClickUp OAuth revocation in your ClickUp account/workspace settings;
+- personal-token regeneration or OAuth revocation in your ClickUp account/workspace settings;
 - Google Calendar disconnect in the app and OAuth revocation in your Google account;
 - browser extension uninstall/removal;
 - deletion or modification of tasks, comments, attachments, and other records directly in ClickUp.

@@ -48,7 +48,7 @@ export function renderAppRoute(route: AppRoute, focusHeading = false): void {
 
     const pageTitle = document.getElementById('pageTitle');
     if (pageTitle) pageTitle.textContent = ROUTE_TITLES[route];
-    document.title = `${ROUTE_TITLES[route]} · ClickUp Gmail Tracker`;
+    document.title = `${ROUTE_TITLES[route]} · TaskBridge for ClickUp`;
     if (route === 'gmail' && refreshDefaultDestination) void refreshDefaultDestination();
 
     if (focusHeading) {
@@ -1456,12 +1456,21 @@ export function renderClickUpConnection(view: ClickUpConnectionView): void {
     detail.textContent = view.detail;
 }
 
-export async function initLocalConnections(port: LocalConnectionPort = chromeConnectionPort): Promise<void> {
+export async function initLocalConnections(port: LocalConnectionPort = chromeConnectionPort): Promise<ClickUpConnectionView> {
     try {
-        renderClickUpConnection(classifyLocalClickUpStatus(await port.getClickUpStatus()));
+        const view = classifyLocalClickUpStatus(await port.getClickUpStatus());
+        renderClickUpConnection(view);
+        return view;
     } catch {
-        renderClickUpConnection(classifyLocalClickUpStatus(null));
+        const view = classifyLocalClickUpStatus(null);
+        renderClickUpConnection(view);
+        return view;
     }
+}
+
+async function refreshClickUpViews(): Promise<void> {
+    const view = await initLocalConnections();
+    if (view.state === 'connected-local') await initDashboardSummary();
 }
 
 /* ------------------------------------------------------------------ *
@@ -2829,9 +2838,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initTaskTimeSort();
     void initWorkSchedule();
     initDashboardRefresh();
-    void initDashboardSummary();
-    void initLocalConnections();
+    void refreshClickUpViews();
     void initDefaultDestination();
     initTaskSearch();
     initCausalRecorder(document);
+});
+
+document.addEventListener('clickup-auth-changed', () => {
+    void refreshClickUpViews();
 });

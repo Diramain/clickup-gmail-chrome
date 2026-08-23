@@ -15,6 +15,7 @@ import { selectAuthorizedTeamId } from '../src/team-selection';
 import { isTaskSearchFailure } from '../src/task-search-view';
 import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
 import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
+import { normalizePersonalToken, type ClickUpAuthMethod } from '../src/clickup-auth';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -36,6 +37,7 @@ import {
 interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    authMethod?: ClickUpAuthMethod;
     requiresReauth?: boolean;
     authUnavailable?: boolean;
     user?: {
@@ -237,6 +239,7 @@ async function init(): Promise<void> {
                 standaloneSetup,
                 status.requiresReauth === true,
                 status.authUnavailable === true,
+                status.authMethod,
             );
         }
     } catch (error: any) {
@@ -360,8 +363,12 @@ function showLoginRequired(
     standaloneSetup = isSetupStandalone(),
     requiresReauth = false,
     authUnavailable = false,
+    authMethod?: ClickUpAuthMethod,
 ): void {
     const loginRequired = document.getElementById('login-required') as HTMLElement;
+    const personalTokenInput = document.getElementById('personalToken') as HTMLInputElement;
+    const connectPersonalTokenBtn = document.getElementById('connectPersonalToken') as HTMLButtonElement;
+    const personalTokenStatus = document.getElementById('personalTokenStatus') as HTMLElement;
     const signInBtn = document.getElementById('signIn') as HTMLButtonElement;
     const saveConfigBtn = document.getElementById('saveConfig') as HTMLButtonElement;
     const clientIdInput = document.getElementById('clientId') as HTMLInputElement;
@@ -371,6 +378,7 @@ function showLoginRequired(
     const openWindowBtn = document.getElementById('openWindow') as HTMLButtonElement;
     const discardChangesBtn = document.getElementById('discardOAuthChanges') as HTMLButtonElement;
     const configStatus = document.getElementById('oauthConfigStatus') as HTMLElement | null;
+    const advancedOAuth = document.querySelector('.auth-advanced-card') as HTMLDetailsElement | null;
 
     let hasStoredConfig = configured;
     let isDirty = false;
@@ -386,6 +394,15 @@ function showLoginRequired(
         if (!configStatus) return;
         configStatus.textContent = message;
         configStatus.style.color = color;
+    };
+
+    const setPersonalTokenStatus = (message: string, color = ''): void => {
+        personalTokenStatus.textContent = message;
+        personalTokenStatus.style.color = color;
+    };
+
+    const updatePersonalTokenButton = (): void => {
+        connectPersonalTokenBtn.disabled = authUnavailable || normalizePersonalToken(personalTokenInput.value) === null;
     };
 
     const updateOAuthButtons = (): OAuthConfigState => {
@@ -454,6 +471,13 @@ function showLoginRequired(
     } else if (configured) {
         setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
     }
+
+    if (authMethod === 'personal-token' && requiresReauth) {
+        setPersonalTokenStatus('El token dejó de ser válido. Pegá un token personal nuevo para reconectar.', '#ff9800');
+    } else if (authUnavailable) {
+        setPersonalTokenStatus('ClickUp no está disponible para validar el token. Reintentá más tarde.', '#ff9800');
+    }
+    if (advancedOAuth && authMethod === 'oauth' && (configured || requiresReauth)) advancedOAuth.open = true;
 
     // Show the Redirect URL (Chrome identity API format)
     const redirectUrl = chrome.identity.getRedirectURL();
@@ -534,6 +558,52 @@ function showLoginRequired(
     });
 
     updateOAuthButtons();
+    updatePersonalTokenButton();
+
+    personalTokenInput.addEventListener('input', () => {
+        setPersonalTokenStatus('');
+        updatePersonalTokenButton();
+    });
+
+    connectPersonalTokenBtn.addEventListener('click', async () => {
+        const token = normalizePersonalToken(personalTokenInput.value);
+        if (!token) {
+            setPersonalTokenStatus('Pegá un token personal válido que empiece con pk_.', '#ff9800');
+            updatePersonalTokenButton();
+            return;
+        }
+
+        const originalLabel = connectPersonalTokenBtn.textContent || 'Conectar con token personal';
+        connectPersonalTokenBtn.disabled = true;
+        connectPersonalTokenBtn.textContent = 'Validando…';
+        setPersonalTokenStatus('Validando el token con ClickUp…');
+        try {
+            const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({
+                action: 'authenticatePersonalToken',
+                data: { token },
+            });
+            if (result.success !== true) throw new Error('auth_error');
+            personalTokenInput.value = '';
+            loginRequired.classList.add('hidden');
+            showLoggedIn({
+                authenticated: true,
+                configured: true,
+                authMethod: result.authMethod || 'personal-token',
+                user: result.user,
+            });
+            document.dispatchEvent(new CustomEvent('clickup-auth-changed'));
+        } catch (error) {
+            personalTokenInput.value = '';
+            connectPersonalTokenBtn.textContent = originalLabel;
+            setPersonalTokenStatus(
+                error instanceof Error && error.message === 'network_error'
+                    ? 'No se pudo validar el token porque ClickUp no está disponible. No se guardó ningún cambio.'
+                    : 'ClickUp rechazó el token. Generá uno nuevo y volvé a intentarlo.',
+                '#ff5252',
+            );
+            updatePersonalTokenButton();
+        }
+    });
 
     discardChangesBtn?.addEventListener('click', async () => {
         clientIdInput.value = '';
@@ -575,11 +645,12 @@ function showLoginRequired(
                 signInBtn.textContent = 'Iniciando sesión…';
             }
 
-            const result = await sendMessage<{ success: boolean; user?: any }>({ action: 'authenticate' });
+            const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({ action: 'authenticate' });
 
             if (result.success) {
                 loginRequired.classList.add('hidden');
-                showLoggedIn({ authenticated: true, configured: true, user: result.user });
+                showLoggedIn({ authenticated: true, configured: true, authMethod: result.authMethod || 'oauth', user: result.user });
+                document.dispatchEvent(new CustomEvent('clickup-auth-changed'));
             } else {
                 throw new Error('AUTHENTICATION_FAILED');
             }
@@ -600,8 +671,16 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const userAvatar = document.getElementById('userAvatar') as HTMLImageElement;
     const userName = document.getElementById('userName') as HTMLElement;
     const userEmail = document.getElementById('userEmail') as HTMLElement;
+    const connectionMethod = document.getElementById('clickUpConnectionMethod');
 
     loggedIn.classList.remove('hidden');
+    if (connectionMethod) {
+        connectionMethod.textContent = status.authMethod === 'personal-token'
+            ? 'Conectado con token personal cifrado localmente'
+            : status.authMethod === 'oauth'
+                ? 'Conectado mediante OAuth administrado'
+                : 'Conectado con una credencial local existente';
+    }
 
     // Set user info
     if (status.user) {

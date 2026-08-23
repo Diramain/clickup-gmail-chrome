@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
-    <title>ClickUp Gmail Tracker</title>
+    <title>TaskBridge for ClickUp</title>
     <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -12,11 +12,12 @@
     <div class="app-shell">
         <aside class="sidebar" aria-label="Navegación principal">
             <div class="brand-lockup">
-                <img class="brand-mark" src="assets/clickup-logomark.svg" alt="" aria-hidden="true">
-                <div>
-                    <strong>ClickUp Gmail</strong>
-                    <span>Nueva experiencia</span>
+                <img class="brand-mark brand-mark-clickup" src="assets/clickup-logomark.svg" alt="" aria-hidden="true">
+                <div class="brand-copy-clickup">
+                    <strong>TaskBridge</strong>
+                    <span>Para ClickUp</span>
                 </div>
+                <img class="brand-spiritfox" src="assets/spiritfox-logo.webp" alt="Spiritfox">
             </div>
 
             <nav class="primary-nav" aria-label="Secciones">
@@ -50,16 +51,27 @@
                 </a>
             </nav>
 
+            <div class="sidebar-actions" aria-label="Ayuda y proyecto">
+                <a class="sidebar-action" href="https://github.com/Diramain/taskbridge-for-clickup/issues/new/choose" target="_blank" rel="noopener noreferrer">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.6 9.6 0 0 1-4-.9L3 21l1.6-4.5A8.3 8.3 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.5 8.4 8.4 0 0 1 9 8.5Z"/></svg>
+                    <span>Enviar feedback</span>
+                </a>
+                <a class="sidebar-action" href="https://github.com/Diramain/taskbridge-for-clickup" target="_blank" rel="noopener noreferrer">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.5 1.4-4.5-2.5-6-3m12 6v-3.9c0-1.1.1-1.5-.5-2.1 2.8-.3 5.7-1.4 5.7-6.2A4.8 4.8 0 0 0 19 6.5 4.5 4.5 0 0 0 18.9 3S17.7 2.6 15 4.3a13.4 13.4 0 0 0-6 0C6.3 2.6 5.1 3 5.1 3A4.5 4.5 0 0 0 5 6.5a4.8 4.8 0 0 0-1.2 3.3c0 4.8 2.9 5.9 5.7 6.2-.6.6-.6 1.2-.5 2.1V22"/></svg>
+                    <span>Ver proyecto en GitHub</span>
+                </a>
+            </div>
+
             <div class="sidebar-note">
                 <span class="status-dot" aria-hidden="true"></span>
-                <div><strong>Vista previa local</strong><span>Sin OAuth ni APIs nuevas</span></div>
+                <div><strong>Datos bajo tu control</strong><span>Procesamiento local y acciones explícitas</span></div>
             </div>
         </aside>
 
         <main id="mainContent" class="main-content" tabindex="-1">
             <header class="topbar">
                 <div>
-                    <span class="topbar-label">ClickUp Gmail Tracker</span>
+                    <span class="topbar-label">TaskBridge for ClickUp</span>
                     <h1 id="pageTitle">Inicio</h1>
                 </div>
                 <div class="topbar-actions">
@@ -68,8 +80,8 @@
                         <button type="button" class="theme-btn" data-theme-choice="clickup" aria-pressed="false"><span class="theme-swatch theme-swatch-clickup" aria-hidden="true"></span>ClickUp oscuro</button>
                         <button type="button" class="theme-btn owner-theme-option" data-theme-choice="spiritfox" aria-pressed="false" hidden><span class="theme-swatch theme-swatch-spiritfox" aria-hidden="true"></span>Spiritfox</button>
                     </div>
-                    <div class="phase-badge"><span aria-hidden="true"></span>UX V2 · Fundación visual</div>
-                    <button id="pluginVersionUnlock" class="version-unlock" type="button" aria-label="Versión de la extensión">v1.2.3</button>
+                    <div class="phase-badge"><span aria-hidden="true"></span>Gmail · Calendar · Meet</div>
+                    <button id="pluginVersionUnlock" class="version-unlock" type="button" aria-label="Versión de la extensión">v2.0.1</button>
                 </div>
             </header>
 
@@ -78,15 +90,27 @@
             <section id="login-required" class="page-section hidden" aria-labelledby="clickupSetupTitle">
                 <div class="section-heading"><div><p class="section-label">Conexión requerida</p><h2 id="clickupSetupTitle">Conectá ClickUp desde esta pestaña.</h2><p>La configuración completa ya no vive en el popup.</p></div></div>
                 <div class="operation-grid two-columns">
-                    <article class="operation-card">
-                        <h3>Configuración OAuth de ClickUp</h3>
-                        <label for="redirectUrl">URL de redirección</label>
-                        <div class="inline-control"><input id="redirectUrl" type="text" readonly><button id="copyUrl" type="button" class="btn">Copiar</button></div>
-                        <label for="clientId">ID de cliente</label><input id="clientId" type="text" autocomplete="off">
-                        <label for="clientSecret">Secreto de cliente</label><input id="clientSecret" type="password" autocomplete="new-password">
-                        <div class="inline-actions"><button id="saveConfig" type="button" class="btn">Guardar configuración</button><button id="discardOAuthChanges" type="button" class="btn">Descartar cambios</button></div>
-                        <p id="oauthConfigStatus" class="field-help" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
-                        <button id="signIn" type="button" class="btn primary" disabled>Iniciar sesión con ClickUp</button>
+                    <article class="operation-card auth-setup-card">
+                        <span class="connection-badge">Recomendado</span>
+                        <h3>Conexión rápida</h3>
+                        <p>Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil de Chrome.</p>
+                        <label for="personalToken">Token personal de ClickUp</label>
+                        <input id="personalToken" type="password" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
+                        <button id="connectPersonalToken" type="button" class="btn primary" disabled>Conectar con token personal</button>
+                        <p id="personalTokenStatus" class="field-help" role="status" aria-live="polite"></p>
+                        <p class="credential-note">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
+                        <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer">Abrir Tokens de API en ClickUp</a>
+                        <details class="auth-advanced-card">
+                            <summary>Configuración avanzada con OAuth</summary>
+                            <p class="field-help">Para owners o admins que administran su propia app OAuth. El secreto se cifra localmente, pero un navegador comprometido puede acceder al perfil.</p>
+                            <label for="redirectUrl">URL de redirección</label>
+                            <div class="inline-control"><input id="redirectUrl" type="text" readonly><button id="copyUrl" type="button" class="btn">Copiar</button></div>
+                            <label for="clientId">ID de cliente</label><input id="clientId" type="text" autocomplete="off">
+                            <label for="clientSecret">Secreto de cliente</label><input id="clientSecret" type="password" autocomplete="new-password">
+                            <div class="inline-actions"><button id="saveConfig" type="button" class="btn">Guardar configuración</button><button id="discardOAuthChanges" type="button" class="btn">Descartar cambios</button></div>
+                            <p id="oauthConfigStatus" class="field-help" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
+                            <button id="signIn" type="button" class="btn primary" disabled>Iniciar sesión con ClickUp</button>
+                        </details>
                         <button id="openWindow" type="button" class="hidden">Abrir ventana</button>
                     </article>
                     <article class="operation-card">
@@ -409,7 +433,7 @@
                                 <small id="clickUpConnectionDetail">No se realizará ninguna validación por red.</small>
                             </div>
                         </div>
-                        <p class="service-footnote">La configuración y reconexión continúan en el popup clásico durante esta fase.</p>
+                        <p class="service-footnote">La sesión se conserva localmente en este perfil de Chrome.</p>
                     </article>
 
                     <article class="service-card service-google">
@@ -434,12 +458,12 @@
 
                 <aside class="privacy-panel" aria-labelledby="privacyTitle">
                     <span class="privacy-line" aria-hidden="true"></span>
-                    <div><h3 id="privacyTitle">Límite de privacidad</h3><p>La integración propuesta no lee Gmail, Drive, audio, video, chat ni participantes de Meet. Tampoco solicita email o perfil de Google.</p></div>
+                    <div><h3 id="privacyTitle">Límite de privacidad</h3><p>La integración no lee Gmail, Drive, audio, video, chat ni participantes de Meet. Tampoco solicita email o perfil de Google.</p></div>
                 </aside>
 
                 <div class="operation-grid two-columns connection-settings">
                     <article class="operation-card"><h3>Calendar y creación</h3><label class="toggle-line">Mostrar eventos de todo el día <input id="calendarShowAllDayToggle" type="checkbox"></label><label for="calendarTaskTypeSearch">Tipo de tarea para reuniones</label><input id="calendarTaskTypeSearch" type="search" autocomplete="off" placeholder="Filtrar tipos retornados por ClickUp…"><select id="calendarTaskTypeSelect" aria-describedby="calendarTaskTypeStatus" disabled><option value="">Sin tipos disponibles</option></select><p id="calendarTaskTypeStatus" class="field-help" role="status" aria-live="polite">Consultando tipos de tarea…</p></article>
-                    <article class="operation-card"><h3>Sesión de ClickUp</h3><p>La desconexión elimina la sesión local y requiere volver a autorizar.</p><button id="signOut" class="btn danger" type="button">Cerrar sesión</button></article>
+                    <article class="operation-card"><h3>Sesión de ClickUp</h3><p id="clickUpConnectionMethod">Método de conexión local</p><p>La desconexión elimina la sesión local y requiere volver a autorizar.</p><button id="signOut" class="btn danger" type="button">Cerrar sesión</button></article>
                 </div>
             </section>
 

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskBridge - tracking desde el popup</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 1280px; height: 800px; margin: 0; overflow: hidden; }
+    body {
+      position: relative;
+      background: #f7f8fa url("taskbridge-screenshot-03-time-1280x800.png") center/cover no-repeat;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    body::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(247,248,250,.08) 0 48%, rgba(23,21,31,.28) 100%);
+      backdrop-filter: saturate(.8);
+    }
+    .popup {
+      position: absolute;
+      z-index: 1;
+      top: 24px;
+      right: 42px;
+      width: 430px;
+      height: 752px;
+      border: 1px solid rgba(47,45,74,.16);
+      border-radius: 18px;
+      background: #f7f8fa;
+      box-shadow: 0 30px 90px rgba(17,14,35,.34);
+      overflow: hidden;
+    }
+    iframe { width: 430px; height: 752px; border: 0; }
+  </style>
+</head>
+<body>
+  <div class="popup"><iframe src="screenshot-popup-tracking-content.html" title="Popup de TaskBridge con tracking activo"></iframe></div>
+</body>
+</html>

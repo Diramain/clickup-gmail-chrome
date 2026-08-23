@@ -2,6 +2,7 @@ import type { ExtensionMessage } from './types/clickup';
 import { isConfirmedThreadId } from './link-hardening';
 import { isValidBulkTaskChange } from './bulk-task-update';
 import { isValidGmailImageUploadPayload } from './gmail-attachment-security';
+import { normalizePersonalToken } from './clickup-auth';
 
 export interface MessageValidationResult {
     ok: boolean;
@@ -21,7 +22,7 @@ const MEET_ACTIONS = new Set([
 ]);
 const DIAGNOSTIC_ACTIONS = new Set(['getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics']);
 const EXTENSION_ACTIONS = new Set([
-    'authenticate', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
+    'authenticate', 'authenticatePersonalToken', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
     'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'createTaskSimple', 'saveOAuthConfig', 'savePreferredTeam',
     'getPreferredTeam', 'getTaskById', 'preloadFullHierarchy', 'getHierarchyCache', 'getEmailTasksSyncStatus', 'findLinkedTasks',
     'searchTasks', 'syncEmailTasks', 'clearLocalData', 'getTimeEntries',
@@ -36,6 +37,7 @@ const EXTENSION_ACTIONS = new Set([
     'linkGoogleCalendarEventTask', 'createGoogleCalendarEventTask', 'getCalendarTaskTypeConfig', 'getClickUpCustomTaskTypes',
     'setCalendarTaskTypeConfig', 'openGoogleCalendarMeet', 'getGmailIntegrationPreference', 'setGmailIntegrationPreference'
 ]);
+const CREDENTIAL_ACTIONS = new Set(['authenticate', 'authenticatePersonalToken', 'saveOAuthConfig']);
 
 const MAX_SUBJECT = 500;
 const MAX_FROM = 320;
@@ -55,6 +57,7 @@ export function validateExtensionMessage(message: ExtensionMessage, sender: chro
 
 export function isAllowedOriginForAction(action: string, origin: string): boolean {
     if (origin.startsWith('chrome-extension://')) {
+        if (CREDENTIAL_ACTIONS.has(action)) return isTrustedSetupPage(origin);
         return action !== 'uploadGmailImageAttachment'
             && (EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action));
     }
@@ -63,6 +66,16 @@ export function isAllowedOriginForAction(action: string, origin: string): boolea
     if (hasExactHttpsHost(origin, 'app.clickup.com')) return CLICKUP_ACTIONS.has(action);
     if (hasExactHttpsHost(origin, 'meet.google.com')) return MEET_ACTIONS.has(action);
     return false;
+}
+
+function isTrustedSetupPage(value: string): boolean {
+    try {
+        const url = new URL(value);
+        return url.protocol === 'chrome-extension:'
+            && (url.pathname === '/popup/popup.html' || url.pathname === '/app/app.html');
+    } catch {
+        return false;
+    }
 }
 
 function hasExactHttpsHost(value: string, hostname: string): boolean {
@@ -77,8 +90,15 @@ function hasExactHttpsHost(value: string, hostname: string): boolean {
 export function hasValidSchema(message: ExtensionMessage): boolean {
     const data = message.data || message;
     switch (message.action) {
+        case 'authenticatePersonalToken':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['token'])
+                && normalizePersonalToken(data.token) !== null;
         case 'saveOAuthConfig':
-            return isShortString(data.clientId, 300) && isShortString(data.clientSecret, 1000);
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['clientId', 'clientSecret'])
+                && isShortString(data.clientId, 300)
+                && isShortString(data.clientSecret, 1000);
         case 'savePreferredTeam':
             return isShortString(data.teamId, 100);
         case 'setDefaultDestination':

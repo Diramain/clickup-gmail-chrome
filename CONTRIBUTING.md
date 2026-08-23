@@ -3,7 +3,7 @@
 ## Project Structure
 
 ```
-clickup-gmail-chrome/
+taskbridge-for-clickup/
 ├── background.ts           # Service worker (router)
 ├── popup/
 │   └── popup.ts            # Popup UI
