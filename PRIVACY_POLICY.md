@@ -1,6 +1,6 @@
 # Privacy Policy for TaskBridge for ClickUp
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-08-23
 
 ## 1. Overview
 
@@ -20,7 +20,7 @@ Depending on the action you choose, the extension may use or transfer to ClickUp
 - Gmail URL for the thread;
 - relevant email content used to create task descriptions, comments, or attachments.
 
-When the sanitized HTML attachment option is selected, the extension may upload a sanitized HTML representation of the email as a ClickUp task attachment. This checkbox is enabled by default. The modal also lets you explicitly select image attachments from the clicked Gmail message. Only PNG, JPEG, GIF, and WebP are accepted; SVG is excluded. Each selected image is fetched by the Gmail content script with the active Gmail session, validated before and after redirects as an HTTPS `mail.google.com` URL, limited to 10 MiB per file and 20 MiB per action, and sent one file at a time to ClickUp. The background service worker does not fetch Gmail attachments. Attachment URLs and bytes are not persisted or logged by the extension.
+When the sanitized HTML attachment option is selected, the extension may upload a sanitized HTML representation of the email as a ClickUp task attachment. This checkbox is enabled by default. The modal also lets you explicitly select supported attachments from the clicked Gmail message: PNG, JPEG, GIF, WebP, PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, TXT, CSV, ZIP, and RAR. This may include images displayed inside the email body only when Gmail serves them from HTTPS `mail.google.com`; arbitrary third-party image hosts and declared tracking pixels are excluded. SVG, macro-enabled Office formats, executables, and scripts are also excluded. Activating the optional thumbnail view loads validated Gmail-hosted images into the modal but does not select them or send them to ClickUp. Each selected file starts from a validated HTTPS `mail.google.com` URL. The response may finish only on `mail.google.com`, Gmail's exact `mail-attachment.googleusercontent.com` host, a numbered `ciN.googleusercontent.com` Gmail image-delivery host, or a non-opaque response produced by Gmail's own service worker without an exposed final URL. Limits are 10 MiB per file and 20 MiB per action, and files are sent one at a time to ClickUp. The extension background service worker does not fetch Gmail attachments. Attachment URLs and bytes are not persisted or logged by the extension.
 
 When automatic ClickUp time tracking is enabled, the extension evaluates ClickUp tab URLs locally to identify a direct task or a task notification detail. Once a task timer is running, navigating to Gmail, Chatwoot, Inbox, or another non-task page does not by itself stop that timer. Opening another recognized task may switch the timer according to the enabled automatic controls. With Auto-Stop enabled, closing the last direct or task-specific ClickUp Inbox tab for the running task stops that timer; another tab for the same task in any Chrome window preserves it.
 

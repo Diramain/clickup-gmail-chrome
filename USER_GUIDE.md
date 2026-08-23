@@ -1,7 +1,7 @@
 # TaskBridge for ClickUp
 ## User Guide
 
-**Version:** 2.0.1
+**Version:** 2.1.0
 **Last Updated:** August 2026
 
 ---
@@ -84,9 +84,9 @@ The modal includes:
 
 The Markdown tab and visual editor stay synchronized. Supported task-description formats are headings, emphasis, ordered/unordered lists, links, quotes, and inline code.
 
-### Image Attachments
+### Gmail Attachments
 
-The task form lists eligible Gmail images explicitly. Nothing is uploaded unless selected. PNG, JPEG, GIF, and WebP are supported; SVG is rejected. Limits are 10 MiB per file and 20 MiB per operation.
+The task form lists eligible files from the selected Gmail message explicitly, including supported images embedded in the body when Gmail serves them from `mail.google.com`. Use **Miniaturas** to load a visual grid for supported images and **Vista lista** to return to compact rows; documents remain in list form. Nothing is uploaded to ClickUp unless selected. Supported formats are PNG, JPEG, GIF, WebP, PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, TXT, CSV, ZIP, and RAR. SVG, macro-enabled Office formats, executables, scripts, remote third-party images, and declared tracking pixels are rejected. Limits are 10 MiB per file and 20 MiB per operation.
 
 ---
 

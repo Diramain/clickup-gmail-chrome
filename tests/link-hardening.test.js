@@ -48,6 +48,8 @@ describe('link hardening helpers', () => {
 
         expect(notFound.linkStatus).toBe('not_found_candidate');
         expect(unlinked.linkStatus).toBe('unlinked_candidate');
+        expect(hardening.needsInactiveLinkConfirmation(notFound, hardening.classifyValidationError(404))).toBe(true);
+        expect(hardening.needsInactiveLinkConfirmation(unlinked, { status: 'unlinked', valid: true, linked: false })).toBe(true);
         expect([notFound]).toHaveLength(1);
         expect(hardening.toVisibleLinkedTasks([notFound, unlinked])).toHaveLength(2);
     });

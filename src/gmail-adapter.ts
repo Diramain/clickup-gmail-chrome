@@ -20,12 +20,18 @@ interface GmailSelectors {
     subjectCell: string;
     mainView: string;
     attachments: string;
-    userEmail: string;
 }
 
 interface SubjectContainer {
     span: Element | null;
     cell: Element | null;
+}
+
+interface GmailAttachmentInfo {
+    url: string;
+    filename: string;
+    mimeType: string;
+    inline?: true;
 }
 
 interface IGmailAdapter {
@@ -40,8 +46,8 @@ interface IGmailAdapter {
     getInboxRows(): NodeListOf<Element>;
     getRowLegacyThreadId(row: Element): string | null;
     getSubjectContainer(row: Element): SubjectContainer;
-    getAttachmentUrls(scope?: Element | null): { url: string; filename: string; mimeType: string }[];
-    getUserEmail(): string;
+    getAttachmentUrls(scope?: Element | null, bodyElement?: Element | null): GmailAttachmentInfo[];
+    getInlineImageUrls(bodyElement: Element): GmailAttachmentInfo[];
     isViewingEmail(): boolean;
     isViewingInbox(): boolean;
 }
@@ -78,10 +84,7 @@ const GmailAdapter: IGmailAdapter = {
         mainView: 'div[role="main"]',
 
         // Attachments
-        attachments: '.ii.gt [download_url], .a3s.aiL [download_url]',
-
-        // User email (for data payload)
-        userEmail: '[data-inboxsdk-user-email-address], [data-email]'
+        attachments: '.ii.gt [download_url], .a3s.aiL [download_url]'
     },
 
     /**
@@ -102,11 +105,7 @@ const GmailAdapter: IGmailAdapter = {
             .filter((el) => !el.querySelector('.a3s.aiL'))
             .filter((el) => !primary.some((body) => el.contains(body) || body.contains(el)));
 
-        return [...primary, ...fallback].filter((el, index, all) =>
-            all.indexOf(el) === index && !all.some((other, otherIndex) =>
-                otherIndex !== index && other.contains(el)
-            )
-        );
+        return [...primary, ...fallback].filter((el, index, all) => all.indexOf(el) === index);
     },
 
     /**
@@ -176,7 +175,8 @@ const GmailAdapter: IGmailAdapter = {
      * Get message container for an email body
      */
     getMessageContainer(bodyElement: Element): Element | null {
-        return bodyElement.closest('.gs') ||
+        return bodyElement.closest('.adn') ||
+            bodyElement.closest('.gs') ||
             bodyElement.closest('.h7') ||
             bodyElement.parentElement;
     },
@@ -210,9 +210,17 @@ const GmailAdapter: IGmailAdapter = {
      * Get attachments info from email
      * Gmail download_url format: "mimeType:filename:actualUrl"
      */
-    getAttachmentUrls(scope?: Element | null): { url: string; filename: string; mimeType: string }[] {
+    getAttachmentUrls(scope?: Element | null, bodyElement?: Element | null): { url: string; filename: string; mimeType: string }[] {
         const attachments: { url: string; filename: string; mimeType: string }[] = [];
-        const elements = (scope || document).querySelectorAll('[download_url]');
+        const scopedElements = Array.from((scope || document).querySelectorAll('[download_url]'));
+        const bodies = bodyElement ? this.getAllEmailBodies() : [];
+        const assignedElements = bodyElement ? Array.from(document.querySelectorAll('[download_url]')).filter(element => {
+            const precedingBodies = bodies.filter(body =>
+                Boolean(body.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
+            );
+            return precedingBodies[precedingBodies.length - 1] === bodyElement;
+        }) : [];
+        const elements = [...new Set([...scopedElements, ...assignedElements])];
         elements.forEach(el => {
             const downloadUrl = el.getAttribute('download_url');
             if (downloadUrl) {
@@ -232,14 +240,28 @@ const GmailAdapter: IGmailAdapter = {
         return attachments;
     },
 
-    /**
-     * Get current user's email address
-     */
-    getUserEmail(): string {
-        const el = document.querySelector(this.SELECTORS.userEmail);
-        if (!el) return '';
-        return el.getAttribute('data-inboxsdk-user-email-address') ||
-            el.getAttribute('data-email') || '';
+    getInlineImageUrls(bodyElement: Element): GmailAttachmentInfo[] {
+        const seen = new Set<string>();
+        const images: GmailAttachmentInfo[] = [];
+        bodyElement.querySelectorAll<HTMLImageElement>('img[src]').forEach(image => {
+            const width = Number(image.getAttribute('width'));
+            const height = Number(image.getAttribute('height'));
+            if (width > 0 && width <= 2 && height > 0 && height <= 2) return;
+            try {
+                const url = new URL(image.getAttribute('src') || '', window.location.origin);
+                if (url.protocol !== 'https:' || url.hostname !== 'mail.google.com' || url.port || url.username || url.password || seen.has(url.href)) return;
+                seen.add(url.href);
+                images.push({
+                    url: url.href,
+                    filename: `imagen-en-el-cuerpo-${images.length + 1}`,
+                    mimeType: 'image/*',
+                    inline: true,
+                });
+            } catch {
+                // Ignore malformed and non-HTTP image sources.
+            }
+        });
+        return images;
     },
 
     /**
@@ -259,7 +281,7 @@ const GmailAdapter: IGmailAdapter = {
 
 // Export for module usage
 export { GmailAdapter };
-export type { IGmailAdapter, GmailSelectors, SubjectContainer };
+export type { GmailAttachmentInfo, IGmailAdapter, GmailSelectors, SubjectContainer };
 
 // Make available globally for content scripts
 (window as any).GmailAdapter = GmailAdapter;

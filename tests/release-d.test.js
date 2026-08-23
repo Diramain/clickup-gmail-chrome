@@ -108,5 +108,6 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(validateScript).toMatch(/Manifest references missing file/);
         expect(validateScript).toMatch(/Release allowlist mismatch/);
         expect(validateScript).toMatch(/Blocked file in release directory/);
+        expect(validateScript).toMatch(/Legacy Gmail SDK marker in release file/);
     });
 });

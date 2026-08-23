@@ -1,4 +1,4 @@
-# TaskBridge for ClickUp 2.0.1
+# TaskBridge for ClickUp 2.1.0
 
 Technical reference for the Chrome Manifest V3 extension. The canonical versioned source is this repository; the GitHub wiki mirrors the maintained user, technical, contribution, security, privacy, and release documents from `main`.
 
@@ -56,14 +56,18 @@ Expired details are refreshed before task creation, task linking, or opening Mee
 
 ## Gmail Attachments
 
-The user explicitly selects eligible images. Supported types are PNG, JPEG, GIF, and WebP. SVG is denied. The flow enforces:
+The user explicitly selects eligible files from the clicked Gmail message. This includes inline body images only when Gmail serves them from `mail.google.com`; arbitrary third-party image hosts and declared tracking pixels are denied. Supported types are PNG, JPEG, GIF, WebP, PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, TXT, CSV, ZIP, and RAR. SVG, macro-enabled Office formats, executables, and scripts are denied. The flow enforces:
 
 - allowlisted Gmail attachment URLs;
-- matching declared/response MIME types;
+- exact `mail-attachment.googleusercontent.com` and numbered `ciN.googleusercontent.com` allowlists for Gmail delivery redirects;
+- non-opaque, URL-less responses from Gmail's own service worker while rejecting opaque responses;
+- matching filename extensions and declared/response MIME types;
 - file signatures;
 - 10 MiB per file;
 - 20 MiB per operation;
 - background message size and origin validation.
+
+The optional thumbnail mode lazily loads only validated Gmail-hosted PNG, JPEG, GIF, WebP, and inline image candidates. Non-image files remain compact rows, and thumbnail activation does not select or upload a file to ClickUp.
 
 The sanitized HTML email copy uses an element and attribute allowlist. Remote image loads, `srcset`, `ping`, active elements, embedded styles, event handlers, forms, and unsafe URLs are removed.
 

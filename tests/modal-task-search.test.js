@@ -36,6 +36,141 @@ function modalFixture() {
 }
 
 describe('Attach-to-existing modal search', () => {
+    test('marks and unmarks every eligible Gmail attachment', async () => {
+        window.matchMedia = jest.fn(() => ({ matches: false }));
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.loadFullHierarchy = jest.fn(() => Promise.resolve());
+        modal.loadDefaultList = jest.fn(() => Promise.resolve());
+        modal.prefillCurrentUser = jest.fn(() => Promise.resolve());
+
+        await modal.show({
+            threadId: 'thread123',
+            subject: 'Email',
+            from: '',
+            html: '',
+            attachments: [
+                { filename: 'one.pdf', mimeType: 'application/pdf', url: 'https://mail.google.com/mail/u/0/?att=1' },
+                { filename: 'two.pdf', mimeType: 'application/pdf', url: 'https://mail.google.com/mail/u/0/?att=2' },
+            ],
+        });
+
+        const button = document.querySelector('#cu-toggle-attachments');
+        const checkboxes = Array.from(document.querySelectorAll('[data-attachment-index]'));
+        expect(button.textContent).toBe('Marcar todos');
+
+        button.click();
+        expect(checkboxes.every(checkbox => checkbox.checked)).toBe(true);
+        expect(button.textContent).toBe('Desmarcar todos');
+        expect(button.getAttribute('aria-pressed')).toBe('true');
+
+        checkboxes[0].checked = false;
+        checkboxes[0].dispatchEvent(new Event('change', { bubbles: true }));
+        expect(button.textContent).toBe('Marcar todos');
+
+        button.click();
+        button.click();
+        expect(checkboxes.every(checkbox => !checkbox.checked)).toBe(true);
+        expect(button.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    test('toggles lazy thumbnails for images without previewing documents', async () => {
+        window.matchMedia = jest.fn(() => ({ matches: false }));
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.loadFullHierarchy = jest.fn(() => Promise.resolve());
+        modal.loadDefaultList = jest.fn(() => Promise.resolve());
+        modal.prefillCurrentUser = jest.fn(() => Promise.resolve());
+
+        await modal.show({
+            threadId: 'thread123',
+            subject: 'Email',
+            from: '',
+            html: '',
+            attachments: [
+                { filename: 'photo.jpg', mimeType: 'image/jpeg', url: 'https://mail.google.com/mail/u/0/?att=1' },
+                { filename: 'report.pdf', mimeType: 'application/pdf', url: 'https://mail.google.com/mail/u/0/?att=2' },
+            ],
+        });
+
+        const button = modal.modal.querySelector('#cu-toggle-attachment-preview');
+        const list = modal.modal.querySelector('#cu-attachment-list');
+        expect(button.hidden).toBe(false);
+        expect(list.querySelectorAll('.cu-attachment-preview')).toHaveLength(0);
+
+        button.click();
+        expect(button.textContent).toBe('Vista lista');
+        expect(button.getAttribute('aria-pressed')).toBe('true');
+        expect(list.classList.contains('cu-attachment-list-thumbnails')).toBe(true);
+        expect(list.querySelectorAll('.cu-attachment-preview')).toHaveLength(1);
+        expect(list.querySelector('.cu-attachment-preview').getAttribute('src')).toBe('https://mail.google.com/mail/u/0/?att=1');
+
+        button.click();
+        expect(button.textContent).toBe('Miniaturas');
+        expect(list.classList.contains('cu-attachment-list-thumbnails')).toBe(false);
+    });
+
+    test('resolves a Gmail body image MIME type before uploading it', async () => {
+        const originalFetch = global.fetch;
+        window.matchMedia = jest.fn(() => ({ matches: false }));
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.loadFullHierarchy = jest.fn(() => Promise.resolve());
+        modal.loadDefaultList = jest.fn(() => Promise.resolve());
+        modal.prefillCurrentUser = jest.fn(() => Promise.resolve());
+        chrome.runtime.sendMessage.mockResolvedValue({ success: true });
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            url: 'https://mail-attachment.googleusercontent.com/attachment/u/0/?attid=1',
+            type: 'cors',
+            headers: { get: key => key === 'content-type' ? 'image/jpeg' : null },
+            arrayBuffer: () => Promise.resolve(Uint8Array.from([0xff, 0xd8, 0xff]).buffer),
+        });
+
+        await modal.show({
+            threadId: 'thread123',
+            subject: 'Email',
+            from: '',
+            html: '',
+            attachments: [{
+                url: 'https://mail.google.com/mail/u/0/?view=fimg&attid=1',
+                filename: 'imagen-en-el-cuerpo-1',
+                mimeType: 'image/*',
+                inline: true,
+            }],
+        });
+        const checkbox = modal.modal.querySelector('[data-attachment-index]');
+        checkbox.checked = true;
+
+        await expect(modal.uploadSelectedAttachments('task-1')).resolves.toEqual({ uploaded: 1, failed: 0, failureReason: undefined });
+        expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'uploadGmailAttachment',
+            data: expect.objectContaining({ filename: 'imagen-en-el-cuerpo-1.jpg', mimeType: 'image/jpeg' }),
+        }));
+        global.fetch = originalFetch;
+    });
+
+    test('omits timeTracked when the optional field is empty', async () => {
+        window.matchMedia = jest.fn(() => ({ matches: false }));
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.loadFullHierarchy = jest.fn(() => Promise.resolve());
+        modal.loadDefaultList = jest.fn(() => Promise.resolve());
+        modal.prefillCurrentUser = jest.fn(() => Promise.resolve());
+        modal.showSuccessPopup = jest.fn();
+        modal.showToast = jest.fn();
+        modal.close = jest.fn();
+        chrome.runtime.sendMessage.mockResolvedValue({ id: 'task-1', name: 'Task', url: 'https://app.clickup.com/t/task-1' });
+
+        await modal.show({ threadId: 'thread123', subject: 'Email', from: '', html: '', attachments: [] });
+        modal.selectedListId = 'list-1';
+        await modal.submit();
+
+        const createMessage = chrome.runtime.sendMessage.mock.calls.map(call => call[0]).find(message => message.action === 'createTaskFull');
+        expect(createMessage).toBeDefined();
+        expect(createMessage).not.toHaveProperty('timeTracked');
+    });
+
     test('renders before hierarchy hydration completes', async () => {
         window.matchMedia = jest.fn(() => ({ matches: false }));
         const { TaskModal } = loadTsModule('src/modal.ts');

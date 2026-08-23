@@ -1,7 +1,7 @@
 import type { ExtensionMessage } from './types/clickup';
 import { isConfirmedThreadId } from './link-hardening';
 import { isValidBulkTaskChange } from './bulk-task-update';
-import { isValidGmailImageUploadPayload } from './gmail-attachment-security';
+import { isValidGmailAttachmentUploadPayload } from './gmail-attachment-security';
 import { normalizePersonalToken } from './clickup-auth';
 
 export interface MessageValidationResult {
@@ -12,7 +12,7 @@ export interface MessageValidationResult {
 const GMAIL_ACTIONS = new Set([
     'openTaskModal', 'getStatus', 'getHierarchy', 'getHierarchyCache', 'getPreferredTeam', 'getTeams', 'getSpaces',
     'getFolders', 'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'searchTasks', 'getTaskById',
-    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'uploadGmailImageAttachment', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig',
+    'preloadFullHierarchy', 'createTaskFull', 'attachToTask', 'uploadGmailAttachment', 'validateTaskLink', 'getEmailTaskMappings', 'getDefaultListConfig',
     'getGmailIntegrationPreference'
 ]);
 const CLICKUP_ACTIONS = new Set(['startTimer', 'stopTimer', 'getRunningTimer', 'createTimeEntry', 'addTimeEntry', 'updateTimerBadge', 'focusedClickUpNavigation']);
@@ -58,7 +58,7 @@ export function validateExtensionMessage(message: ExtensionMessage, sender: chro
 export function isAllowedOriginForAction(action: string, origin: string): boolean {
     if (origin.startsWith('chrome-extension://')) {
         if (CREDENTIAL_ACTIONS.has(action)) return isTrustedSetupPage(origin);
-        return action !== 'uploadGmailImageAttachment'
+        return action !== 'uploadGmailAttachment'
             && (EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action));
     }
     if (DIAGNOSTIC_ACTIONS.has(action)) return false;
@@ -126,10 +126,10 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return isConfirmedThreadId(data.threadId || message.threadId);
         case 'attachToTask':
             return isShortString(message.taskId || data.taskId, 100) && isValidEmailData(message.emailData || data.emailData, true);
-        case 'uploadGmailImageAttachment':
+        case 'uploadGmailAttachment':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && hasOnlyDataKeys(data, ['taskId', 'filename', 'mimeType', 'byteLength', 'base64'])
-                && isValidGmailImageUploadPayload(data);
+                && isValidGmailAttachmentUploadPayload(data);
         case 'setGmailIntegrationPreference':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && hasOnlyDataKeys(data, ['enabled'])

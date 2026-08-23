@@ -74,13 +74,14 @@ describe('B2 sanitizer and message security', () => {
         expect(messages.validateExtensionMessage({ action: 'applyBulkTaskChange', data: { taskId: '../bad', listId: 'list-1', status: 'Done' } }, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'attachToTask', taskId: 't', emailData: { threadId: 'th', subject: 's', from: 'f', html: '', attachments: [{ filename: 'x'.repeat(300), mimeType: 'text/plain' }] } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         const pngBase64 = 'iVBORw0KGgo=';
-        const upload = { action: 'uploadGmailImageAttachment', data: { taskId: 'task-1', filename: 'image.png', mimeType: 'image/png', byteLength: 8, base64: pngBase64 } };
+        const upload = { action: 'uploadGmailAttachment', data: { taskId: 'task-1', filename: 'image.png', mimeType: 'image/png', byteLength: 8, base64: pngBase64 } };
         expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(true);
         expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://app.clickup.com/' }, runtimeId).ok).toBe(false);
         expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'chrome-extension://ext-id/task-modal.html' }, runtimeId).ok).toBe(false);
         expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://mail.google.com.evil.test/' }, runtimeId).ok).toBe(false);
         expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, mimeType: 'image/svg+xml' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
         expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, filename: 'image.svg' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, filename: 'payload.exe', mimeType: 'application/octet-stream' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
         expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, byteLength: 9 } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
     });
 

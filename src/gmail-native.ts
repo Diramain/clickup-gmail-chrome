@@ -12,6 +12,7 @@ import { ensureThreadBar, reconcileLinkedTaskAnchors, reconcileThreadBarState } 
 import {
     applyValidationToTask,
     isConfirmedThreadId,
+    needsInactiveLinkConfirmation,
     readMappingsWithFallback,
     shouldValidateLink,
     toVisibleLinkedTasks,
@@ -19,7 +20,7 @@ import {
     type LinkValidationResult,
 } from './link-hardening';
 import { safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
-import { isAllowedGmailAttachmentUrl, isAllowedGmailImageMimeType, sanitizeGmailAttachmentFilename } from './gmail-attachment-security';
+import { isAllowedGmailAttachmentType, isAllowedGmailAttachmentUrl, isAllowedGmailInlineImageCandidate, sanitizeGmailAttachmentFilename } from './gmail-attachment-security';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
@@ -369,11 +370,11 @@ function reconcileClickUpBar(bar: HTMLElement, threadId: string | null): void {
 // Task Verification
 // ============================================================================
 
-async function verifyThreadTasks(threadId: string, barElement: Element): Promise<void> {
+async function verifyThreadTasks(threadId: string, barElement: Element, ttlMs?: number): Promise<void> {
     const tasks = linkedTasks[threadId] || [];
     if (tasks.length === 0) return;
 
-    const dueTasks = tasks.filter(task => shouldValidateLink(task));
+    const dueTasks = tasks.filter(task => shouldValidateLink(task, Date.now(), ttlMs));
     if (dueTasks.length === 0) return;
 
     const taskIdsKey = dueTasks.map(task => task.id).sort().join(',');
@@ -396,7 +397,7 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
     for (const task of dueTasks) {
         try {
             Logger.debug(' Verifying task link');
-            const response = await chrome.runtime.sendMessage({
+            let response = await chrome.runtime.sendMessage({
                 action: 'validateTaskLink',
                 taskId: task.id,
                 threadId: threadId
@@ -404,7 +405,15 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
             Logger.debug(` Validation response status: ${response?.status || 'unknown'}`);
 
             if (response?.status) {
-                const updated = (response as any).linkRecord || applyValidationToTask(task, response);
+                let updated = (response as any).linkRecord || applyValidationToTask(task, response);
+                if (needsInactiveLinkConfirmation(updated, response)) {
+                    response = await chrome.runtime.sendMessage({
+                        action: 'validateTaskLink',
+                        taskId: task.id,
+                        threadId: threadId
+                    }) as LinkValidationResult;
+                    updated = (response as any).linkRecord || applyValidationToTask(updated, response);
+                }
                 updates.set(task.id, updated);
                 changed = changed || updated.linkStatus !== task.linkStatus || updated.lastValidatedAt !== task.lastValidatedAt;
                 if (response.status === 'not_found' || response.status === 'unlinked') {
@@ -433,10 +442,13 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
 function openTaskModal(threadId: string, initialTab: 'create' | 'attach' = 'create', messageBody?: HTMLElement): void {
     const body = messageBody?.isConnected ? messageBody : GmailAdapter.getEmailBodyElement();
     const messageContainer = body ? GmailAdapter.getMessageContainer(body) : null;
-    const attachments = GmailAdapter.getAttachmentUrls(messageContainer)
-        .filter(attachment => isAllowedGmailImageMimeType(attachment.mimeType)
+    const attachments = [
+        ...GmailAdapter.getAttachmentUrls(messageContainer, body),
+        ...(body ? GmailAdapter.getInlineImageUrls(body) : []),
+    ].filter(attachment => isAllowedGmailInlineImageCandidate(attachment)
+        || (isAllowedGmailAttachmentType(attachment.filename, attachment.mimeType)
             && isAllowedGmailAttachmentUrl(attachment.url)
-            && sanitizeGmailAttachmentFilename(attachment.filename));
+            && sanitizeGmailAttachmentFilename(attachment.filename)));
     const emailData: EmailData = {
         threadId: threadId,
         subject: getEmailSubject(),
@@ -529,7 +541,7 @@ function revalidateVisibleBars(): void {
     document.querySelectorAll('.cu-email-bar').forEach((bar) => {
         const threadId = (bar as HTMLElement).dataset.threadId || '';
         if (isConfirmedThreadId(threadId)) {
-            verifyThreadTasks(threadId, bar);
+            verifyThreadTasks(threadId, bar, 10_000);
         }
     });
 }

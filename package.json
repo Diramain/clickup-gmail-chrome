@@ -1,6 +1,6 @@
 {
   "name": "taskbridge-for-clickup",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Chrome extension to create ClickUp tasks from Gmail",
   "private": true,
   "author": "Leandro Iramain",
