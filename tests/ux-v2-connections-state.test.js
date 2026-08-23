@@ -23,6 +23,7 @@ describe('CGC-UX-V2-C1 local connections state', () => {
     test.each([
         [{ configured: false, credentialPresent: false, requiresReauth: false }, 'unconfigured'],
         [{ configured: true, credentialPresent: false, requiresReauth: false }, 'configured'],
+        [{ configured: false, credentialPresent: true, requiresReauth: false }, 'connected-local'],
         [{ configured: true, credentialPresent: true, requiresReauth: false }, 'connected-local'],
         [{ configured: true, credentialPresent: true, requiresReauth: true }, 'reauth-required'],
         [null, 'unavailable'],
@@ -37,6 +38,7 @@ describe('CGC-UX-V2-C1 local connections state', () => {
 
         expect(action).toContain('hasSecureOAuthConfig');
         expect(action).toContain('hasSecureToken');
+        expect(action).toContain('configured: oauthConfigured || credentialPresent');
         expect(action).not.toMatch(/fetch\(|getFreshAuthenticatedUser|ensureAPI|token:|user:|oauthConfig:/);
     });
 
@@ -51,6 +53,9 @@ describe('CGC-UX-V2-C1 local connections state', () => {
         expect(clickUpState.dataset.state).toBe('loading');
         expect(googleButton.disabled).toBe(true);
         expect(source('app/app.ts')).toContain("action: 'getLocalConnectionStatus'");
+        expect(source('app/app.ts')).toContain("document.addEventListener('clickup-auth-changed'");
+        expect(source('app/app.css')).toMatch(/#calendarConnectionLink\s*\{[\s\S]*var\(--state-error\)/);
+        expect(source('app/app.css')).toContain('#calendarConnectionLink[hidden] { display: none; }');
         expect(source('app/app.ts')).not.toMatch(/action:\s*['"](?:authenticate|logout|saveOAuthConfig|getStatus)['"]/);
     });
 

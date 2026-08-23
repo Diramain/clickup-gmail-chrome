@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
-    <title>ClickUp Gmail Tracker</title>
+    <meta name="color-scheme" content="light dark">
+    <title>TaskBridge for ClickUp</title>
     <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -12,131 +12,417 @@
     <div class="app-shell">
         <aside class="sidebar" aria-label="Navegación principal">
             <div class="brand-lockup">
-                <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
-                    <path d="M10 32c4 6 8 8 14 8s10-2 14-8" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
-                    <path d="M11 19 24 8l13 11" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <div>
-                    <strong>ClickUp Gmail</strong>
-                    <span>Nueva experiencia</span>
+                <img class="brand-mark brand-mark-clickup" src="assets/clickup-logomark.svg" alt="" aria-hidden="true">
+                <div class="brand-copy-clickup">
+                    <strong>TaskBridge</strong>
+                    <span>Para ClickUp</span>
                 </div>
+                <img class="brand-spiritfox" src="assets/spiritfox-logo.webp" alt="Spiritfox">
             </div>
 
             <nav class="primary-nav" aria-label="Secciones">
-                <a href="#inicio" data-route="inicio" aria-current="page"><span class="nav-index">01</span>Inicio</a>
-                <a href="#tareas" data-route="tareas"><span class="nav-index">02</span>Tareas</a>
-                <a href="#seguimiento" data-route="seguimiento"><span class="nav-index">03</span>Seguimiento</a>
-                <a href="#reuniones" data-route="reuniones"><span class="nav-index">04</span>Reuniones</a>
-                <a href="#conexiones" data-route="conexiones"><span class="nav-index">05</span>Conexiones</a>
-                <a href="#configuracion" data-route="configuracion"><span class="nav-index">06</span>Configuración</a>
+                <a href="#inicio" data-route="inicio" aria-current="page">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M5.5 10v10h13V10M9 20v-6h6v6"/></svg>
+                    <span class="nav-text">Inicio</span>
+                </a>
+                <a href="#gmail" data-route="gmail">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3zM3 7l9 7 9-7"/></svg>
+                    <span class="nav-text">Integración con Gmail</span>
+                </a>
+                <a href="#tiempo" data-route="tiempo">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 3h6"/></svg>
+                    <span class="nav-text">Jornada y tiempo</span>
+                </a>
+                <a href="#meet" data-route="meet">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12v10H3zM15 10l6-3v10l-6-3z"/></svg>
+                    <span class="nav-text">Calendar y Meet</span>
+                </a>
+                <a href="#sync" data-route="sync">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-7V2M4 17h7v5M19 12a7 7 0 0 0-12-5l-3 3M5 12a7 7 0 0 0 12 5l3-3"/></svg>
+                    <span class="nav-text">Sincronización</span>
+                </a>
+                <a href="#conexion" data-route="conexion">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14.8 6L14.5 3h-5L9.2 6a8 8 0 0 0-1.7 1.1l-2.4-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.2 18l.3 3h5l.3-3a8 8 0 0 0 1.7-1.1l2.4 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>
+                    <span class="nav-text">Conexión</span>
+                </a>
+                <a href="#datos" data-route="datos">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+                    <span class="nav-text">Datos y diagnóstico</span>
+                </a>
             </nav>
+
+            <div class="sidebar-actions" aria-label="Ayuda y proyecto">
+                <a class="sidebar-action" href="https://github.com/Diramain/taskbridge-for-clickup/issues/new/choose" target="_blank" rel="noopener noreferrer">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.6 9.6 0 0 1-4-.9L3 21l1.6-4.5A8.3 8.3 0 0 1 3 11.5a8.4 8.4 0 0 1 9-8.5 8.4 8.4 0 0 1 9 8.5Z"/></svg>
+                    <span>Enviar feedback</span>
+                </a>
+                <a class="sidebar-action" href="https://github.com/Diramain/taskbridge-for-clickup" target="_blank" rel="noopener noreferrer">
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4.5 1.4-4.5-2.5-6-3m12 6v-3.9c0-1.1.1-1.5-.5-2.1 2.8-.3 5.7-1.4 5.7-6.2A4.8 4.8 0 0 0 19 6.5 4.5 4.5 0 0 0 18.9 3S17.7 2.6 15 4.3a13.4 13.4 0 0 0-6 0C6.3 2.6 5.1 3 5.1 3A4.5 4.5 0 0 0 5 6.5a4.8 4.8 0 0 0-1.2 3.3c0 4.8 2.9 5.9 5.7 6.2-.6.6-.6 1.2-.5 2.1V22"/></svg>
+                    <span>Ver proyecto en GitHub</span>
+                </a>
+            </div>
 
             <div class="sidebar-note">
                 <span class="status-dot" aria-hidden="true"></span>
-                <div><strong>Vista previa local</strong><span>Sin OAuth ni APIs nuevas</span></div>
+                <div><strong>Datos bajo tu control</strong><span>Procesamiento local y acciones explícitas</span></div>
             </div>
         </aside>
 
         <main id="mainContent" class="main-content" tabindex="-1">
             <header class="topbar">
                 <div>
-                    <span class="topbar-label">ClickUp Gmail Tracker</span>
+                    <span class="topbar-label">TaskBridge for ClickUp</span>
                     <h1 id="pageTitle">Inicio</h1>
                 </div>
-                <div class="phase-badge"><span aria-hidden="true"></span>UX V2 · Conexiones locales</div>
+                <div class="topbar-actions">
+                    <div class="theme-switcher" role="group" aria-label="Seleccionar tema visual">
+                        <button type="button" class="theme-btn" data-theme-choice="paper" aria-pressed="true"><span class="theme-swatch theme-swatch-paper" aria-hidden="true"></span>ClickUp claro</button>
+                        <button type="button" class="theme-btn" data-theme-choice="clickup" aria-pressed="false"><span class="theme-swatch theme-swatch-clickup" aria-hidden="true"></span>ClickUp oscuro</button>
+                        <button type="button" class="theme-btn owner-theme-option" data-theme-choice="spiritfox" aria-pressed="false" hidden><span class="theme-swatch theme-swatch-spiritfox" aria-hidden="true"></span>Spiritfox</button>
+                    </div>
+                    <div class="phase-badge"><span aria-hidden="true"></span>Gmail · Calendar · Meet</div>
+                    <button id="pluginVersionUnlock" class="version-unlock" type="button" aria-label="Versión de la extensión">v2.0.1</button>
+                </div>
             </header>
 
-            <section class="page-section" data-page="inicio" aria-labelledby="inicioTitle">
-                <div class="hero-panel">
-                    <div class="hero-copy">
-                        <p class="section-label">Centro de trabajo</p>
-                        <h2 id="inicioTitle">Tu flujo entre Gmail y ClickUp, sin vivir dentro de un popup.</h2>
-                        <p>Esta pestaña será la nueva superficie principal. Durante la migración, las funciones actuales siguen operativas en el popup clásico.</p>
-                    </div>
-                    <div class="hero-orbit" aria-hidden="true">
-                        <div class="orbit orbit-a">Gmail</div>
-                        <div class="orbit orbit-b">ClickUp</div>
-                        <div class="orbit orbit-c">Calendar</div>
-                    </div>
-                </div>
+            <div id="loading" class="runtime-loading"><span class="status-dot" aria-hidden="true"></span> Cargando estado local…</div>
 
-                <div class="migration-grid" aria-label="Estado de migración de módulos">
-                    <article class="module-card module-card-primary">
-                        <span class="module-kicker">Disponible ahora</span>
-                        <h3>Conexiones</h3>
-                        <p>Revisá cómo convivirán ClickUp y Google Calendar con permisos separados.</p>
-                        <a href="#conexiones">Abrir Conexiones</a>
+            <section id="login-required" class="page-section hidden" aria-labelledby="clickupSetupTitle">
+                <div class="section-heading"><div><p class="section-label">Conexión requerida</p><h2 id="clickupSetupTitle">Conectá ClickUp desde esta pestaña.</h2><p>La configuración completa ya no vive en el popup.</p></div></div>
+                <div class="operation-grid two-columns">
+                    <article class="operation-card auth-setup-card">
+                        <span class="connection-badge">Recomendado</span>
+                        <h3>Conexión rápida</h3>
+                        <p>Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil de Chrome.</p>
+                        <label for="personalToken">Token personal de ClickUp</label>
+                        <input id="personalToken" type="password" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
+                        <button id="connectPersonalToken" type="button" class="btn primary" disabled>Conectar con token personal</button>
+                        <p id="personalTokenStatus" class="field-help" role="status" aria-live="polite"></p>
+                        <p class="credential-note">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
+                        <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer">Abrir Tokens de API en ClickUp</a>
+                        <details class="auth-advanced-card">
+                            <summary>Configuración avanzada con OAuth</summary>
+                            <p class="field-help">Para owners o admins que administran su propia app OAuth. El secreto se cifra localmente, pero un navegador comprometido puede acceder al perfil.</p>
+                            <label for="redirectUrl">URL de redirección</label>
+                            <div class="inline-control"><input id="redirectUrl" type="text" readonly><button id="copyUrl" type="button" class="btn">Copiar</button></div>
+                            <label for="clientId">ID de cliente</label><input id="clientId" type="text" autocomplete="off">
+                            <label for="clientSecret">Secreto de cliente</label><input id="clientSecret" type="password" autocomplete="new-password">
+                            <div class="inline-actions"><button id="saveConfig" type="button" class="btn">Guardar configuración</button><button id="discardOAuthChanges" type="button" class="btn">Descartar cambios</button></div>
+                            <p id="oauthConfigStatus" class="field-help" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
+                            <button id="signIn" type="button" class="btn primary" disabled>Iniciar sesión con ClickUp</button>
+                        </details>
+                        <button id="openWindow" type="button" class="hidden">Abrir ventana</button>
                     </article>
-                    <article class="module-card">
-                        <span class="module-kicker">Siguiente fase</span>
-                        <h3>Tareas y seguimiento</h3>
-                        <p>La migración conservará búsquedas, creación de tareas y timers sin duplicar lógica.</p>
-                    </article>
-                    <article class="module-card module-card-muted">
-                        <span class="module-kicker">Fallback activo</span>
-                        <h3>Popup clásico</h3>
-                        <p>Continúa siendo la interfaz funcional hasta alcanzar paridad y validar regresión.</p>
+                    <article class="operation-card">
+                        <h3>Google Calendar</h3>
+                        <p>Integración opcional para próximos eventos del calendario principal.</p>
+                        <button id="connectGoogleCalendarSetup" type="button" disabled aria-disabled="true">Conectar Google Calendar</button>
+                        <p id="googleOAuthSetupStatus" class="field-help">OAuth permanece desactivado.</p>
                     </article>
                 </div>
             </section>
 
-            <section class="page-section" data-page="tareas" aria-labelledby="tareasTitle" hidden>
+            <div id="logged-in" class="hidden">
+
+            <section class="page-section" data-page="inicio" aria-labelledby="inicioTitle">
                 <div class="section-heading">
                     <div>
-                        <p class="section-label">Buscar antes de crear</p>
-                        <h2 id="tareasTitle">Tareas</h2>
-                        <p>Encontrá una tarea por título, ID o URL. La creación se incorporará después de validar esta lectura.</p>
+                        <p class="section-label">Panel por usuario</p>
+                        <h2 id="inicioTitle">Tu jornada, de un vistazo.</h2>
+                        <p>Cada fase de la migración aporta su módulo a este panel. Podés elegir cuáles ver y en qué orden.</p>
                     </div>
                 </div>
 
-                <div class="task-search-panel">
-                    <form id="taskSearchForm" class="task-search-form" role="search">
-                        <label for="appTaskSearch">Buscar en ClickUp</label>
-                        <div class="task-search-controls">
-                            <input id="appTaskSearch" name="query" type="search" minlength="2" maxlength="100" autocomplete="off" placeholder="Título, ID o URL de tarea" disabled aria-describedby="taskSearchHelp taskSearchState">
-                            <button id="appTaskSearchButton" type="submit" disabled>Buscar</button>
+                <section class="dashboard-now" aria-labelledby="dashboardNowTitle">
+                    <div class="dashboard-block-heading">
+                        <div>
+                            <p class="section-label">Prioridad inmediata</p>
+                            <h3 id="dashboardNowTitle">Ahora</h3>
                         </div>
-                        <p id="taskSearchHelp" class="field-help">La búsqueda real permanece bloqueada hasta un canario read-only separado.</p>
+                        <span class="dashboard-live-label"><span aria-hidden="true"></span>Estado local</span>
+                    </div>
+                    <div class="now-grid">
+                        <article class="now-card now-card-timer">
+                            <div class="now-card-head">
+                                <span class="now-icon" aria-hidden="true">◷</span>
+                                <span id="dashboardTimerState" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span><span id="dashboardTimerStateText">Sin temporizador</span></span>
+                            </div>
+                            <p class="now-eyebrow">Temporizador activo</p>
+                            <strong id="dashboardTimerTask">No hay una tarea en curso</strong>
+                            <time id="dashboardTimerValue" class="now-value" datetime="PT0S">00:00:00</time>
+                            <a href="#tiempo" class="now-link">Abrir jornada y tiempo</a>
+                        </article>
+                        <article class="now-card now-card-meeting">
+                            <div class="now-card-head">
+                                <span class="now-icon" aria-hidden="true">□</span>
+                                <span id="dashboardMeetingState" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span><span id="dashboardMeetingStateText">Sin datos</span></span>
+                            </div>
+                            <p class="now-eyebrow">Próxima reunión</p>
+                            <strong id="dashboardMeetingTitle">Calendar no está conectado</strong>
+                            <span id="dashboardMeetingTime" class="now-value now-value-text">Horario no disponible</span>
+                            <a href="#meet" class="now-link">Abrir Calendar y Meet</a>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="execution-board-section" aria-labelledby="executionBoardTitle">
+                    <div class="dashboard-block-heading execution-board-heading">
+                        <div>
+                            <p class="section-label">Bandeja personal</p>
+                            <h3 id="executionBoardTitle">Qué requiere tu atención</h3>
+                        </div>
+                        <div class="execution-heading-actions">
+                            <span id="executionFutureCount" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span><span>Consultando tareas futuras…</span></span>
+                            <button id="toggleExecutionSelection" class="btn execution-refresh" type="button" aria-pressed="false">Seleccionar</button>
+                            <button id="refreshExecutionBoard" class="btn execution-refresh" type="button"><span aria-hidden="true">↻</span><span>Actualizar</span></button>
+                        </div>
+                    </div>
+                    <div id="executionStatusLegend" class="execution-status-legend" aria-label="Estados presentes en tus tareas"></div>
+                    <div id="executionBoard" class="execution-board" tabindex="0" aria-label="Tareas agrupadas por vencimiento">
+                        <section class="execution-column is-overdue" data-execution-column="overdue" aria-labelledby="executionOverdueTitle">
+                            <header><div class="execution-column-title"><button class="execution-drag-handle" type="button" aria-label="Mover columna Vencidas" title="Arrastrar o usar flechas para mover">⠿</button><h4 id="executionOverdueTitle">Vencidas</h4></div><div class="execution-column-actions"><button class="execution-date-sort" type="button" data-sort-column="overdue" aria-label="Ordenar Vencidas por fecha descendente">Fecha ↑</button><span id="executionOverdueCount">—</span></div></header>
+                            <div id="executionOverdueTasks" class="execution-task-list"><p class="execution-empty">Consultando ClickUp…</p></div>
+                        </section>
+                        <section class="execution-column is-today" data-execution-column="today" aria-labelledby="executionTodayTitle">
+                            <header><div class="execution-column-title"><button class="execution-drag-handle" type="button" aria-label="Mover columna Hoy" title="Arrastrar o usar flechas para mover">⠿</button><h4 id="executionTodayTitle">Hoy</h4></div><div class="execution-column-actions"><button class="execution-date-sort" type="button" data-sort-column="today" aria-label="Ordenar Hoy por fecha descendente">Fecha ↑</button><span id="executionTodayCount">—</span></div></header>
+                            <div id="executionTodayTasks" class="execution-task-list"><p class="execution-empty">Consultando ClickUp…</p></div>
+                        </section>
+                        <section class="execution-column is-next" data-execution-column="next" aria-labelledby="executionNextTitle">
+                            <header><div class="execution-column-title"><button class="execution-drag-handle" type="button" aria-label="Mover columna Próximos 3 días" title="Arrastrar o usar flechas para mover">⠿</button><h4 id="executionNextTitle">Próximos 3 días</h4></div><div class="execution-column-actions"><button class="execution-date-sort" type="button" data-sort-column="next" aria-label="Ordenar Próximos 3 días por fecha descendente">Fecha ↑</button><span id="executionNextCount">—</span></div></header>
+                            <div id="executionNextTasks" class="execution-task-list"><p class="execution-empty">Consultando ClickUp…</p></div>
+                        </section>
+                        <section class="execution-column is-undated" data-execution-column="undated" aria-labelledby="executionUndatedTitle">
+                            <header><div class="execution-column-title"><button class="execution-drag-handle" type="button" aria-label="Mover columna Sin fecha" title="Arrastrar o usar flechas para mover">⠿</button><h4 id="executionUndatedTitle">Sin fecha</h4></div><div class="execution-column-actions"><button class="execution-date-sort" type="button" data-sort-column="undated" aria-label="Ordenar Sin fecha por título descendente">Título ↑</button><span id="executionUndatedCount">—</span></div></header>
+                            <div id="executionUndatedTasks" class="execution-task-list"><p class="execution-empty">Consultando ClickUp…</p></div>
+                        </section>
+                    </div>
+                </section>
+
+                <section class="dashboard-kpis" aria-labelledby="dashboardKpiTitle">
+                    <div class="dashboard-block-heading">
+                        <div><p class="section-label">Resumen esencial</p><h3 id="dashboardKpiTitle">Tu trabajo</h3></div>
+                        <span id="dashboardDataState" class="dashboard-data-note" role="status" aria-live="polite">Consultando ClickUp…</span>
+                    </div>
+                    <div class="kpi-grid">
+                        <article class="stat"><p class="stat-title">Tareas para hoy</p><strong id="kpiTasksToday" class="stat-value">—</strong><span class="stat-note">Pendientes con vencimiento hoy</span></article>
+                        <article class="stat"><p class="stat-title">Tareas vencidas</p><strong id="kpiTasksOverdue" class="stat-value">—</strong><span class="stat-note">Requieren revisión</span></article>
+                        <article class="stat"><p class="stat-title">Completadas esta semana</p><strong id="kpiCompletedWeek" class="stat-value">—</strong><span class="stat-note">Avance de los últimos 7 días</span></article>
+                        <article class="stat"><p class="stat-title">Tiempo registrado hoy</p><strong id="kpiTrackedToday" class="stat-value">—</strong><span class="stat-note">Suma de entradas disponibles</span></article>
+                        <article class="stat"><p class="stat-title">Correos llevados a ClickUp</p><strong id="kpiGmailTasks" class="stat-value">—</strong><span class="stat-note">Creados o vinculados esta semana</span></article>
+                    </div>
+                </section>
+
+                <section class="dashboard-time-summary" aria-labelledby="dashboardTimeTitle">
+                    <div class="dashboard-block-heading">
+                        <div><p class="section-label">Últimos 7 días</p><h3 id="dashboardTimeTitle">Tiempo por tarea</h3></div>
+                        <div class="dashboard-time-actions">
+                            <label for="taskTimeSort">Ordenar por</label>
+                            <select id="taskTimeSort"><option value="duration">Más horas</option><option value="recent">Último trackeo</option></select>
+                            <a href="#tiempo" class="now-link">Ver todos los trackeos</a>
+                        </div>
+                    </div>
+                    <div id="dashboardTaskTimeTotals" class="dashboard-time-list" aria-live="polite">
+                        <p class="dashboard-time-empty">Consultando entradas de tiempo de ClickUp…</p>
+                    </div>
+                </section>
+
+                <div class="dashboard-toolbar">
+                    <div class="dashboard-toolbar-info">
+                        <span id="dashboardPresetChip" class="chip"><span class="chip-dot" aria-hidden="true"></span>Base esencial</span>
+                        <span id="dashboardSaveState" class="dashboard-save-state" role="status" aria-live="polite">Preferencias guardadas sólo en este navegador.</span>
+                    </div>
+                    <button type="button" id="openCustomizer" class="btn primary">Personalizar dashboard</button>
+                </div>
+
+                <div id="dashboardWidgets" class="dashboard-widgets"></div>
+            </section>
+
+            <section class="page-section" data-page="gmail" aria-labelledby="gmailTitle" hidden>
+                <div class="section-heading">
+                    <div>
+                        <p class="section-label">Integración con Gmail</p>
+                        <h2 id="gmailTitle">Convertí conversaciones en trabajo concreto.</h2>
+                        <p>Controlá los botones que aparecen dentro de Gmail y cómo se vinculan los correos con ClickUp.</p>
+                    </div>
+                </div>
+
+                <div class="operation-grid two-columns gmail-integration-overview">
+                    <article class="operation-card">
+                        <h3>Controles dentro de Gmail</h3>
+                        <label class="toggle-line" for="gmailIntegrationToggle"><span>Mostrar controles de ClickUp en Gmail</span><input id="gmailIntegrationToggle" type="checkbox" aria-describedby="gmailIntegrationStatus"></label>
+                        <p id="gmailIntegrationStatus" class="field-help" role="status" aria-live="polite">Leyendo preferencia local…</p>
+                        <p class="field-help">El cambio se aplica a las pestañas de Gmail abiertas: quita o vuelve a insertar las barras sin recargar la página.</p>
+                    </article>
+                    <article class="operation-card">
+                        <h3>Qué podés hacer</h3>
+                        <ul class="instruction-steps gmail-feature-list">
+                            <li>Crear una tarea desde el mensaje que estás leyendo.</li>
+                            <li>Vincular el correo con una tarea existente.</li>
+                            <li>Conservar el enlace a Gmail y una copia HTML sanitizada.</li>
+                            <li>Elegir imágenes adjuntas para subirlas de forma explícita.</li>
+                        </ul>
+                    </article>
+                    <article class="operation-card">
+                        <h3>Campo Gmail Thread ID</h3>
+                        <p>Permite reconocer qué tarea ya está vinculada con un hilo sin depender del texto de la descripción.</p>
+                        <ol class="instruction-steps"><li>Creá en ClickUp un campo personalizado de tipo texto.</li><li>Usá el mismo nombre en las listas donde vinculás correos.</li><li>Guardá abajo el nombre exacto; por defecto se usa <strong>Gmail Thread ID</strong>.</li></ol>
+                        <label class="toggle-line" for="useCustomFieldToggle"><span>Usar campo para Gmail Thread ID</span><input id="useCustomFieldToggle" type="checkbox" checked></label>
+                        <label for="customFieldName">Nombre exacto del campo</label>
+                        <input id="customFieldName" type="text" placeholder="Gmail Thread ID" maxlength="200">
+                        <button id="saveCustomFieldConfig" class="btn" type="button">Guardar nombre del campo</button>
+                    </article>
+                </div>
+
+                <div class="destination-panel">
+                    <div class="destination-head">
+                        <div>
+                            <h3>Destino predeterminado</h3>
+                            <p>La creación rápida usa esta lista desde cualquier pestaña.</p>
+                        </div>
+                        <span id="destinationCurrent" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span>Sin destino</span>
+                    </div>
+
+                    <form id="destinationForm" class="destination-form">
+                        <div class="destination-fields">
+                            <div class="field">
+                                <label for="destinationTeam">Workspace</label>
+                                <span class="field-context">Organización de ClickUp</span>
+                                <select id="destinationTeam" disabled aria-describedby="destinationState"></select>
+                            </div>
+                            <div class="field">
+                                <label for="destinationList">Lista predeterminada</label>
+                                <span class="field-context">Espacio, carpeta y lista final</span>
+                                <input id="destinationListSearch" type="search" autocomplete="off" placeholder="Buscar por espacio, carpeta o lista…" disabled aria-controls="destinationList" aria-describedby="destinationState">
+                                <select id="destinationList" disabled aria-describedby="destinationState"></select>
+                            </div>
+                        </div>
+                        <div class="destination-actions">
+                            <span>Se aplicará a la creación rápida desde cualquier pestaña.</span>
+                            <button type="submit" id="destinationSave" class="btn primary" disabled aria-describedby="destinationState">Guardar destino</button>
+                        </div>
                     </form>
 
-                    <div id="taskSearchState" class="task-search-state" data-state="blocked" role="status" aria-live="polite">
-                        <strong id="taskSearchStateTitle">Canario pendiente</strong>
-                        <span id="taskSearchStateDetail">La interfaz está lista, pero todavía no consulta ClickUp.</span>
+                    <div id="destinationState" class="task-search-state" data-state="loading" role="status" aria-live="polite">
+                        <strong id="destinationStateTitle">Leyendo datos locales…</strong>
+                        <span id="destinationStateDetail">No se realizará ninguna consulta a ClickUp.</span>
                     </div>
-                    <ol id="taskSearchResults" class="task-search-results" aria-label="Resultados de tareas"></ol>
+                </div>
+
+                <div class="operation-grid two-columns">
+                    <article class="operation-card">
+                        <h3>Buscar tarea</h3>
+                        <label for="taskSearch">Título o ID</label>
+                        <input id="taskSearch" type="search" autocomplete="off" placeholder="Buscar por título o ID de tarea…">
+                        <div id="searchResults" class="search-results" aria-live="polite"></div>
+                    </article>
+                    <article class="operation-card">
+                        <h3>Crear tarea</h3>
+                        <div class="inline-actions"><button id="quickCreateTask" class="btn primary" type="button">Creación rápida</button><button id="openTaskModal" class="btn" type="button">Formulario completo</button></div>
+                        <div id="quickCreateForm" class="stack hidden">
+                            <label for="newTaskName">Nombre</label><input id="newTaskName" type="text">
+                            <label for="newTaskDescription">Descripción</label><textarea id="newTaskDescription" rows="3"></textarea>
+                            <label for="listSearch">Lista de destino</label><input id="listSearch" type="search"><div id="listSearchResults" class="search-results"></div>
+                            <div class="inline-actions"><button id="cancelQuickCreate" class="btn" type="button">Cancelar</button><button id="createTask" class="btn primary" type="button" disabled>Crear tarea</button></div>
+                        </div>
+                    </article>
                 </div>
             </section>
 
-            <section class="page-section" data-page="seguimiento" aria-labelledby="seguimientoTitle" hidden>
-                <div class="empty-state">
-                    <span class="section-label">Migración pendiente</span>
-                    <h2 id="seguimientoTitle">Seguimiento</h2>
-                    <p>Los temporizadores y entradas manuales continúan en el popup clásico hasta que esta pantalla alcance paridad funcional.</p>
+            <section class="page-section" data-page="tiempo" aria-labelledby="tiempoTitle" hidden>
+                <div class="section-heading"><div><p class="section-label">Jornada y tiempo</p><h2 id="tiempoTitle">Tiempo registrado, no una nota de productividad.</h2><p>Administrá el temporizador, automatizaciones y entradas manuales desde esta vista.</p></div></div>
+                <div class="operation-grid two-columns">
+                    <article class="operation-card timer-card">
+                        <h3>Temporizador</h3>
+                        <div id="runningTimer" class="hidden"><p id="timerTaskName" class="timer-task-label">Tarea en curso</p></div>
+                        <div id="noTimer"><p class="field-help">No hay temporizador activo.</p></div>
+                        <p id="timerDisplay" class="large-timer">00:00:00:00</p>
+                        <div class="timer-primary-controls"><button id="resumeLastTimer" class="timer-icon-button play" type="button" disabled aria-label="Reanudar última tarea">▶</button><button id="stopTimer" class="timer-icon-button stop" type="button" disabled aria-label="Detener temporizador">■</button></div>
+                        <p id="resumeLastTimerLabel" class="field-help">Todavía no hay una tarea anterior para retomar.</p>
+                    </article>
+                    <article class="operation-card"><h3>Seguimiento automático</h3><label class="toggle-line">Iniciar al enfocar una tarea <input id="autoStartToggle" type="checkbox"></label><label class="toggle-line">Detener al cambiar o cerrar <input id="autoStopToggle" type="checkbox"></label><label class="toggle-line">Priorizar reuniones Google Meet <input id="meetPriorityToggle" type="checkbox"></label></article>
+                    <article class="operation-card"><h3>Iniciar temporizador</h3><input id="trackTaskSearch" type="search" placeholder="Buscar tarea…"><div id="trackSearchResults" class="search-results"></div><button id="startTimerBtn" class="btn primary" type="button" disabled>Iniciar temporizador</button></article>
+                    <article class="operation-card"><h3>Entrada manual</h3><input id="manualTaskSearch" type="search" placeholder="Buscar tarea…"><div id="manualSearchResults" class="search-results"></div><label for="durationInput">Duración</label><input id="durationInput" type="text" placeholder="1h 30m"><button id="addManualTime" class="btn" type="button" disabled>Agregar tiempo</button></article>
+                    <article class="operation-card work-schedule-card">
+                        <h3>Jornada objetivo</h3>
+                        <p class="field-help">Configuración local para orientar tus objetivos de tiempo. No se envía a ClickUp.</p>
+                        <fieldset class="workday-selector">
+                            <legend>Días laborables</legend>
+                            <label><input type="checkbox" data-workday="monday"> Lun</label>
+                            <label><input type="checkbox" data-workday="tuesday"> Mar</label>
+                            <label><input type="checkbox" data-workday="wednesday"> Mié</label>
+                            <label><input type="checkbox" data-workday="thursday"> Jue</label>
+                            <label><input type="checkbox" data-workday="friday"> Vie</label>
+                            <label><input type="checkbox" data-workday="saturday"> Sáb</label>
+                            <label><input type="checkbox" data-workday="sunday"> Dom</label>
+                        </fieldset>
+                        <label for="dailyTrackedHoursTarget">Objetivo diario de horas registradas</label>
+                        <input id="dailyTrackedHoursTarget" type="number" min="0.5" max="24" step="0.5" inputmode="decimal">
+                        <div class="work-schedule-total"><span>Objetivo semanal</span><strong id="weeklyTrackedHoursTarget">40 h por semana</strong></div>
+                        <p id="workScheduleStatus" class="field-help" role="status" aria-live="polite">Leyendo jornada local…</p>
+                    </article>
+                </div>
+                <article class="operation-card recent-entries-card"><h3>Entradas recientes</h3><div id="timeHistory" class="time-history"><p class="field-help">Cargando entradas…</p></div></article>
+            </section>
+
+            <section class="page-section" data-page="meet" aria-labelledby="meetTitle" hidden>
+                <div class="section-heading"><div><p class="section-label">Calendar y Meet</p><h2 id="meetTitle">Planificá la reunión y dejá su tarea preparada.</h2><p>Meet mantiene su alcance local. Calendar se conecta sólo cuando vos lo autorizás.</p></div></div>
+                <div class="operation-grid two-columns">
+                    <article id="meetPriorityCard" class="operation-card">
+                        <h3>Prioridad Google Meet</h3>
+                        <p class="field-help">La activación automática se controla desde Jornada y tiempo.</p>
+                        <p class="field-help">No lee audio, video, chat, captions, participantes ni títulos.</p>
+                        <div id="meetPriorityStatus" class="task-search-state"><p>Prioridad Meet desactivada</p></div>
+                        <div id="meetTaskChooser" class="stack hidden"><label for="meetTaskSearch">Tarea para esta reunión</label><input id="meetTaskSearch" type="search"><div id="meetTaskResults" class="search-results"></div><label><input id="meetRememberToggle" type="checkbox"> Recordar para esta sala</label><button id="assignMeetTask" class="btn primary" type="button" disabled>Usar tarea seleccionada</button></div>
+                        <div id="meetActions" class="inline-actions hidden"><button id="usePreviousMeetTask" class="btn hidden" type="button">Usar anterior</button><button id="changeMeetTask" class="btn hidden" type="button">Cambiar</button><button id="resumeMeetSession" class="btn hidden" type="button">Reanudar</button><button id="ignoreMeetSession" class="btn hidden" type="button">Ignorar</button><button id="endMeetSession" class="btn danger hidden" type="button">Finalizar</button></div>
+                    </article>
+                    <article id="calendarAgendaCard" class="operation-card calendar-agenda-card" aria-labelledby="calendarAgendaTitle">
+                        <div class="calendar-agenda-head">
+                            <div><h3 id="calendarAgendaTitle">Próximos eventos</h3><p>Calendario principal · próximos 7 días · sólo lectura.</p></div>
+                            <span class="service-badge service-badge-blue">Opcional</span>
+                        </div>
+                        <div id="calendarAgendaState" class="service-state service-state-neutral" data-state="disabled" role="status" aria-live="polite">
+                            <span aria-hidden="true"></span>
+                            <div><strong id="calendarAgendaStateTitle">Calendar desactivado</strong><small id="calendarAgendaStateDetail">OAuth permanece apagado hasta el canario autorizado.</small></div>
+                        </div>
+                        <div class="inline-actions calendar-agenda-actions">
+                            <a id="calendarConnectionLink" href="#conexion" class="now-link" hidden>Conectar Calendar</a>
+                            <button id="refreshGoogleCalendarAgenda" class="btn small" type="button" hidden disabled>Resincronizar calendario</button>
+                        </div>
+                        <ul id="calendarAgendaList" class="calendar-agenda-list" aria-label="Próximos eventos"></ul>
+                    </article>
+                </div>
+                <section id="meetingLinkSection" class="operation-card hidden" hidden aria-label="Vinculación de reuniones"></section>
+                <details id="meetMappingsDetails" class="operation-card meet-mappings-card hidden">
+                    <summary>Vinculaciones guardadas</summary>
+                    <p class="field-help">Reglas locales entre una sala de Meet y una tarea. No indican que haya una reunión activa o programada.</p>
+                    <div id="meetMappingsList"></div>
+                </details>
+            </section>
+
+            <section class="page-section" data-page="sync" aria-labelledby="syncTitle" hidden>
+                <div class="section-heading"><div><p class="section-label">Sincronización</p><h2 id="syncTitle">Progreso visible y resultados concretos.</h2><p>Actualizá la jerarquía de listas o las tareas vinculadas a emails.</p></div></div>
+                <div class="operation-grid two-columns">
+                    <article class="operation-card"><h3>Workspace preferido</h3><label for="teamSelect">Espacio de trabajo</label><select id="teamSelect"><option value="">Seleccionar espacio…</option></select></article>
+                    <article class="operation-card"><h3>Caché de listas</h3><p id="syncStatus" class="field-help">Precargar listas para crear tareas más rápido.</p><progress id="hierarchyProgress" class="sync-progress" max="100" value="0">0%</progress><button id="syncLists" class="btn primary" type="button"><span class="btn-text">Sincronizar listas</span><span class="spinner hidden"></span></button><details class="sync-console"><summary>Ver log técnico</summary><pre id="hierarchySyncLog" aria-live="polite">Esperando sincronización…</pre></details></article>
+                    <article class="operation-card"><h3>Tareas de email</h3><p id="emailSyncStatus" class="field-help">Sincronizar tareas vinculadas a emails.</p><progress id="emailProgress" class="sync-progress" max="100" value="0">0%</progress><select id="emailSyncDays"><option value="30">Últimos 30 días</option><option value="60">Últimos 60 días</option><option value="90">Últimos 90 días</option></select><button id="syncEmailTasks" class="btn" type="button"><span class="btn-text">Sincronizar</span><span class="spinner hidden"></span></button><details class="sync-console"><summary>Ver log técnico</summary><pre id="emailSyncLog" aria-live="polite">Esperando sincronización…</pre></details></article>
                 </div>
             </section>
 
-            <section class="page-section" data-page="reuniones" aria-labelledby="reunionesTitle" hidden>
-                <div class="empty-state">
-                    <span class="section-label">Capacidad protegida</span>
-                    <h2 id="reunionesTitle">Reuniones</h2>
-                    <p>Meet Priority sigue funcionando con su alcance actual. Calendar y la creación coordinada permanecen desactivados.</p>
-                </div>
-            </section>
-
-            <section class="page-section" data-page="conexiones" aria-labelledby="conexionesTitle" hidden>
+            <section class="page-section" data-page="conexion" aria-labelledby="conexionTitle" hidden>
                 <div class="section-heading">
                     <div>
                         <p class="section-label">Autorizaciones separadas</p>
-                        <h2 id="conexionesTitle">Conexiones</h2>
+                        <h2 id="conexionTitle">Conexión</h2>
                         <p>Controlá qué servicios puede usar la extensión. Ninguna cuenta comparte tokens o configuración con la otra.</p>
                     </div>
                 </div>
 
+                <div class="user-info operation-card"><img id="userAvatar" src="" alt="Avatar" class="avatar"><div><strong id="userName">Usuario</strong><span id="userEmail"></span></div></div>
+
                 <div class="connections-layout">
                     <article class="service-card service-clickup">
-                        <div class="service-head">
-                            <div class="service-icon service-icon-clickup" aria-hidden="true">C</div>
-                            <div><span class="service-type">Servicio principal</span><h3>ClickUp</h3></div>
+                        <div class="service-head service-head-clickup">
+                            <div class="clickup-service-brand"><span class="service-type">Servicio principal</span><h3 class="clickup-wordmark-title"><span class="sr-only">ClickUp</span><img class="clickup-logo-on-light" src="assets/clickup-logo-on-light.svg" alt=""><img class="clickup-logo-on-dark" src="assets/clickup-logo-on-dark.svg" alt=""></h3></div>
                             <span class="service-badge">Requerido</span>
                         </div>
                         <p>Crea tareas desde Gmail y administra seguimiento de tiempo.</p>
@@ -147,41 +433,135 @@
                                 <small id="clickUpConnectionDetail">No se realizará ninguna validación por red.</small>
                             </div>
                         </div>
-                        <p class="service-footnote">La configuración y reconexión continúan en el popup clásico durante esta fase.</p>
+                        <p class="service-footnote">La sesión se conserva localmente en este perfil de Chrome.</p>
                     </article>
 
                     <article class="service-card service-google">
                         <div class="service-head">
-                            <div class="service-icon service-icon-google" aria-hidden="true">G</div>
+                            <div class="service-icon service-icon-google" aria-hidden="true"><img src="assets/google-calendar.svg" alt=""></div>
                             <div><span class="service-type">Integración opcional</span><h3>Google Calendar</h3></div>
                             <span class="service-badge service-badge-blue">Opcional</span>
                         </div>
-                        <p>Preparado para disponibilidad y reuniones en calendarios propios, sin acceso general a tu cuenta.</p>
+                        <p>Preparado para leer próximos eventos del calendario principal, sin acceso general a tu cuenta.</p>
                         <ul class="permission-list" aria-label="Permisos previstos">
-                            <li>Lista de calendarios</li>
-                            <li>Disponibilidad</li>
-                            <li>Eventos propios</li>
+                            <li>Eventos del calendario principal en modo lectura</li>
+                            <li>Ventana limitada a los próximos siete días</li>
+                            <li>Sin invitados, descripciones ni ubicaciones</li>
                         </ul>
-                        <button type="button" class="google-action" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
-                        <p id="googleDisabledStatus" class="service-footnote" role="status">OAuth permanece desactivado en esta fase.</p>
+                        <div class="inline-actions google-calendar-connection-actions">
+                            <button id="connectGoogleCalendarConnectionPreview" type="button" class="btn primary" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
+                            <button id="disconnectGoogleCalendar" class="btn" type="button" disabled aria-describedby="googleDisabledStatus">Desconectar</button>
+                        </div>
+                        <p id="googleDisabledStatus" class="service-footnote" role="status">Comprobando el estado de Calendar…</p>
                     </article>
                 </div>
 
                 <aside class="privacy-panel" aria-labelledby="privacyTitle">
                     <span class="privacy-line" aria-hidden="true"></span>
-                    <div><h3 id="privacyTitle">Límite de privacidad</h3><p>La integración propuesta no lee Gmail, Drive, audio, video, chat ni participantes de Meet. Tampoco solicita email o perfil de Google.</p></div>
+                    <div><h3 id="privacyTitle">Límite de privacidad</h3><p>La integración no lee Gmail, Drive, audio, video, chat ni participantes de Meet. Tampoco solicita email o perfil de Google.</p></div>
                 </aside>
-            </section>
 
-            <section class="page-section" data-page="configuracion" aria-labelledby="configuracionTitle" hidden>
-                <div class="empty-state">
-                    <span class="section-label">Migración pendiente</span>
-                    <h2 id="configuracionTitle">Configuración</h2>
-                    <p>Espacio de trabajo, campo personalizado, sincronización, datos y diagnóstico continúan en el popup clásico.</p>
+                <div class="operation-grid two-columns connection-settings">
+                    <article class="operation-card"><h3>Calendar y creación</h3><label class="toggle-line">Mostrar eventos de todo el día <input id="calendarShowAllDayToggle" type="checkbox"></label><label for="calendarTaskTypeSearch">Tipo de tarea para reuniones</label><input id="calendarTaskTypeSearch" type="search" autocomplete="off" placeholder="Filtrar tipos retornados por ClickUp…"><select id="calendarTaskTypeSelect" aria-describedby="calendarTaskTypeStatus" disabled><option value="">Sin tipos disponibles</option></select><p id="calendarTaskTypeStatus" class="field-help" role="status" aria-live="polite">Consultando tipos de tarea…</p></article>
+                    <article class="operation-card"><h3>Sesión de ClickUp</h3><p id="clickUpConnectionMethod">Método de conexión local</p><p>La desconexión elimina la sesión local y requiere volver a autorizar.</p><button id="signOut" class="btn danger" type="button">Cerrar sesión</button></article>
                 </div>
             </section>
+
+            <section class="page-section" data-page="datos" aria-labelledby="datosTitle" hidden>
+                <div class="section-heading"><div><p class="section-label">Datos y diagnóstico</p><h2 id="datosTitle">Control visible sobre lo que queda guardado.</h2><p>Exportación, borrado y diagnóstico seguro, sin telemetría propia.</p></div></div>
+                <div class="operation-grid two-columns">
+                    <article class="operation-card"><h3>Gestión de datos</h3><p>Exportá vínculos email-tarea o borrá datos locales.</p><div class="inline-actions"><button id="exportData" class="btn" type="button">Exportar datos</button><button id="clearData" class="btn danger" type="button">Borrar datos</button></div><p id="dataStatus" class="field-help" aria-live="polite"></p></article>
+                    <section id="safeDiagnostics" class="operation-card diagnostics-card hidden" aria-labelledby="safeDiagnosticsTitle">
+                        <h3 id="safeDiagnosticsTitle">Diagnóstico seguro</h3>
+                        <h4>Snapshot de esta sesión</h4>
+                        <label class="toggle-line">Registrar eventos técnicos de esta sesión <input id="diagnosticToggle" type="checkbox"></label>
+                        <p class="field-help">Conserva en memoria hasta 200 eventos categóricos de esta extensión. Sirve para un diagnóstico breve y se pierde al terminar la sesión.</p>
+                        <div class="inline-actions"><button id="exportDiagnostics" class="btn" type="button">Exportar snapshot JSON</button><button id="clearDiagnostics" class="btn danger" type="button">Borrar diagnóstico</button></div>
+                        <p id="diagnosticStatus" class="field-help" aria-live="polite">Diagnóstico desactivado</p>
+                        <div class="recorder-inline" aria-labelledby="recorderInlineTitle">
+                            <h4 id="recorderInlineTitle">Captura causal prolongada</h4>
+                            <p class="field-help">También observa sólo esta extensión, no todo Chrome. Escribe timestamps y metadatos categóricos en un JSONL elegido por vos para investigar secuencias largas. Stop manual es el cierre confiable; revisá el archivo antes de compartirlo y borralo después.</p>
+                            <div class="inline-actions"><button id="startRecorder" class="btn" type="button">Elegir archivo e iniciar</button><button id="stopRecorder" class="btn danger" type="button" disabled>Detener captura</button></div>
+                            <dl class="recorder-status"><div><dt>Estado</dt><dd id="state">inactivo</dd></div><div><dt>Eventos</dt><dd id="eventCount">0</dd></div><div><dt>Bytes</dt><dd id="byteCount">0</dd></div><div><dt>Cola</dt><dd id="queueCount">0</dd></div><div><dt>Parada</dt><dd id="scheduledStop">pendiente</dd></div></dl>
+                            <p id="message" class="field-help" role="status" aria-live="polite"></p>
+                        </div>
+                    </section>
+                </div>
+            </section>
+            </div>
         </main>
     </div>
+
+    <button id="bulkActionRailButton" class="bulk-action-rail" type="button" aria-controls="bulkEditDrawer" aria-expanded="false" hidden>Acciones · <span>0</span></button>
+    <aside id="bulkEditDrawer" class="bulk-edit-drawer" aria-labelledby="bulkEditTitle" aria-hidden="true">
+        <div class="bulk-edit-head">
+            <div><p class="section-label">Aplicación controlada</p><h2 id="bulkEditTitle">Cambios masivos</h2><p><strong id="bulkSelectedCount">0 tareas</strong> seleccionadas</p></div>
+            <button id="closeBulkEdit" class="btn small" type="button" aria-label="Cerrar cambios masivos">Cerrar</button>
+        </div>
+        <div class="bulk-edit-body">
+            <div class="bulk-field">
+                <label for="bulkDueMode">Fecha límite</label>
+                <select id="bulkDueMode"><option value="none">Sin cambios</option><option value="set">Establecer fecha</option><option value="clear">Quitar fecha</option></select>
+                <input id="bulkDueDate" type="date" disabled>
+            </div>
+            <div class="bulk-field">
+                <label for="bulkStatus">Estado</label>
+                <select id="bulkStatus" disabled><option value="">Sin cambios</option></select>
+                <small id="bulkStatusHelp">Seleccioná tareas para consultar estados compatibles.</small>
+            </div>
+            <div class="bulk-field">
+                <label for="bulkAssignee">Responsable</label>
+                <select id="bulkAssignee" disabled><option value="">Sin cambios</option></select>
+                <small id="bulkAssigneeHelp">Reemplazará la asignación actual sólo cuando exista un miembro común.</small>
+            </div>
+            <div class="bulk-edit-actions">
+                <button id="clearBulkSelection" class="btn" type="button">Limpiar selección</button>
+                <button id="previewBulkChanges" class="btn primary" type="button">Previsualizar</button>
+            </div>
+            <div id="bulkPreview" class="bulk-preview" role="status" aria-live="polite"><p>Elegí uno o más cambios para preparar la vista previa.</p></div>
+        </div>
+        <div class="bulk-apply-footer">
+            <p id="bulkApplyState" role="status" aria-live="polite">Previsualizá los cambios antes de aplicarlos.</p>
+            <button id="applyBulkChanges" class="btn primary" type="button" disabled aria-disabled="true">Aplicar cambios</button>
+        </div>
+    </aside>
+
+    <div id="dashboardCustomizer" class="customizer-backdrop" hidden>
+        <section class="customizer-panel" role="dialog" aria-modal="true" aria-labelledby="customizerTitle">
+            <div class="customizer-head">
+                <div>
+                    <p class="section-label">Panel por usuario</p>
+                    <h2 id="customizerTitle">Personalizar dashboard</h2>
+                    <p>Elegí módulos, cambiales el orden y guardá el resultado para este usuario.</p>
+                </div>
+                <button type="button" id="closeCustomizer" class="btn small" aria-label="Cerrar personalización">Cerrar</button>
+            </div>
+
+            <div class="customizer-field">
+                <label for="presetSelect">Preset</label>
+                <select id="presetSelect">
+                    <option value="pm">PM · coordinación y reuniones</option>
+                    <option value="ejecucion">Ejecución · trabajo individual</option>
+                    <option value="completo">Completo · todos los módulos</option>
+                </select>
+            </div>
+
+            <div id="widgetConfigList" class="widget-config-list" aria-label="Módulos del dashboard"></div>
+
+            <div class="customizer-field">
+                <label for="presetName">Nombre del preset</label>
+                <input id="presetName" type="text" maxlength="40" autocomplete="off" placeholder="Mi panel">
+            </div>
+
+            <p id="customizerState" class="field-help" role="status" aria-live="polite">Ningún módulo está disponible todavía. El orden que definas se aplicará cuando lleguen.</p>
+
+            <div class="customizer-actions">
+                <button type="button" id="resetPmPreset" class="btn">Restablecer preset PM</button>
+                <button type="button" id="saveDashboardPreset" class="btn primary">Guardar</button>
+            </div>
+        </section>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>

@@ -1,9 +1,9 @@
 {
     "manifest_version": 3,
     "minimum_chrome_version": "102",
-    "name": "ClickUp Gmail Tracker",
-    "version": "1.2.3",
-    "description": "Crea tareas de ClickUp directamente desde emails de Gmail",
+    "name": "TaskBridge for ClickUp",
+    "version": "2.0.1",
+    "description": "Integra Gmail, Google Calendar y Meet con tareas y seguimiento de tiempo en ClickUp",
     "author": "Leandro Iramain",
     "homepage_url": "https://leandroiramain.com.ar",
     "incognito": "not_allowed",
@@ -15,6 +15,7 @@
     ],
     "host_permissions": [
         "https://api.clickup.com/*",
+        "https://www.googleapis.com/*",
         "https://mail.google.com/*",
         "https://app.clickup.com/*",
         "https://meet.google.com/*"
@@ -22,9 +23,7 @@
     "oauth2": {
         "client_id": "1085109551140-db2i3dgveraah5vkjoadfkmf091e29h2.apps.googleusercontent.com",
         "scopes": [
-            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-            "https://www.googleapis.com/auth/calendar.events.freebusy",
-            "https://www.googleapis.com/auth/calendar.events.owned"
+            "https://www.googleapis.com/auth/calendar.events.owned.readonly"
         ]
     },
     "background": {
@@ -67,7 +66,7 @@
         }
     ],
     "action": {
-        "default_popup": "popup/popup.html",
+        "default_popup": "popup/minimal.html",
         "default_icon": {
             "16": "icons/icon-16.png",
             "32": "icons/icon-32.png",

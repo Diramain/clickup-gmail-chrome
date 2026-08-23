@@ -4,6 +4,14 @@ export interface SafeTaskSearchResult {
     status: string;
 }
 
+export function isTaskSearchFailure(response: unknown): boolean {
+    if (!response || typeof response !== 'object') return true;
+    const envelope = response as Record<string, unknown>;
+    return envelope.success === false
+        || envelope.requiresReauth === true
+        || typeof envelope.error === 'string';
+}
+
 const MAX_RESULTS = 10;
 const MAX_ID_LENGTH = 100;
 const MAX_NAME_LENGTH = 500;

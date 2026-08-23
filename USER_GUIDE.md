@@ -1,7 +1,7 @@
-# ClickUp Gmail Chrome Extension
+# TaskBridge for ClickUp
 ## User Guide
 
-**Version:** 1.2.3
+**Version:** 2.0.1
 **Last Updated:** August 2026
 
 ---
@@ -10,28 +10,32 @@
 
 ## Installation
 
-1. Download the extension from Chrome Web Store
-2. Click "Add to Chrome"
-3. Pin the extension to your toolbar for easy access
+1. Install TaskBridge from the [Chrome Web Store](https://chromewebstore.google.com/detail/gihebfjgjfnglhadpeemhpdoamklckdg) when the Store version is available, or download and extract the current ZIP from [GitHub Releases](https://github.com/Diramain/taskbridge-for-clickup/releases).
+2. For a GitHub ZIP, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the extracted folder.
+3. Pin the extension to your toolbar for easy access.
 
 ## Initial Setup
 
-### Step 1: Create ClickUp OAuth App
+### Step 1: Choose a ClickUp Connection
 
-1. Go to [ClickUp Settings → Integrations](https://app.clickup.com/settings/integrations)
-2. Click "Create an App"
-3. Enter a name (e.g., "Gmail Tracker")
-4. Copy the **Redirect URL** from the extension popup
-5. Paste it in ClickUp
-6. Copy the **Client ID** and **Client Secret**
+For the simplest setup, generate your own token in [ClickUp API settings](https://app.clickup.com/settings/apps). Personal tokens are long-lived credentials with the same ClickUp access as their owner. Do not share a token between users.
 
-### Step 2: Configure Extension
+For an administrator-managed deployment, create an OAuth app in ClickUp and use the advanced setup. Only a Workspace owner or admin can create that app.
+
+### Step 2: Connect the Extension
 
 1. Click the extension icon
-2. Paste your **Client ID** and **Client Secret**
-3. Click "Save Configuration"
-4. Click "Sign in with ClickUp"
-5. Authorize the app in the popup
+2. Paste your personal token under **Conexión rápida**
+3. Click **Conectar con token personal**
+4. Wait for ClickUp validation; invalid or unavailable credentials are not persisted
+
+To use OAuth instead:
+
+1. Expand **Configuración avanzada con OAuth**
+2. Copy the Redirect URL into your ClickUp OAuth app
+3. Paste its **Client ID** and **Client Secret**
+4. Save the encrypted local configuration and click **Iniciar sesión con ClickUp**
+5. Authorize the required Workspaces
 
 ---
 
@@ -72,11 +76,17 @@ The modal includes:
 | **B** | Bold | Ctrl+B |
 | *I* | Italic | Ctrl+I |
 | ~~S~~ | Strikethrough | - |
-| `</>` | Code | - |
+| `</>` | Inline code | - |
 | 🔗 | Link | - |
 | • | Bullet List | - |
 | 1. | Numbered List | - |
 | > | Quote | - |
+
+The Markdown tab and visual editor stay synchronized. Supported task-description formats are headings, emphasis, ordered/unordered lists, links, quotes, and inline code.
+
+### Image Attachments
+
+The task form lists eligible Gmail images explicitly. Nothing is uploaded unless selected. PNG, JPEG, GIF, and WebP are supported; SVG is rejected. Limits are 10 MiB per file and 20 MiB per operation.
 
 ---
 
@@ -97,12 +107,24 @@ Tasks linked to an email appear:
 
 ---
 
+## 📅 Google Calendar and Meet
+
+1. Open the full app from the extension icon.
+2. Connect Google Calendar from **Agenda**.
+3. Switch between Agenda and Week views.
+4. Create a task using an explicit ClickUp List, or link an existing task.
+5. Choose occurrence or series scope for recurring events.
+
+Calendar access is read-only. Event details remain in an expiring in-memory cache; saved mappings contain only reduced event/series keys and ClickUp task metadata.
+
+---
+
 ## ⏱️ Time Tracking
 
-### From Popup
+### From the Full App
 
-1. Click the extension icon
-2. Go to **Tracking** tab
+1. Click the extension icon to open the full app
+2. Go to **Tracking**
 3. Search for a task
 4. Click "▶️ Start Timer"
 5. Click "⏹️ Stop" when done
@@ -181,9 +203,9 @@ Safe Diagnostics uses separate controls and is not included in the regular data 
 
 ## "Not authenticated" Error
 
-1. Go to **Config** tab
-2. Click "Test Token Refresh"
-3. If fails, sign out and sign in again
+1. Open **Conexión** in the full application.
+2. Confirm that your personal token is current, or that your advanced OAuth app configuration is still valid.
+3. Reconnect explicitly. TaskBridge does not invent or silently refresh unsupported ClickUp OAuth grants.
 
 ## Tasks Not Appearing in Gmail
 
@@ -224,8 +246,8 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 
 | Data | Location | Encryption |
 |------|----------|------------|
-| Access Token | Local | AES-256-GCM |
-| Client Secret | Local | AES-256-GCM |
+| Personal or OAuth Access Token | Local | AES-256-GCM best-effort local encryption |
+| OAuth Client Secret | Local | AES-256-GCM best-effort local encryption |
 | Email-Task Links | Local | No |
 | User Info | Local | No |
 | Safe Diagnostics (opt-in) | Browser session memory | Allowlisted fields only |
@@ -249,7 +271,7 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 # FAQ
 
 **Q: Can I use this without an OAuth app?**
-A: No, OAuth is required for security. ClickUp Personal API tokens are not supported.
+A: Yes. Use your own ClickUp personal token under **Conexión rápida**. OAuth remains available as an advanced option for owners or admins who manage their own app.
 
 **Q: Does this work with Google Workspace?**
 A: Yes, as long as you have access to Gmail.
@@ -264,9 +286,10 @@ A: No, data is stored locally per browser.
 
 # Support
 
-- **GitHub:** [github.com/diramain/clickup-gmail-chrome](https://github.com/diramain/clickup-gmail-chrome)
-- **Issues:** Report bugs on GitHub Issues
-- **Feature Requests:** Create a GitHub Issue with "Feature" label
+- **GitHub:** [github.com/Diramain/taskbridge-for-clickup](https://github.com/Diramain/taskbridge-for-clickup)
+- **Issues:** Use the [guided Issue forms](https://github.com/Diramain/taskbridge-for-clickup/issues/new/choose) for bugs and feature requests.
+- **Security:** Use [private vulnerability reporting](https://github.com/Diramain/taskbridge-for-clickup/security/advisories/new), never a public Issue.
+- **Wiki:** Read the [online documentation](https://github.com/Diramain/taskbridge-for-clickup/wiki).
 
 ---
 

@@ -1,20 +1,24 @@
-# Contributing to ClickUp Gmail Extension
+# Contributing to TaskBridge for ClickUp
+
+Thank you for improving TaskBridge. Ordinary bugs and feature ideas belong in the guided GitHub Issue forms. Suspected vulnerabilities must use [private vulnerability reporting](https://github.com/Diramain/taskbridge-for-clickup/security/advisories/new), not a public Issue or pull request.
 
 ## Project Structure
 
 ```
-clickup-gmail-chrome/
+taskbridge-for-clickup/
 ├── background.ts           # Service worker (router)
-├── popup/
-│   └── popup.ts            # Popup UI
+├── app/                    # Responsive full-tab application
+├── popup/                  # Launcher and durable setup UI
 ├── src/
+│   ├── calendar/           # Read-only Calendar agenda and mappings
+│   ├── meet/               # Minimal Meet detector and task mappings
 │   ├── constants.ts        # Centralized constants
 │   ├── modal.ts            # Task creation modal
 │   ├── gmail-adapter.ts    # Gmail DOM queries
 │   ├── gmail-native.ts     # Gmail content script
 │   ├── clickup-tracker.ts  # ClickUp page content script
 │   ├── logger.ts           # Debug logging
-│   ├── services/           # ⭐ Service Layer
+│   ├── services/           # Service layer
 │   │   ├── auth.service.ts     # OAuth, tokens, session
 │   │   ├── api.service.ts      # ClickUp API wrapper
 │   │   ├── timer.service.ts    # Time tracking + badge
@@ -25,6 +29,8 @@ clickup-gmail-chrome/
 │   └── utils/
 │       └── sanitize.utils.ts   # XSS prevention
 ├── tests/                  # Jest tests
+├── scripts/                # Build and exact release validation
+├── store-assets/           # Store artwork and reproducible fixtures
 ├── .github/workflows/      # CI/CD
 ├── build.js                # esbuild configuration
 └── manifest.json           # Extension manifest (MV3)
@@ -51,18 +57,24 @@ clickup-gmail-chrome/
 
 ## Development
 
+Use Node.js 20, matching GitHub Actions.
+
 ```bash
-npm install     # Install dependencies
-npm run build   # Build extension
-npm run watch   # Build with watch
-npm test        # Run tests
+npm ci
+npm run typecheck
+npm test -- --runInBand
+npm run build:release
+npm run validate:release
 ```
+
+Use `npm run watch` only for local iteration. Do not commit generated JavaScript, `dist/`, ZIP files, credentials, browser profiles, exported diagnostics, or real Gmail/ClickUp/Meet data.
 
 ## Loading in Chrome
 
 1. Go to `chrome://extensions`
 2. Enable "Developer mode"
-3. Click "Load unpacked" → select project folder
+3. Run `npm run build:dev-extension`
+4. Click "Load unpacked" and select `dist/dev-extension`
 
 ## Using Services
 
@@ -81,28 +93,37 @@ api.setAuthenticationFailureCallback(async () => {
 });
 ```
 
-## Technical Debt
+## Change Boundaries
 
-| File | Status | Note |
-|------|--------|------|
-| `background.ts` | ⚠️ Large | Can migrate to use services |
-| `popup.ts` | ⚠️ Large | Split by tab recommended |
-| `modal.ts` | ⚠️ Large | Split into components |
+- Keep host pages untrusted and preserve sender/origin/schema checks on runtime messages.
+- Never log, fixture, screenshot, or commit tokens, headers, account data, Gmail content, Meet content, private URLs, or diagnostic exports.
+- Do not broaden Chrome permissions without a documented need, privacy review, and test coverage.
+- Keep ClickUp writes non-replayed by default. Retries are limited to operations proven safe by the API layer.
+- Treat AES-GCM storage as best-effort local protection, not protection from a compromised browser profile or machine.
+- Preserve Calendar read-only scope and Meet data minimization.
 
 ## Security
 
-See `SECURITY.md` for token encryption, XSS prevention, rate limiting.
+Read the repository [security policy](https://github.com/Diramain/taskbridge-for-clickup/blob/main/SECURITY.md) before changing authentication, storage, API, message, HTML, Gmail, Calendar, Meet, or release boundaries.
 
 ## CI/CD
 
-GitHub Actions runs on push/PR:
-1. Type check
-2. Tests
-3. Build
-4. Upload artifact
+GitHub Actions runs on pushes and pull requests to `main`:
+
+1. Install from the lockfile with Node.js 20.
+2. Run strict TypeScript checks.
+3. Run the Jest suite.
+4. Build and validate the exact release directory.
+5. Upload the validated release directory as a short-lived artifact.
+
+Relevant documentation changes merged into `main` are synchronized to the GitHub wiki.
 
 ## Pull Requests
 
-1. Run `npm run build` - no errors
-2. Test OAuth flow after auth changes
-3. Test in Gmail after content script changes
+1. Open or reference an Issue when the change needs prior discussion.
+2. Create a focused branch and keep unrelated changes out of the pull request.
+3. Update tests and documentation for changed behavior.
+4. Run the same checks used by CI.
+5. Target `main` and describe behavior, security/privacy impact, validation, and remaining manual QA.
+
+Real-account OAuth, Gmail, Calendar, Meet, or ClickUp-write testing is operator-controlled. A contributor must not use or request repository-owner credentials.

@@ -3,20 +3,19 @@
  * TypeScript version with Tab Modules
  */
 
-// Tab Modules
-import { tasksTab } from './tabs/tasks.tab';
-import { trackingTab } from './tabs/tracking.tab';
-import { configTab } from './tabs/config.tab';
 import { escapeHTML, safeAvatarUrl, safeClickUpUrl } from '../src/utils/sanitize.utils';
 import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from '../src/data-management';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
+import { filterDestinationLists } from '../src/destination-config';
 import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
 import { openOrFocusAppTab } from '../src/app-tab';
-import { formatSyncProgress, isSyncProgressMessage } from '../src/sync-progress';
+import { formatSyncProgress, isSyncProgressMessage, type SyncProgressMessage } from '../src/sync-progress';
 import { selectAuthorizedTeamId } from '../src/team-selection';
+import { isTaskSearchFailure } from '../src/task-search-view';
 import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
 import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
+import { normalizePersonalToken, type ClickUpAuthMethod } from '../src/clickup-auth';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -25,6 +24,11 @@ import {
     toTimeEntryTimestamp,
 } from '../src/time-entry-history';
 import type { TimeEntry } from '../src/types/clickup';
+import {
+    MeetMappingTaskCache,
+    normalizeMeetMappingTaskDetail,
+    type MeetMappingTaskDetail,
+} from '../src/meet/meet-mapping-view';
 
 // ============================================================================
 // Types
@@ -33,6 +37,7 @@ import type { TimeEntry } from '../src/types/clickup';
 interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    authMethod?: ClickUpAuthMethod;
     requiresReauth?: boolean;
     authUnavailable?: boolean;
     user?: {
@@ -48,16 +53,6 @@ interface ClickUpUser {
 }
 
 interface ClickUpTeam {
-    id: string;
-    name: string;
-}
-
-interface ClickUpSpace {
-    id: string;
-    name: string;
-}
-
-interface ClickUpList {
     id: string;
     name: string;
 }
@@ -90,6 +85,25 @@ interface SafeDiagnosticStatus {
     maxEvents: number;
 }
 
+interface LastTrackedTask {
+    id: string;
+    name: string;
+    teamId: string;
+}
+
+function sanitizeLastTrackedTask(value: unknown): LastTrackedTask | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const teamId = typeof candidate.teamId === 'string' ? candidate.teamId.trim() : '';
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(id) || !/^[A-Za-z0-9_-]{1,100}$/.test(teamId) || !name || name.length > 500) return null;
+    return { id, name, teamId };
+}
+
+const IS_FULL_APP_SURFACE = window.location.pathname.endsWith('/app/app.html');
+if (IS_FULL_APP_SURFACE) document.body.classList.add('full-app-surface');
+
 function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.MessageSender): void {
     if (sender.id !== chrome.runtime.id || !isSyncProgressMessage(message)) return;
 
@@ -106,6 +120,29 @@ function handleSyncProgressMessage(message: unknown, sender: chrome.runtime.Mess
         : message.phase === 'complete'
             ? '#00c853'
             : '#666';
+
+    const progressId = message.scope === 'hierarchy' ? 'hierarchyProgress' : 'emailProgress';
+    const logId = message.scope === 'hierarchy' ? 'hierarchySyncLog' : 'emailSyncLog';
+    const progress = document.getElementById(progressId) as HTMLProgressElement | null;
+    const log = document.getElementById(logId);
+    if (progress) progress.value = syncProgressPercent(message);
+    if (log) {
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const previous = log.textContent === 'Esperando sincronización…' ? '' : `${log.textContent}\n`;
+        log.textContent = `${previous}[${timestamp}] ${text}`.split('\n').slice(-40).join('\n');
+        log.scrollTop = log.scrollHeight;
+    }
+}
+
+function syncProgressPercent(message: SyncProgressMessage): number {
+    if (message.phase === 'complete') return 100;
+    if (message.phase === 'error') return 0;
+    if (message.phase === 'starting') return 4;
+    if (message.current !== undefined && message.total) {
+        return Math.min(96, Math.max(8, Math.round((message.current / message.total) * 92)));
+    }
+    if (message.phase === 'fetching') return 12;
+    return 8;
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
@@ -125,6 +162,15 @@ document.addEventListener('DOMContentLoaded', init);
 function initTabNavigation(): void {
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
+
+    if (IS_FULL_APP_SURFACE) {
+        tabButtons.forEach((button) => button.classList.add('hidden'));
+        tabContents.forEach((content) => {
+            content.classList.remove('hidden');
+            content.classList.add('active');
+        });
+        return;
+    }
 
     tabButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -153,7 +199,7 @@ function initTabNavigation(): void {
 
 async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
-    const standaloneSetup = isSetupStandalone();
+    const standaloneSetup = isSetupStandalone() || IS_FULL_APP_SURFACE;
 
     chrome.storage.local.remove('draftClientSecret');
     initAppTabLauncher();
@@ -193,6 +239,7 @@ async function init(): Promise<void> {
                 standaloneSetup,
                 status.requiresReauth === true,
                 status.authUnavailable === true,
+                status.authMethod,
             );
         }
     } catch (error: any) {
@@ -201,6 +248,7 @@ async function init(): Promise<void> {
         loading.innerHTML = '<p style="color: #ff5252;">No se pudo cargar la extensión</p>';
     }
 }
+
 
 function initAppTabLauncher(): void {
     const button = document.getElementById('openAppTab') as HTMLButtonElement | null;
@@ -227,7 +275,6 @@ async function initSafeDiagnostics(): Promise<void> {
     const toggle = document.getElementById('diagnosticToggle') as HTMLInputElement | null;
     const exportButton = document.getElementById('exportDiagnostics') as HTMLButtonElement | null;
     const clearButton = document.getElementById('clearDiagnostics') as HTMLButtonElement | null;
-    const openRecorderButton = document.getElementById('openCausalRecorder') as HTMLButtonElement | null;
     const status = document.getElementById('diagnosticStatus') as HTMLElement | null;
     if (!container || !toggle || !exportButton || !clearButton || !status) return;
 
@@ -305,9 +352,6 @@ async function initSafeDiagnostics(): Promise<void> {
         }
     });
 
-    openRecorderButton?.addEventListener('click', () => {
-        chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics/recorder.html') });
-    });
 }
 
 // ============================================================================
@@ -319,8 +363,12 @@ function showLoginRequired(
     standaloneSetup = isSetupStandalone(),
     requiresReauth = false,
     authUnavailable = false,
+    authMethod?: ClickUpAuthMethod,
 ): void {
     const loginRequired = document.getElementById('login-required') as HTMLElement;
+    const personalTokenInput = document.getElementById('personalToken') as HTMLInputElement;
+    const connectPersonalTokenBtn = document.getElementById('connectPersonalToken') as HTMLButtonElement;
+    const personalTokenStatus = document.getElementById('personalTokenStatus') as HTMLElement;
     const signInBtn = document.getElementById('signIn') as HTMLButtonElement;
     const saveConfigBtn = document.getElementById('saveConfig') as HTMLButtonElement;
     const clientIdInput = document.getElementById('clientId') as HTMLInputElement;
@@ -330,6 +378,7 @@ function showLoginRequired(
     const openWindowBtn = document.getElementById('openWindow') as HTMLButtonElement;
     const discardChangesBtn = document.getElementById('discardOAuthChanges') as HTMLButtonElement;
     const configStatus = document.getElementById('oauthConfigStatus') as HTMLElement | null;
+    const advancedOAuth = document.querySelector('.auth-advanced-card') as HTMLDetailsElement | null;
 
     let hasStoredConfig = configured;
     let isDirty = false;
@@ -345,6 +394,15 @@ function showLoginRequired(
         if (!configStatus) return;
         configStatus.textContent = message;
         configStatus.style.color = color;
+    };
+
+    const setPersonalTokenStatus = (message: string, color = ''): void => {
+        personalTokenStatus.textContent = message;
+        personalTokenStatus.style.color = color;
+    };
+
+    const updatePersonalTokenButton = (): void => {
+        connectPersonalTokenBtn.disabled = authUnavailable || normalizePersonalToken(personalTokenInput.value) === null;
     };
 
     const updateOAuthButtons = (): OAuthConfigState => {
@@ -413,6 +471,13 @@ function showLoginRequired(
     } else if (configured) {
         setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
     }
+
+    if (authMethod === 'personal-token' && requiresReauth) {
+        setPersonalTokenStatus('El token dejó de ser válido. Pegá un token personal nuevo para reconectar.', '#ff9800');
+    } else if (authUnavailable) {
+        setPersonalTokenStatus('ClickUp no está disponible para validar el token. Reintentá más tarde.', '#ff9800');
+    }
+    if (advancedOAuth && authMethod === 'oauth' && (configured || requiresReauth)) advancedOAuth.open = true;
 
     // Show the Redirect URL (Chrome identity API format)
     const redirectUrl = chrome.identity.getRedirectURL();
@@ -493,6 +558,52 @@ function showLoginRequired(
     });
 
     updateOAuthButtons();
+    updatePersonalTokenButton();
+
+    personalTokenInput.addEventListener('input', () => {
+        setPersonalTokenStatus('');
+        updatePersonalTokenButton();
+    });
+
+    connectPersonalTokenBtn.addEventListener('click', async () => {
+        const token = normalizePersonalToken(personalTokenInput.value);
+        if (!token) {
+            setPersonalTokenStatus('Pegá un token personal válido que empiece con pk_.', '#ff9800');
+            updatePersonalTokenButton();
+            return;
+        }
+
+        const originalLabel = connectPersonalTokenBtn.textContent || 'Conectar con token personal';
+        connectPersonalTokenBtn.disabled = true;
+        connectPersonalTokenBtn.textContent = 'Validando…';
+        setPersonalTokenStatus('Validando el token con ClickUp…');
+        try {
+            const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({
+                action: 'authenticatePersonalToken',
+                data: { token },
+            });
+            if (result.success !== true) throw new Error('auth_error');
+            personalTokenInput.value = '';
+            loginRequired.classList.add('hidden');
+            showLoggedIn({
+                authenticated: true,
+                configured: true,
+                authMethod: result.authMethod || 'personal-token',
+                user: result.user,
+            });
+            document.dispatchEvent(new CustomEvent('clickup-auth-changed'));
+        } catch (error) {
+            personalTokenInput.value = '';
+            connectPersonalTokenBtn.textContent = originalLabel;
+            setPersonalTokenStatus(
+                error instanceof Error && error.message === 'network_error'
+                    ? 'No se pudo validar el token porque ClickUp no está disponible. No se guardó ningún cambio.'
+                    : 'ClickUp rechazó el token. Generá uno nuevo y volvé a intentarlo.',
+                '#ff5252',
+            );
+            updatePersonalTokenButton();
+        }
+    });
 
     discardChangesBtn?.addEventListener('click', async () => {
         clientIdInput.value = '';
@@ -534,11 +645,12 @@ function showLoginRequired(
                 signInBtn.textContent = 'Iniciando sesión…';
             }
 
-            const result = await sendMessage<{ success: boolean; user?: any }>({ action: 'authenticate' });
+            const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({ action: 'authenticate' });
 
             if (result.success) {
                 loginRequired.classList.add('hidden');
-                showLoggedIn({ authenticated: true, configured: true, user: result.user });
+                showLoggedIn({ authenticated: true, configured: true, authMethod: result.authMethod || 'oauth', user: result.user });
+                document.dispatchEvent(new CustomEvent('clickup-auth-changed'));
             } else {
                 throw new Error('AUTHENTICATION_FAILED');
             }
@@ -559,8 +671,16 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const userAvatar = document.getElementById('userAvatar') as HTMLImageElement;
     const userName = document.getElementById('userName') as HTMLElement;
     const userEmail = document.getElementById('userEmail') as HTMLElement;
+    const connectionMethod = document.getElementById('clickUpConnectionMethod');
 
     loggedIn.classList.remove('hidden');
+    if (connectionMethod) {
+        connectionMethod.textContent = status.authMethod === 'personal-token'
+            ? 'Conectado con token personal cifrado localmente'
+            : status.authMethod === 'oauth'
+                ? 'Conectado mediante OAuth administrado'
+                : 'Conectado con una credencial local existente';
+    }
 
     // Set user info
     if (status.user) {
@@ -585,6 +705,20 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     let timeTrackingRefreshInFlight: Promise<void> | null = null;
     let recentRunningStart: number | null = null;
     let stopMeetPriorityUi: (() => void) | null = null;
+    const lastTrackedStore = await chrome.storage.local.get('lastTrackedTaskV1');
+    let lastTrackedTask = sanitizeLastTrackedTask(lastTrackedStore.lastTrackedTaskV1);
+
+    const renderPrimaryTimerControls = (running: boolean): void => {
+        const resume = document.getElementById('resumeLastTimer') as HTMLButtonElement | null;
+        const stop = document.getElementById('stopTimer') as HTMLButtonElement | null;
+        const label = document.getElementById('resumeLastTimerLabel');
+        if (resume) resume.disabled = running || !lastTrackedTask;
+        if (stop) stop.disabled = !running;
+        if (label) label.textContent = lastTrackedTask
+            ? `Última tarea: ${lastTrackedTask.name}`
+            : 'Todavía no hay una tarea anterior para retomar.';
+    };
+    renderPrimaryTimerControls(false);
 
     // ========== TASKS TAB HANDLERS ==========
 
@@ -592,44 +726,67 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const taskSearch = document.getElementById('taskSearch') as HTMLInputElement;
     const searchResults = document.getElementById('searchResults') as HTMLElement;
     let searchTimeout: ReturnType<typeof setTimeout>;
+    let taskSearchSequence = 0;
 
-    taskSearch?.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
-        const query = taskSearch.value.trim();
-
-        if (query.length < 2) {
-            searchResults.innerHTML = '';
-            return;
-        }
-
+    const executeTaskSearch = async (query: string): Promise<void> => {
+        const sequence = ++taskSearchSequence;
         searchResults.innerHTML = '<p class="hint">Buscando…</p>';
-        searchTimeout = setTimeout(async () => {
-            try {
-                const result = await sendMessage<{ tasks: any[] }>({
+        try {
+                let result: { tasks: any[]; hasMore?: boolean; indexedCount?: number } = { tasks: [], hasMore: true, indexedCount: 0 };
+                for (let batch = 0; batch < 10; batch += 1) {
+                    result = await sendMessage<{ tasks: any[]; hasMore?: boolean; indexedCount?: number }>({
                     action: 'searchTasks',
                     data: { query }
-                });
+                    });
+                    if (sequence !== taskSearchSequence) return;
+                    if (isTaskSearchFailure(result)) throw new Error('TASK_SEARCH_FAILED');
+                    if (result.tasks.length >= 10 || !result.hasMore) break;
+                    searchResults.innerHTML = `<p class="hint">Buscando más coincidencias… ${Number(result.indexedCount) || 0} tareas revisadas.</p>`;
+                }
 
                 if (result?.tasks?.length > 0) {
-                    searchResults.innerHTML = result.tasks.slice(0, 5).map(task => `
+                    searchResults.innerHTML = result.tasks.map(task => `
                         <div class="search-result-item" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
                             <span class="task-name">${escapeHTML(task.name || '')}</span>
                             <span class="task-id">${escapeHTML(task.id || '')}</span>
                         </div>
-                    `).join('');
+                    `).join('') + (result.hasMore
+                        ? `<button type="button" class="btn task-search-more">Buscar más tareas</button><p class="hint">Índice parcial: ${Number(result.indexedCount) || 0} tareas revisadas.</p>`
+                        : result.tasks.length < 10
+                            ? `<p class="hint">Se encontraron ${result.tasks.length} coincidencia${result.tasks.length === 1 ? '' : 's'} reales en todo el índice.</p>`
+                            : '');
 
                     searchResults.querySelectorAll('.search-result-item').forEach(el => {
                         el.addEventListener('click', () => {
                             window.open(safeClickUpUrl((el as HTMLElement).dataset.url || ''), '_blank', 'noopener,noreferrer');
                         });
                     });
+                    searchResults.querySelector<HTMLButtonElement>('.task-search-more')?.addEventListener('click', () => {
+                        void executeTaskSearch(query);
+                    });
                 } else {
-                    searchResults.innerHTML = '<p class="hint">No se encontraron tareas</p>';
+                    searchResults.innerHTML = result.hasMore
+                        ? '<p class="hint">Todavía no hay coincidencias en el tramo revisado.</p><button type="button" class="btn task-search-more">Buscar en más tareas</button>'
+                        : '<p class="hint">No se encontraron tareas</p>';
+                    searchResults.querySelector<HTMLButtonElement>('.task-search-more')?.addEventListener('click', () => {
+                        void executeTaskSearch(query);
+                    });
                 }
             } catch (e) {
+                if (sequence !== taskSearchSequence) return;
                 searchResults.innerHTML = '<p class="hint">No se pudo buscar</p>';
             }
-        }, 300);
+    };
+
+    taskSearch?.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const query = taskSearch.value.trim();
+        if (query.length < 2) {
+            taskSearchSequence++;
+            searchResults.innerHTML = '';
+            return;
+        }
+        searchTimeout = setTimeout(() => { void executeTaskSearch(query); }, 300);
     });
 
     // Quick Create Button
@@ -668,10 +825,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 const teamCache = getTeamHierarchyCache(storage.hierarchyCache, teamId);
                 const lists = flattenHierarchySpaces(teamCache?.data?.spaces);
 
-                const filtered = lists.filter((list: any) =>
-                    list.name.toLowerCase().includes(query) ||
-                    (list.path && list.path.toLowerCase().includes(query))
-                ).slice(0, 10);
+                const filtered = filterDestinationLists(lists, query).slice(0, 20);
 
                 if (filtered.length > 0) {
                     listSearchResults.innerHTML = filtered.map((list: any) => `
@@ -918,6 +1072,18 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         }
     });
 
+    const resumeLastTimer = document.getElementById('resumeLastTimer') as HTMLButtonElement | null;
+    resumeLastTimer?.addEventListener('click', async () => {
+        if (!lastTrackedTask) return;
+        resumeLastTimer.disabled = true;
+        try {
+            await sendMessage({ action: 'startTimer', data: { teamId: lastTrackedTask.teamId, taskId: lastTrackedTask.id } });
+            await refreshTimeTracking();
+        } catch {
+            resumeLastTimer.disabled = false;
+        }
+    });
+
     // ========== AUTO-TRACKING TOGGLES ==========
     const autoStartToggle = document.getElementById('autoStartToggle') as HTMLInputElement;
     const autoStopToggle = document.getElementById('autoStopToggle') as HTMLInputElement;
@@ -1071,7 +1237,8 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                         : taskName;
                     return `
                     <div class="time-entry-item${isRunning ? ' time-entry-running' : ''}">
-                        <span class="entry-task">${taskLabel}${isRunning ? ' <span class="entry-state">En curso</span>' : ''}</span>
+                        <span class="entry-task">${taskLabel}</span>
+                        <span class="entry-state${isRunning ? ' is-running' : ''}">${isRunning ? 'En curso' : 'Finalizada'}</span>
                         <span class="entry-duration"${isRunning ? ' id="recentRunningDuration"' : ''}>${formatDuration(duration)}</span>
                     </div>
                 `;
@@ -1121,6 +1288,27 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     // loadTimeHistory();
 
     // ========== LOAD RUNNING TIMER ==========
+    function renderDashboardTimer(timer: TimeEntry | null): void {
+        const state = document.getElementById('dashboardTimerState');
+        const stateText = document.getElementById('dashboardTimerStateText');
+        const task = document.getElementById('dashboardTimerTask');
+        const value = document.getElementById('dashboardTimerValue') as HTMLTimeElement | null;
+        if (!state || !stateText || !task || !value) return;
+
+        if (timer) {
+            state.classList.remove('blocked');
+            stateText.textContent = 'En curso';
+            task.textContent = timer.task?.name || 'Tarea en curso';
+            return;
+        }
+
+        state.classList.add('blocked');
+        stateText.textContent = 'Sin temporizador';
+        task.textContent = 'No hay una tarea en curso';
+        value.textContent = '00:00:00';
+        value.dateTime = 'PT0S';
+    }
+
     async function loadRunningTimer(): Promise<TimeEntry | null> {
         console.log('[Timer] LOAD_RUNNING_TIMER');
         // console.trace('[Timer] Caller Trace');
@@ -1139,6 +1327,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
             if (!teamId) {
                 console.log('[Timer] NO_TEAM_ID');
+                renderDashboardTimer(null);
                 return null;
             }
 
@@ -1163,17 +1352,29 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                     timerTaskName.textContent = timer.task?.name || 'En curso…';
                 }
 
+                const taskId = String(timer.task?.id || '').trim();
+                if (taskId && teamId) {
+                    lastTrackedTask = { id: taskId, name: timer.task?.name || taskId, teamId };
+                    await chrome.storage.local.set({ lastTrackedTaskV1: lastTrackedTask });
+                }
+
                 updateTimerDisplay(toTimeEntryTimestamp(startTime));
+                renderDashboardTimer(normalizedTimer);
+                renderPrimaryTimerControls(true);
                 return normalizedTimer;
             } else {
                 runningTimerEl.classList.add('hidden');
                 noTimerEl.classList.remove('hidden');
                 recentRunningStart = null;
                 if (timerInterval) clearInterval(timerInterval);
+                if (timerDisplay) timerDisplay.textContent = '00:00:00:00';
+                renderDashboardTimer(null);
+                renderPrimaryTimerControls(false);
                 return null;
             }
         } catch (e) {
             console.error('[Timer] LOAD_RUNNING_TIMER_ERROR');
+            renderDashboardTimer(null);
             return null;
         }
     }
@@ -1190,8 +1391,14 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             const hours = Math.floor(elapsed / (1000 * 60 * 60));
             const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((elapsed % (1000 * 60)) / 1000);
+            const centiseconds = Math.floor((elapsed % 1000) / 10);
 
-            timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            timerDisplay.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}:${centiseconds.toString().padStart(2, '0')}`;
+            const dashboardTimer = document.getElementById('dashboardTimerValue') as HTMLTimeElement | null;
+            if (dashboardTimer) {
+                dashboardTimer.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                dashboardTimer.dateTime = `PT${hours}H${minutes}M${seconds}S`;
+            }
             const recentDuration = document.getElementById('recentRunningDuration');
             if (recentDuration && recentRunningStart) {
                 recentDuration.textContent = formatDuration(Date.now() - recentRunningStart);
@@ -1199,7 +1406,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
         };
 
         update();
-        timerInterval = setInterval(update, 1000);
+        timerInterval = setInterval(update, 50);
     }
 
     async function refreshTimeTracking(): Promise<void> {
@@ -1422,7 +1629,7 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
     let searchRevision = 0;
     let searchTimeout: ReturnType<typeof setTimeout> | null = null;
     let changingTask = false;
-    const taskNames = new Map<string, string>();
+    const taskDetails = new MeetMappingTaskCache();
 
     const setVisible = (element: Element, visible: boolean): void => {
         element.classList.toggle('hidden', !visible);
@@ -1439,29 +1646,27 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
 
     const taskLabel = (taskId: string | undefined): string => {
         if (!taskId) return 'tarea no disponible';
-        return taskNames.get(taskId) || `tarea ${taskId}`;
+        return taskDetails.get(taskId)?.name || `tarea ${taskId}`;
     };
 
-    const resolveTaskName = async (taskId: string | undefined): Promise<void> => {
-        if (!taskId || taskNames.has(taskId)) return;
+    const resolveTaskDetail = async (taskId: string): Promise<MeetMappingTaskDetail> => {
+        const cached = taskDetails.get(taskId);
+        if (cached) return cached;
+        let detail = normalizeMeetMappingTaskDetail(null, taskId);
         try {
-            const task = await sendMessage<{ id?: string; name?: string }>({
+            const task = await sendMessage<unknown>({
                 action: 'getTaskById',
                 data: { taskId },
             });
-            if (task?.id === taskId && typeof task.name === 'string' && task.name.length > 0) {
-                taskNames.set(taskId, task.name.slice(0, 500));
-            }
+            detail = normalizeMeetMappingTaskDetail(task, taskId);
         } catch {
-            // The task ID remains sufficient for local controls if name lookup is unavailable.
+            // A bounded negative cache keeps the ID usable without retrying on every render.
         }
+        taskDetails.set(detail);
+        return detail;
     };
 
     const renderMappings = async (): Promise<void> => {
-        if (!currentStatus.enabled) {
-            setVisible(mappingsDetails, false);
-            return;
-        }
         const result = await sendMessage<{ mappings: MeetTaskMappingV1[] }>({ action: 'getMeetMappings' });
         const mappings = Array.isArray(result?.mappings) ? result.mappings.slice(0, 50) : [];
         setVisible(mappingsDetails, true);
@@ -1475,14 +1680,50 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
             return;
         }
 
-        mappings.forEach((mapping, index) => {
-            const item = document.createElement('div');
-            item.className = 'meet-mapping-item';
-            const label = document.createElement('span');
-            label.className = 'meet-mapping-name';
-            label.textContent = `Reunión vinculada ${index + 1} · tarea ${mapping.taskId}`;
+        const details = new Map<string, MeetMappingTaskDetail>();
+        const taskIds = [...new Set(mappings.map((mapping) => mapping.taskId))];
+        for (let index = 0; index < taskIds.length; index += 4) {
+            const batch = taskIds.slice(index, index + 4);
+            const resolved = await Promise.all(batch.map((taskId) => resolveTaskDetail(taskId)));
+            for (const detail of resolved) details.set(detail.id, detail);
+        }
 
-            const buttonGroup = document.createElement('span');
+        const tableRegion = document.createElement('div');
+        tableRegion.className = 'meet-mappings-table-region';
+        tableRegion.tabIndex = 0;
+        tableRegion.setAttribute('role', 'region');
+        tableRegion.setAttribute('aria-label', 'Vinculaciones guardadas de Google Meet');
+        const table = document.createElement('table');
+        table.className = 'meet-mappings-table';
+        const head = document.createElement('thead');
+        const headingRow = document.createElement('tr');
+        for (const heading of ['Tarea', 'ID', 'Estado', 'Acciones']) {
+            const cell = document.createElement('th');
+            cell.scope = 'col';
+            cell.textContent = heading;
+            headingRow.append(cell);
+        }
+        head.append(headingRow);
+        const body = document.createElement('tbody');
+
+        mappings.forEach((mapping, index) => {
+            const detail = details.get(mapping.taskId) || normalizeMeetMappingTaskDetail(null, mapping.taskId);
+            const row = document.createElement('tr');
+            const taskCell = document.createElement('td');
+            taskCell.className = 'meet-mapping-name';
+            taskCell.textContent = detail.name;
+            const idCell = document.createElement('td');
+            const id = document.createElement('code');
+            id.textContent = mapping.taskId;
+            idCell.append(id);
+            const statusCell = document.createElement('td');
+            const state = document.createElement('span');
+            state.className = `meet-mapping-state ${mapping.enabled ? 'is-active' : 'is-inactive'}`;
+            state.textContent = `${mapping.enabled ? 'Activa' : 'Desactivada'} · ${detail.status}`;
+            statusCell.append(state);
+
+            const actionCell = document.createElement('td');
+            const buttonGroup = document.createElement('div');
             buttonGroup.className = 'meet-mapping-actions';
             const enabledButton = document.createElement('button');
             enabledButton.type = 'button';
@@ -1518,9 +1759,13 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
             });
 
             buttonGroup.append(enabledButton, deleteButton);
-            item.append(label, buttonGroup);
-            mappingsList.appendChild(item);
+            actionCell.append(buttonGroup);
+            row.append(taskCell, idCell, statusCell, actionCell);
+            body.append(row);
         });
+        table.append(head, body);
+        tableRegion.append(table);
+        mappingsList.append(tableRegion);
     };
 
     const renderStatus = async (): Promise<void> => {
@@ -1549,12 +1794,12 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
                 ? 'Hay otra sala abierta. Sólo la pestaña Meet enfocada puede tomar prioridad.'
                 : 'No hay una tarea vinculada. Elegí una o ignorá esta sesión.');
         } else if (tracking) {
-            await resolveTaskName(status.taskId);
+            if (status.taskId) await resolveTaskDetail(status.taskId);
             const elapsed = status.joinedAt ? formatMeetElapsed(Date.now() - status.joinedAt) : '00:00:00';
             const conflictNote = status.conflict ? ' · otra sala quedó sin autoridad' : '';
             setStatusCopy('Reunión en curso', `${taskLabel(status.taskId)} · ${elapsed}${conflictNote}`);
         } else if (paused) {
-            await resolveTaskName(status.taskId);
+            if (status.taskId) await resolveTaskDetail(status.taskId);
             setStatusCopy('Reunión pausada', `${taskLabel(status.taskId)} · confirmá para continuar.`);
         } else if (ignored) {
             setStatusCopy('Reunión ignorada', 'El tracking normal puede continuar; esta sesión no volverá a preguntar.');
@@ -1613,7 +1858,6 @@ async function initMeetPriority(refreshTimeTracking: () => Promise<void>): Promi
                     item.append(name, id);
                     item.addEventListener('click', () => {
                         selectedTask = { id: task.id!, name: task.name! };
-                        taskNames.set(task.id!, task.name!);
                         searchInput.value = task.name!;
                         searchResults.replaceChildren();
                         assignButton.disabled = false;
@@ -1827,68 +2071,6 @@ async function loadTeams(): Promise<void> {
     } catch (error) {
         console.error('[Popup] LOAD_TEAMS_ERROR');
         teamSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
-    }
-}
-
-async function loadSpaces(teamId: string, selectSpaceId?: string, selectListId?: string): Promise<void> {
-    const spaceSelect = document.getElementById('spaceSelect') as HTMLSelectElement;
-    const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
-
-    spaceSelect.innerHTML = '<option value="">Cargando…</option>';
-    spaceSelect.classList.remove('hidden');
-    listSelect.classList.add('hidden');
-
-    try {
-        const spaces = await sendMessage<{ spaces: ClickUpSpace[] }>({
-            action: 'getSpaces',
-            data: { teamId }
-        });
-
-        spaceSelect.innerHTML = '<option value="">Seleccionar espacio…</option>';
-        spaces.spaces.forEach(space => {
-            const option = document.createElement('option');
-            option.value = space.id;
-            option.textContent = space.name;
-            spaceSelect.appendChild(option);
-        });
-
-        if (selectSpaceId) {
-            spaceSelect.value = selectSpaceId;
-            await loadLists(selectSpaceId, selectListId);
-        }
-    } catch (error) {
-        console.error('[Popup] LOAD_SPACES_ERROR');
-        spaceSelect.innerHTML = '<option value="">No se pudieron cargar los espacios</option>';
-    }
-}
-
-async function loadLists(spaceId: string, selectListId?: string): Promise<void> {
-    const listSelect = document.getElementById('listSelect') as HTMLSelectElement;
-
-    listSelect.innerHTML = '<option value="">Cargando…</option>';
-    listSelect.classList.remove('hidden');
-
-    try {
-        const lists = await sendMessage<{ lists: ClickUpList[] }>({
-            action: 'getLists',
-            data: { spaceId }
-        });
-
-        listSelect.innerHTML = '<option value="">Seleccionar lista…</option>';
-        lists.lists.forEach(list => {
-            const option = document.createElement('option');
-            option.value = list.id;
-            option.textContent = list.name;
-            listSelect.appendChild(option);
-        });
-
-        if (selectListId) {
-            listSelect.value = selectListId;
-            listSelect.style.borderColor = '#00c853';
-        }
-    } catch (error) {
-        console.error('[Popup] LOAD_LISTS_ERROR');
-        listSelect.innerHTML = '<option value="">No se pudieron cargar las listas</option>';
     }
 }
 

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClickUp Gmail Tracker</title>
+    <title>TaskBridge for ClickUp</title>
     <link rel="stylesheet" href="popup.css">
 </head>
 
@@ -24,7 +24,7 @@
                         d="M25.4 129.1L49.2 110.9C61.9 127.4 75.3 135 90.3 135C105.1 135 118.2 127.5 130.3 111.1L154.4 128.9C137 152.5 115.3 165 90.3 165C65.3 165 43.4 152.6 25.4 129.1Z" />
                     <polygon points="90.2 49.8 47.8 86.4 28.2 63.6 90.3 10.2 151.8 63.7 132.2 86.3" />
                 </svg>
-                <h1>ClickUp Gmail</h1>
+                <h1>TaskBridge</h1>
             </div>
             <button id="openAppTab" class="app-launcher" type="button" title="Abrir nueva interfaz en una pestaña">
                 Abrir app
@@ -37,11 +37,25 @@
             <p>Cargando…</p>
         </div>
 
-        <!-- Login Required (same as before) -->
+        <!-- ClickUp connection -->
         <div id="login-required" class="section hidden">
-            <div class="card">
-                <h2>Configuración OAuth</h2>
-                <p class="help-text">Esta ventana durable conserva el setup aunque cambies de pestaña. Creá una app OAuth de ClickUp para conectar:</p>
+            <div class="card auth-primary-card">
+                <span class="connection-badge">Recomendado</span>
+                <h2>Conexión rápida</h2>
+                <p class="help-text">Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil de Chrome.</p>
+                <div class="form-group">
+                    <label for="personalToken">Token personal de ClickUp</label>
+                    <input type="password" id="personalToken" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
+                </div>
+                <button id="connectPersonalToken" class="btn btn-primary" type="button" disabled>Conectar con token personal</button>
+                <p id="personalTokenStatus" class="hint" role="status" aria-live="polite"></p>
+                <p class="credential-note">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
+                <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer">Abrir Tokens de API en ClickUp</a>
+            </div>
+
+            <details class="card auth-advanced-card">
+                <summary>Configuración avanzada con OAuth</summary>
+                <p class="help-text">Para owners o admins que administran su propia app OAuth. El secreto se cifra localmente, pero un navegador comprometido puede acceder al perfil.</p>
 
                 <!-- Step 1: Redirect URL -->
                 <div class="step-card">
@@ -88,31 +102,30 @@
                     <button id="discardOAuthChanges" class="btn btn-link" type="button">Descartar cambios</button>
                 </div>
                 <p id="oauthConfigStatus" class="hint" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
-            </div>
-
-            <button id="signIn" class="btn btn-primary" disabled>
-                Iniciar sesión con ClickUp
-            </button>
+                <button id="signIn" class="btn btn-primary" disabled>
+                    Iniciar sesión con ClickUp
+                </button>
+            </details>
 
             <div class="card connection-preview-card google-connection-card" aria-labelledby="googleCalendarSetupTitle">
                 <div class="connection-heading">
                     <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                     <div class="connection-title">
                         <h3 id="googleCalendarSetupTitle">Google Calendar</h3>
-                        <p>Integración opcional para disponibilidad y reuniones propias</p>
+                        <p>Integración opcional para próximos eventos del calendario principal</p>
                     </div>
                     <span class="connection-badge">Opcional</span>
                 </div>
                 <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
-                    <li>Lista de calendarios</li>
-                    <li>Disponibilidad</li>
-                    <li>Eventos propios</li>
+                    <li>Eventos del calendario principal en modo lectura</li>
+                    <li>Próximos siete días</li>
+                    <li>Sin invitados, descripciones ni ubicaciones</li>
                 </ul>
                 <button id="connectGoogleCalendarSetup" class="btn btn-google" type="button"
                     aria-describedby="googleOAuthSetupStatus" aria-disabled="true" disabled>
                     Conectar Google Calendar
                 </button>
-                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
                 <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
             </div>
 
@@ -124,7 +137,7 @@
         <!-- Logged In - Tabbed Interface -->
         <div id="logged-in" class="section hidden">
             <!-- Tab Navigation - Tracking is default (first active) -->
-            <nav class="tab-nav" role="tablist" aria-label="Secciones de ClickUp Gmail">
+            <nav class="tab-nav" role="tablist" aria-label="Secciones de TaskBridge">
                 <button class="tab-btn" data-tab="tasks" role="tab" aria-controls="tab-tasks" aria-selected="false">
                     <span class="tab-icon">📋</span>
                     <span class="tab-label">Tareas</span>
@@ -222,13 +235,15 @@
                         <button id="endMeetSession" class="btn btn-danger btn-small hidden">Finalizar reunión</button>
                     </div>
 
-                    <details id="meetMappingsDetails" class="meet-mappings hidden">
-                        <summary>Reuniones vinculadas</summary>
-                        <div id="meetMappingsList"></div>
-                    </details>
                 </div>
 
                 <section id="meetingLinkSection" class="card hidden" hidden aria-label="Vinculación de reuniones"></section>
+
+                <details id="meetMappingsDetails" class="card meet-mappings hidden">
+                    <summary>Vinculaciones guardadas</summary>
+                    <p class="hint">Reglas locales entre una sala de Meet y una tarea; no representan reuniones activas o programadas.</p>
+                    <div id="meetMappingsList"></div>
+                </details>
 
                 <!-- Running Timer -->
                 <div class="card timer-card">
@@ -315,10 +330,11 @@
 
                     <div class="connection-row">
                         <span class="connection-provider connection-provider-clickup" aria-hidden="true">C</span>
-                        <div class="connection-title">
-                            <strong>ClickUp</strong>
-                            <span>Tareas y seguimiento de tiempo</span>
-                        </div>
+                            <div class="connection-title">
+                                <strong>ClickUp</strong>
+                                <span>Tareas y seguimiento de tiempo</span>
+                                <span id="clickUpConnectionMethod">Método de conexión local</span>
+                            </div>
                         <span class="connection-state connection-state-ok">Conectado</span>
                     </div>
 
@@ -326,20 +342,20 @@
                         <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                         <div class="connection-title">
                             <strong>Google Calendar</strong>
-                            <span>Disponibilidad y reuniones propias</span>
+                            <span>Próximos eventos del calendario principal</span>
                         </div>
                         <span class="connection-badge">Opcional</span>
                     </div>
                     <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
-                        <li>Lista de calendarios</li>
-                        <li>Disponibilidad</li>
-                        <li>Eventos propios</li>
+                        <li>Eventos del calendario principal en modo lectura</li>
+                        <li>Próximos siete días</li>
+                        <li>Sin invitados, descripciones ni ubicaciones</li>
                     </ul>
                     <button id="connectGoogleCalendarConfig" class="btn btn-google" type="button"
                         aria-describedby="googleOAuthConfigStatus" aria-disabled="true" disabled>
                         Conectar Google Calendar
                     </button>
-                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Google Calendar estará disponible en una próxima fase. OAuth permanece desactivado.</p>
+                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
                     <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
                 </div>
 
@@ -402,7 +418,7 @@
                         <textarea id="feedbackText" placeholder="Tus comentarios o sugerencias…" rows="3"></textarea>
                     </div>
                     <button id="sendFeedback" class="btn btn-secondary">Enviar comentarios</button>
-                    <a href="https://github.com/diramain/clickup-gmail-chrome" target="_blank" class="btn btn-link">
+                    <a href="https://github.com/Diramain/taskbridge-for-clickup" target="_blank" class="btn btn-link">
                         ⭐ Ver en GitHub
                     </a>
                 </div>

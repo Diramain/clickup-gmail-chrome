@@ -1,25 +1,19 @@
 import {
     ClickUpTask,
-    ClickUpList,
-    ClickUpFolder,
-    ClickUpSpace,
-    ClickUpTeam,
-    ClickUpUser,
     ClickUpUserResponse,
     ClickUpTeamsResponse,
-    ClickUpSpacesResponse,
-    ClickUpFoldersResponse,
-    ClickUpListsResponse,
     ExtensionMessage,
     CreateTaskPayload,
     EmailData,
     TimeEntry,
-    ClickUpCustomField
+    ClickUpCustomTaskType
 } from './src/types/clickup';
 import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
+import { resolveAuthorizedDestination } from './src/destination-config';
+import { flattenHierarchySpaces, getTeamHierarchyCache } from './src/hierarchy-utils';
 import {
     EMAIL_TASK_MAPPINGS_V2_KEY,
     SingleFlight,
@@ -48,7 +42,6 @@ import {
 import { isSyncProgressMessage, type SyncProgressMessage } from './src/sync-progress';
 import {
     extractTaskIdCandidate,
-    hasHighConfidenceTaskSearchResult,
     rankTaskSearchResults,
 } from './src/task-search';
 import { extractCurrentUserId } from './src/time-entry-history';
@@ -60,7 +53,6 @@ import {
     executeFocusedTimerAction,
     removeClickUpTaskTabIndexEntry,
     resolveClickUpFocusContext,
-    updateClickUpTaskTabIndex,
     type FocusedTabSnapshot,
     type TimerAutoSettings,
 } from './src/clickup-focus';
@@ -84,12 +76,40 @@ import {
     type SafeCausalTraceEvent,
 } from './src/causal-trace';
 import { MeetingLinkController, MEETING_FEATURE_FLAGS_KEY, type MeetingLinkWriteAction } from './src/meeting-link/meeting-link.controller';
+import { buildDashboardSummary, type DashboardSummary } from './src/dashboard-summary';
+import { applyValidatedBulkTaskChange } from './src/bulk-task-update';
+import { isCustomTaskIdCandidate } from './src/meet/meet-task-prompt';
+import { GOOGLE_CALENDAR_RUNTIME_ENABLED } from './src/calendar/calendar-capability';
+import { createCalendarSeriesKey, disabledCalendarAgendaView, type CalendarAgendaViewV1 } from './src/calendar/calendar-agenda';
+import {
+    CalendarAgendaMemoryCache,
+    canonicalMeetUrlFromCalendarAgenda,
+    createMeetMappingFromCalendarAgenda,
+} from './src/calendar/calendar-agenda-cache';
+import { GoogleCalendarAgendaRuntime } from './src/calendar/calendar-runtime';
+import { readPrimaryCalendarAgenda } from './src/calendar/google-calendar.service';
+import {
+    dateToClickUpDueDate,
+    findCustomTaskType,
+    mappingStorageKey,
+    sanitizeCalendarTaskMappings,
+    sanitizeCalendarTaskTypeSelection,
+    sanitizeCustomTaskTypesResponse,
+    type CalendarTaskLinkScope,
+    type CalendarTaskMappingStoreV1,
+} from './src/calendar/calendar-linking';
+import {
+    invalidateGoogleCalendarToken,
+    requestGoogleCalendarToken,
+} from './src/google/google-identity.service';
+import { decodeAndValidateGmailImage, type GmailImageUploadPayload } from './src/gmail-attachment-security';
+import { GMAIL_INTEGRATION_PREFERENCE_KEY, normalizeGmailIntegrationPreference } from './src/gmail-preferences';
+import { normalizePersonalToken, resolveClickUpAuthMethod, type ClickUpAuthMethod } from './src/clickup-auth';
 
 interface CreateTaskFullMessage {
     listId: string;
     taskData: CreateTaskPayload;
     emailData?: EmailData;
-    attachWithFiles?: boolean;
     timeTracked?: number;
     teamId?: string;
 }
@@ -112,6 +132,7 @@ const STORAGE_KEYS = {
     HIERARCHY_PRELOAD_STATUS: 'hierarchyPreloadStatus',
     RATE_GOVERNOR_STATE: 'clickupRateGovernorState',
     REAUTH_REQUIRED: 'clickupReauthRequired',
+    AUTH_METHOD: 'clickupAuthMethod',
     AUTHORIZATION_MODE: 'clickupAuthorizationMode',
     CURRENT_USER_VALIDATED_AT: 'clickupCurrentUserValidatedAt',
     DRAFT_CLIENT_ID: 'draftClientId',
@@ -122,15 +143,19 @@ const EXPIRATION_TIME = 24 * 60 * 60 * 1000; // 24 hours
 const TASK_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const TASK_SEARCH_MAX_PAGES = 50;
 const TASK_SEARCH_PAGE_SIZE = 100;
-const TASK_SEARCH_RESULT_LIMIT = 10;
+const TASK_SEARCH_RESULT_LIMIT = 20;
+const TASK_SEARCH_PAGE_BUDGET = 5;
 const CURRENT_USER_VALIDATION_TTL_MS = 5 * 60 * 1000;
 const RECENT_TIME_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DASHBOARD_SNAPSHOT_TTL_MS = 60 * 1000;
 const FOCUSED_TIMER_DEBOUNCE_MS = 1_200;
 const FOCUSED_TIMER_SESSION_KEY = 'focusedClickUpTimerState';
 const AUTO_START_SUPPRESSED_TASK_SESSION_KEY = 'autoStartSuppressedTaskId';
 const CLICKUP_TASK_TAB_INDEX_SESSION_KEY = 'clickUpTaskTabIndexV1';
 const MEET_PRIORITY_ENABLED_KEY = 'meetPriorityEnabled';
 const MEET_MAPPINGS_KEY = 'meetTaskMappingsV1';
+const CALENDAR_TASK_MAPPINGS_KEY = 'calendarTaskMappingsV1';
+const CALENDAR_TASK_TYPE_CONFIG_KEY = 'calendarTaskTypeConfigV1';
 const MEET_SESSION_KEY = 'meetPrioritySessionV1';
 const MEET_CONFLICT_KEY = 'meetPriorityConflictV1';
 const MEET_MAX_DURATION_MS = 4 * 60 * 60 * 1000;
@@ -142,6 +167,15 @@ const causalTracePorts = new Map<chrome.runtime.Port, CausalTraceSanitizer>();
 const meetingLinkController = new MeetingLinkController({
     get: (key: typeof MEETING_FEATURE_FLAGS_KEY) => chrome.storage.local.get(key) as Promise<Record<typeof MEETING_FEATURE_FLAGS_KEY, unknown>>,
 });
+const dashboardSnapshotCache = new Map<string, { expiresAt: number; summary: DashboardSummary }>();
+const dashboardSnapshotInFlight = new Map<string, Promise<DashboardSummary>>();
+const calendarAgendaCache = new CalendarAgendaMemoryCache();
+const calendarTaskCreateInFlight = new Set<string>();
+const googleCalendarRuntime = new GoogleCalendarAgendaRuntime({
+    requestToken: (interactive) => requestGoogleCalendarToken(interactive),
+    invalidateToken: (token) => invalidateGoogleCalendarToken(token),
+    readAgenda: (token) => readPrimaryCalendarAgenda(token),
+}, calendarAgendaCache);
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
@@ -184,11 +218,6 @@ chrome.runtime.onConnect.addListener((port) => {
 function emitSyncProgress(message: SyncProgressMessage): void {
     if (!isSyncProgressMessage(message)) return;
     void chrome.runtime.sendMessage(message).catch(() => undefined);
-}
-
-interface CacheEntry<T> {
-    data: T;
-    timestamp: number;
 }
 
 interface TaskSearchCache {
@@ -249,19 +278,15 @@ async function loadNextTaskSearchPage(teamId: string, cache: TaskSearchCache): P
     }
 }
 
-interface HierarchyData {
-    spaces: ClickUpSpace[];
-    lists?: ClickUpList[];
-}
-
 let clickupAPI: ClickUpAPIWrapper | null = null;
+let apiInitializationPromise: Promise<void> | null = null;
 let authenticationStateQueue: Promise<void> = Promise.resolve();
 let currentUserValidatedAt = 0;
-let hierarchyCache: Record<string, CacheEntry<HierarchyData>> = {};
 const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
 let mappingWriteQueue: Promise<void> = Promise.resolve();
 let focusedTimerQueue: Promise<void> = Promise.resolve();
 let timerWriteQueue: Promise<void> = Promise.resolve();
+let bulkTaskWriteQueue: Promise<void> = Promise.resolve();
 let clickUpTaskTabIndexQueue: Promise<void> = Promise.resolve();
 let focusedTimerDebounce: ReturnType<typeof setTimeout> | null = null;
 let focusedTimerRevision = 0;
@@ -269,6 +294,10 @@ let meetPrioritySession: MeetPrioritySession | null = null;
 let logoutInProgress = false;
 const customFieldUpdateQueues = new Map<string, Promise<void>>();
 const HIERARCHY_FOLDER_CONCURRENCY = 3;
+const API_REQUIRED_MESSAGE_ACTIONS = new Set<string>([
+    'getMembers', 'getList', 'startTimer', 'stopTimer', 'getRunningTimer',
+    'createTimeEntry', 'addTimeEntry', 'getTimeEntries',
+]);
 
 // Default badge state
 const BADGE_STATES = {
@@ -405,7 +434,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // Initialize API wrapper
-async function initializeAPI() {
+async function initializeAPI(): Promise<void> {
+    if (apiInitializationPromise) return apiInitializationPromise;
+    apiInitializationPromise = initializeAPIOnce();
+    try {
+        await apiInitializationPromise;
+    } finally {
+        apiInitializationPromise = null;
+    }
+}
+
+async function initializeAPIOnce(): Promise<void> {
     recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'started' });
     const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
@@ -464,7 +503,6 @@ async function invalidateAuthenticationSession(rejectedToken: string): Promise<b
         }
         clickupAPI = null;
         currentUserValidatedAt = 0;
-        hierarchyCache = {};
         taskSearchCaches.clear();
         await chrome.storage.local.set({ [STORAGE_KEYS.REAUTH_REQUIRED]: true });
         await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
@@ -499,7 +537,7 @@ function runAuthenticationStateMutation<T>(operation: () => Promise<T>): Promise
     return result;
 }
 
-initializeAPI();
+void initializeAPI().catch((error) => Logger.error('API_INITIALIZATION_FAILED', error));
 initializeLinkStorageShadow().catch((e) => {
     Logger.error('LINK_STORAGE_SHADOW_MIGRATION_SKIPPED', e);
 });
@@ -546,8 +584,66 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 
 async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.MessageSender) {
     const { action, data } = message;
+    if (API_REQUIRED_MESSAGE_ACTIONS.has(action)) await ensureAPI();
 
     switch (action) {
+        case 'authenticatePersonalToken': {
+            recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'started' });
+            const token = normalizePersonalToken(data?.token);
+            if (!token) return { success: false, error: 'invalid_token_format' };
+
+            try {
+                const candidateApi = new ClickUpAPIWrapper(token, new ClickUpRateGovernor(), 'raw');
+                const user = await candidateApi.getUser();
+                const validatedAt = Date.now();
+
+                await runAuthenticationStateMutation(async () => {
+                    clickupAPI = null;
+                    await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token);
+                    await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                    await chrome.storage.local.set({
+                        [STORAGE_KEYS.AUTH_METHOD]: 'personal-token' satisfies ClickUpAuthMethod,
+                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw',
+                        [STORAGE_KEYS.CACHED_USER]: user,
+                        [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: validatedAt,
+                    });
+                    await chrome.storage.local.remove([
+                        STORAGE_KEYS.OAUTH_CONFIG,
+                        STORAGE_KEYS.DRAFT_CLIENT_ID,
+                        STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                        STORAGE_KEYS.CACHED_TEAMS,
+                        STORAGE_KEYS.CACHED_HIERARCHY,
+                        STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
+                        STORAGE_KEYS.REAUTH_REQUIRED,
+                    ]);
+                    currentUserValidatedAt = validatedAt;
+                    taskSearchCaches.clear();
+                    dashboardSnapshotCache.clear();
+                    await initializeAPI();
+                });
+
+                await getTeams(true);
+                logoutInProgress = false;
+                if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
+                    await refreshMeetPriorityBadge().catch(() => undefined);
+                } else {
+                    await restoreNormalTimerBadge().catch(() => undefined);
+                }
+                scheduleFocusedTimerEvaluation('authenticated');
+                recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'success' });
+                return { success: true, user, authMethod: 'personal-token' as ClickUpAuthMethod };
+            } catch (error) {
+                recordDiagnostic('auth_state', {
+                    stage: 'personal-token',
+                    outcome: 'failure',
+                    failureClass: classifyDiagnosticFailure(error),
+                });
+                Logger.error('AUTH_FAILED', error);
+                return { success: false, error: Logger.sanitizeError(error) };
+            }
+        }
+
         case 'authenticate':
             recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'started' });
             try {
@@ -593,8 +689,13 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                     throw new Error('Access token missing from OAuth response');
                 }
                 await runAuthenticationStateMutation(async () => {
+                    clickupAPI = null;
                     await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
                     await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                    await chrome.storage.local.set({
+                        [STORAGE_KEYS.AUTH_METHOD]: 'oauth' satisfies ClickUpAuthMethod,
+                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'bearer',
+                    });
                     await chrome.storage.local.remove([
                         STORAGE_KEYS.DRAFT_CLIENT_ID,
                         STORAGE_KEYS.DRAFT_CLIENT_SECRET,
@@ -603,9 +704,11 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                         STORAGE_KEYS.CACHED_HIERARCHY,
                         STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
                         STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
                         STORAGE_KEYS.REAUTH_REQUIRED,
                     ]);
                     currentUserValidatedAt = 0;
+                    dashboardSnapshotCache.clear();
                     await initializeAPI();
                 });
                 const user = await getFreshAuthenticatedUser();
@@ -619,7 +722,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 scheduleFocusedTimerEvaluation('authenticated');
                 recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'success' });
 
-                return { success: true, user };
+                return { success: true, user, authMethod: 'oauth' as ClickUpAuthMethod };
             } catch (e) {
                 recordDiagnostic('auth_state', {
                     stage: 'oauth',
@@ -667,17 +770,22 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
                 await chrome.storage.local.remove([
                     STORAGE_KEYS.OAUTH_CONFIG,
+                    STORAGE_KEYS.AUTH_METHOD,
+                    STORAGE_KEYS.AUTHORIZATION_MODE,
+                    STORAGE_KEYS.RATE_GOVERNOR_STATE,
                     STORAGE_KEYS.DRAFT_CLIENT_ID,
                     STORAGE_KEYS.DRAFT_CLIENT_SECRET,
                     STORAGE_KEYS.CACHED_USER,
                     STORAGE_KEYS.CACHED_TEAMS,
+                    STORAGE_KEYS.CACHED_HIERARCHY,
+                    STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
                     STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
                     STORAGE_KEYS.REAUTH_REQUIRED,
                 ]);
                 clickupAPI = null;
                 currentUserValidatedAt = 0;
-                hierarchyCache = {};
                 taskSearchCaches.clear();
+                dashboardSnapshotCache.clear();
             });
             await chrome.action.setBadgeText({ text: '' });
             return { success: true };
@@ -689,11 +797,17 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await getAuthenticationStatus();
 
         case 'getLocalConnectionStatus': {
-            const localAuthState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+            const oauthConfigured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+            const credentialPresent = await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+            const localAuthState = await chrome.storage.local.get([
+                STORAGE_KEYS.REAUTH_REQUIRED,
+                STORAGE_KEYS.AUTH_METHOD,
+            ]);
             return {
-                configured: await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG),
-                credentialPresent: await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN),
+                configured: oauthConfigured || credentialPresent,
+                credentialPresent,
                 requiresReauth: localAuthState[STORAGE_KEYS.REAUTH_REQUIRED] === true,
+                authMethod: resolveClickUpAuthMethod(localAuthState[STORAGE_KEYS.AUTH_METHOD], oauthConfigured),
             };
         }
 
@@ -738,6 +852,83 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 defaultListConfig: sanitizeDefaultListConfig(defaultListStore.defaultListConfig),
             };
 
+        // CGC-UX-V2-D2: lectura local del destino para la app en pestaña.
+        // Resuelve equipos, listas y destino vigente en una sola ida y vuelta,
+        // exclusivamente desde caché. Nunca llama a la API.
+        case 'getDestinationOptions': {
+            await storageLocalTrustedReady;
+            const destinationStore = await chrome.storage.local.get([
+                STORAGE_KEYS.CACHED_TEAMS,
+                STORAGE_KEYS.CACHED_HIERARCHY,
+                STORAGE_KEYS.PREFERRED_TEAM,
+                'defaultListConfig',
+            ]);
+
+            const cachedTeams = destinationStore[STORAGE_KEYS.CACHED_TEAMS];
+            const teams = Array.isArray(cachedTeams?.teams)
+                ? cachedTeams.teams.map((team: { id?: unknown; name?: unknown }) => ({ id: team?.id, name: team?.name }))
+                : [];
+
+            const preferredTeamId = typeof destinationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+                ? destinationStore[STORAGE_KEYS.PREFERRED_TEAM]
+                : teams[0]?.id;
+
+            const teamCache = getTeamHierarchyCache(destinationStore[STORAGE_KEYS.CACHED_HIERARCHY], preferredTeamId);
+            const lists = flattenHierarchySpaces(teamCache?.data?.spaces).map((list) => ({
+                id: list.id,
+                name: list.name,
+                path: list.path,
+            }));
+
+            return {
+                teams,
+                preferredTeamId,
+                lists,
+                current: sanitizeDefaultListConfig(destinationStore.defaultListConfig),
+                cachedAt: typeof teamCache?.timestamp === 'number' ? teamCache.timestamp : null,
+            };
+        }
+
+        case 'getDashboardSummary':
+            return await getDashboardSummarySnapshot();
+
+        case 'refreshDashboardSummary':
+            return await getDashboardSummarySnapshot(true);
+
+        // CGC-UX-V2-D2: escritura local del destino. Devuelve lo persistido para
+        // que la UI confirme por read-back en lugar de asumir el éxito.
+        case 'setDefaultDestination': {
+            await storageLocalTrustedReady;
+            const authorizationStore = await chrome.storage.local.get([
+                STORAGE_KEYS.CACHED_TEAMS,
+                STORAGE_KEYS.CACHED_HIERARCHY,
+                STORAGE_KEYS.PREFERRED_TEAM,
+            ]);
+            const authorizationTeams = authorizationStore[STORAGE_KEYS.CACHED_TEAMS];
+            const authorizationTeamId = typeof authorizationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+                ? authorizationStore[STORAGE_KEYS.PREFERRED_TEAM]
+                : authorizationTeams?.teams?.[0]?.id;
+            const authorizationCache = getTeamHierarchyCache(
+                authorizationStore[STORAGE_KEYS.CACHED_HIERARCHY],
+                authorizationTeamId,
+            );
+            const canonicalDestination = resolveAuthorizedDestination(
+                data,
+                flattenHierarchySpaces(authorizationCache?.data?.spaces),
+            );
+            if (!canonicalDestination) {
+                return { ok: false, code: 'DESTINATION_NOT_CACHED' };
+            }
+
+            await chrome.storage.local.set({
+                defaultList: canonicalDestination.listId,
+                defaultListConfig: canonicalDestination,
+            });
+
+            const persisted = await chrome.storage.local.get('defaultListConfig');
+            return { ok: true, current: sanitizeDefaultListConfig(persisted.defaultListConfig) };
+        }
+
         case 'getMeetingLinkUiState':
             return await meetingLinkController.getUiState();
 
@@ -781,6 +972,14 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getList':
             return await clickupAPI!.getList(message.listId || (data ? data.listId : undefined));
 
+        case 'applyBulkTaskChange':
+            await ensureAPI();
+            return await runBulkTaskWrite(async () => {
+                const result = await applyValidatedBulkTaskChange(clickupAPI!, data);
+                if (result.outcome === 'applied' || result.code.startsWith('VERIFY_')) dashboardSnapshotCache.clear();
+                return result;
+            });
+
         case 'getEmailTasksSyncStatus':
             // Return persisted sync status
             const emailSyncData = await chrome.storage.local.get(['lastEmailSync', 'lastEmailSyncCount']);
@@ -791,7 +990,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             };
 
         case 'createTask': // Action used by Gmail Button (Default List)
-            return await createTaskFromEmail(message.emailData || data);
+            return await createTaskFromEmail();
 
         case 'createTaskSimple': // Action used by Quick Create Form (Manual List Selection)
             return await createTaskSimple(data);
@@ -840,6 +1039,32 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 emailData: message.emailData || (data ? data.emailData : undefined)
             });
 
+        case 'uploadGmailImageAttachment':
+            return await uploadGmailImageAttachment(data as GmailImageUploadPayload);
+
+        case 'getGmailIntegrationPreference': {
+            const stored = await chrome.storage.local.get(GMAIL_INTEGRATION_PREFERENCE_KEY);
+            return normalizeGmailIntegrationPreference(stored[GMAIL_INTEGRATION_PREFERENCE_KEY]);
+        }
+
+        case 'setGmailIntegrationPreference': {
+            const preference = { version: 1 as const, enabled: data.enabled };
+            await chrome.storage.local.set({ [GMAIL_INTEGRATION_PREFERENCE_KEY]: preference });
+            const gmailTabs = await chrome.tabs.query({ url: 'https://mail.google.com/*' });
+            await Promise.all(gmailTabs.map(async (tab) => {
+                if (typeof tab.id !== 'number') return;
+                try {
+                    await chrome.tabs.sendMessage(tab.id, {
+                        action: 'gmailIntegrationPreferenceChanged',
+                        enabled: preference.enabled,
+                    });
+                } catch {
+                    // Gmail may still be loading or may not have the content script yet.
+                }
+            }));
+            return preference;
+        }
+
         case 'validateTask':
             // Verify if task exists and we have access
             const vTaskId = message.taskId || (data ? data.taskId : undefined);
@@ -877,6 +1102,63 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             const gTaskId = message.taskId || (data ? data.taskId : undefined);
             return await getTaskById(gTaskId);
 
+        case 'getGoogleCalendarAgenda':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.getAgenda());
+
+        case 'connectGoogleCalendar':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.connect());
+
+        case 'refreshGoogleCalendarAgenda':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await withCalendarTaskMappings(await googleCalendarRuntime.refresh());
+
+        case 'disconnectGoogleCalendar':
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await googleCalendarRuntime.disconnect();
+
+        case 'getCalendarTaskTypeConfig':
+            return { selection: await getCalendarTaskTypeConfig() };
+
+        case 'getClickUpCustomTaskTypes':
+            return { custom_items: await getClickUpCustomTaskTypes() };
+
+        case 'setCalendarTaskTypeConfig':
+            return { selection: await setCalendarTaskTypeConfig(data.customItemId) };
+
+        case 'linkGoogleCalendarEventTask': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            if (!await ensureCalendarAgendaEvent(data.eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
+            const teamId = await resolveFocusedTimerTeamId();
+            if (!teamId || !await validateFocusedTask(data.taskId, teamId)) {
+                throw new Error('CALENDAR_TASK_INVALID');
+            }
+            const mapping = await createMeetMappingFromCalendarAgenda(calendarAgendaCache, {
+                eventKey: data.eventKey,
+                taskId: data.taskId,
+                teamId,
+            });
+            if (mapping) await saveMeetMapping(mapping);
+            const task = await getTaskById(data.taskId);
+            await saveCalendarTaskMapping(data.eventKey, data.scope, { id: task.id, name: task.name });
+            return await withCalendarTaskMappings(googleCalendarRuntime.currentView());
+        }
+
+        case 'createGoogleCalendarEventTask': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            return await createAndMapCalendarTask(data.eventKey, data.scope, data.customItemId, data.listId, data.parentTaskId);
+        }
+
+        case 'openGoogleCalendarMeet': {
+            if (!GOOGLE_CALENDAR_RUNTIME_ENABLED) return disabledCalendarAgendaView();
+            if (!await ensureCalendarAgendaEvent(data.eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
+            const url = canonicalMeetUrlFromCalendarAgenda(calendarAgendaCache, data.eventKey);
+            if (!url) throw new Error('CALENDAR_MEET_UNAVAILABLE');
+            await chrome.tabs.create({ url, active: true });
+            return { success: true };
+        }
+
         case 'focusedClickUpNavigation':
             if (typeof sender.tab?.id === 'number') {
                 await updateTrackedClickUpTaskTab(sender.tab.id, sender.tab.url || sender.url);
@@ -890,6 +1172,27 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'getMeetDetectionEnabled':
             const meetDetectionSettings = await chrome.storage.local.get(MEET_PRIORITY_ENABLED_KEY);
             return { enabled: meetDetectionSettings[MEET_PRIORITY_ENABLED_KEY] === true };
+
+        case 'getMeetTaskPromptState':
+            return await getMeetTaskPromptState(sender);
+
+        case 'suggestMeetTasks':
+            await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+            return await suggestMeetTasksForPrompt(data.query);
+
+        case 'assignMeetPromptTask':
+            return await runTimerWrite(async () => {
+                await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+                const teamId = await resolveFocusedTimerTeamId();
+                if (!teamId) throw new Error('MEET_TEAM_UNAVAILABLE');
+                return await assignMeetTask(data.taskId, teamId, data.remember);
+            });
+
+        case 'dismissMeetPrompt':
+            return await runTimerWrite(async () => {
+                await requireMeetPromptAuthority(data.roomKey, sender, ['awaiting-task']);
+                return await ignoreMeetSession();
+            });
 
         case 'getMeetPriorityStatus':
             return await getMeetPriorityStatus();
@@ -1038,21 +1341,26 @@ async function getAuthenticationStatus(): Promise<{
     authenticated: boolean;
     configured: boolean;
     requiresReauth: boolean;
+    authMethod?: ClickUpAuthMethod;
     authUnavailable?: boolean;
     user?: ClickUpUserResponse;
 }> {
     const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-    const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
+    const authState = await chrome.storage.local.get([
+        STORAGE_KEYS.REAUTH_REQUIRED,
+        STORAGE_KEYS.AUTH_METHOD,
+    ]);
+    const authMethod = resolveClickUpAuthMethod(authState[STORAGE_KEYS.AUTH_METHOD], configured);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
         recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
-        return { authenticated: false, configured, requiresReauth: true };
+        return { authenticated: false, configured, requiresReauth: true, authMethod };
     }
 
     try {
         if (!clickupAPI) await initializeAPI();
         if (!clickupAPI) {
             recordDiagnostic('auth_state', { stage: 'status', outcome: 'no-token' });
-            return { authenticated: false, configured, requiresReauth: false };
+            return { authenticated: false, configured, requiresReauth: false, authMethod };
         }
         const cache = await chrome.storage.local.get([
             STORAGE_KEYS.CACHED_USER,
@@ -1068,16 +1376,17 @@ async function getAuthenticationStatus(): Promise<{
                 authenticated: true,
                 configured,
                 requiresReauth: false,
+                authMethod,
                 user: cache[STORAGE_KEYS.CACHED_USER] as ClickUpUserResponse,
             };
         }
         const user = await getFreshAuthenticatedUser();
         recordDiagnostic('auth_state', { stage: 'status', outcome: 'remote' });
-        return { authenticated: true, configured, requiresReauth: false, user };
+        return { authenticated: true, configured, requiresReauth: false, authMethod, user };
     } catch (error) {
         if (isReauthenticationRequired(error)) {
             recordDiagnostic('auth_state', { stage: 'status', outcome: 'reauth-required' });
-            return { authenticated: false, configured, requiresReauth: true };
+            return { authenticated: false, configured, requiresReauth: true, authMethod };
         }
         recordDiagnostic('auth_state', {
             stage: 'status',
@@ -1085,13 +1394,19 @@ async function getAuthenticationStatus(): Promise<{
             failureClass: classifyDiagnosticFailure(error),
         });
         Logger.warn('AUTHENTICATION_STATUS_UNAVAILABLE');
-        return { authenticated: false, configured, requiresReauth: false, authUnavailable: true };
+        return { authenticated: false, configured, requiresReauth: false, authMethod, authUnavailable: true };
     }
 }
 
 function runTimerWrite<T>(operation: () => Promise<T>): Promise<T> {
     const result = timerWriteQueue.then(operation, operation);
     timerWriteQueue = result.then(() => undefined, () => undefined);
+    return result;
+}
+
+function runBulkTaskWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const result = bulkTaskWriteQueue.then(operation, operation);
+    bulkTaskWriteQueue = result.then(() => undefined, () => undefined);
     return result;
 }
 
@@ -1222,6 +1537,52 @@ async function assignMeetTask(taskId: string, teamId: string, remember: boolean)
         }
     }
     return { success: true, mappingSaved };
+}
+
+async function getMeetTaskPromptState(sender: chrome.runtime.MessageSender): Promise<Record<string, unknown>> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    const sameTab = !!session
+        && typeof sender.tab?.id === 'number'
+        && typeof sender.tab.windowId === 'number'
+        && sender.tab.id === session.tabId
+        && sender.tab.windowId === session.windowId;
+    return {
+        visible: sameTab && session?.status === 'awaiting-task',
+        status: sameTab ? session?.status : 'idle',
+    };
+}
+
+async function requireMeetPromptAuthority(
+    roomKey: string,
+    sender: chrome.runtime.MessageSender,
+    allowedStatuses: MeetPrioritySession['status'][],
+): Promise<MeetPrioritySession> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    if (!session
+        || session.roomKey !== roomKey
+        || sender.tab?.id !== session.tabId
+        || sender.tab?.windowId !== session.windowId
+        || !allowedStatuses.includes(session.status)
+        || !await isMeetSessionTabAlive(session)) {
+        throw new Error('MEET_PROMPT_UNAUTHORIZED');
+    }
+    return session;
+}
+
+async function suggestMeetTasksForPrompt(query: string): Promise<{ tasks: Array<{ id: string; name: string }>; hasMore: boolean }> {
+    const result = await searchTasks(query);
+    return {
+        tasks: (Array.isArray(result.tasks) ? result.tasks : [])
+            .slice(0, 5)
+            .flatMap((task) => {
+                const id = typeof task?.id === 'string' ? task.id.trim() : '';
+                const name = typeof task?.name === 'string' ? task.name.trim().slice(0, 500) : '';
+                return /^[A-Za-z0-9_-]{1,100}$/.test(id) && name ? [{ id, name }] : [];
+            }),
+        hasMore: result.hasMore === true,
+    };
 }
 
 async function ignoreMeetSession(): Promise<{ success: boolean }> {
@@ -1406,6 +1767,165 @@ async function saveMeetMapping(mapping: MeetTaskMappingV1): Promise<void> {
     const store = await readMeetMappings();
     store.mappings[mapping.roomKey] = mapping;
     await chrome.storage.local.set({ [MEET_MAPPINGS_KEY]: store });
+}
+
+async function readCalendarTaskMappings(): Promise<CalendarTaskMappingStoreV1> {
+    const stored = await chrome.storage.local.get(CALENDAR_TASK_MAPPINGS_KEY);
+    return sanitizeCalendarTaskMappings(stored[CALENDAR_TASK_MAPPINGS_KEY]);
+}
+
+async function withCalendarTaskMappings(view: CalendarAgendaViewV1): Promise<CalendarAgendaViewV1> {
+    const store = await readCalendarTaskMappings();
+    return {
+        ...view,
+        items: view.items.map((item) => {
+            const occurrence = store.mappings[`occurrence:${item.key}`];
+            const series = item.seriesKey ? store.mappings[`series:${item.seriesKey}`] : undefined;
+            const task = occurrence?.task || series?.task;
+            return task ? { ...item, linkedTask: { id: task.id, name: task.name } } : item;
+        }),
+    };
+}
+
+async function ensureCalendarAgendaEvent(eventKey: string): Promise<boolean> {
+    if (calendarAgendaCache.get(eventKey)) return true;
+    const refreshed = await googleCalendarRuntime.refresh();
+    if (refreshed.state !== 'ready' && refreshed.state !== 'empty') return false;
+    return calendarAgendaCache.get(eventKey) !== null;
+}
+
+async function saveCalendarTaskMapping(eventKey: string, scope: CalendarTaskLinkScope, task: { id: string; name: string }): Promise<void> {
+    const now = Date.now();
+    let reducedKey = eventKey;
+    if (scope === 'series') {
+        const candidate = calendarAgendaCache.get(eventKey, now);
+        const seriesKey = candidate?.recurringEventId ? await createCalendarSeriesKey(candidate.recurringEventId) : null;
+        if (!seriesKey) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+        reducedKey = seriesKey;
+    }
+    const storageKey = mappingStorageKey(scope, reducedKey);
+    if (!storageKey) throw new Error('CALENDAR_MAPPING_INVALID');
+    const store = await readCalendarTaskMappings();
+    store.mappings[storageKey] = {
+        key: reducedKey,
+        scope,
+        task: { id: task.id.slice(0, 100), name: task.name.slice(0, 500) },
+        createdAt: store.mappings[storageKey]?.createdAt || now,
+        updatedAt: now,
+    };
+    await chrome.storage.local.set({ [CALENDAR_TASK_MAPPINGS_KEY]: store });
+}
+
+async function resolveCalendarTaskMappingStorageKey(eventKey: string, scope: CalendarTaskLinkScope): Promise<string> {
+    let reducedKey = eventKey;
+    if (scope === 'series') {
+        const candidate = calendarAgendaCache.get(eventKey);
+        const seriesKey = candidate?.recurringEventId ? await createCalendarSeriesKey(candidate.recurringEventId) : null;
+        if (!seriesKey) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+        reducedKey = seriesKey;
+    }
+    const storageKey = mappingStorageKey(scope, reducedKey);
+    if (!storageKey) throw new Error('CALENDAR_MAPPING_INVALID');
+    return storageKey;
+}
+
+async function createAndMapCalendarTask(
+    eventKey: string,
+    scope: CalendarTaskLinkScope,
+    customItemId: number,
+    listId: string,
+    parentTaskId?: string,
+): Promise<CalendarAgendaViewV1 & { calendarCreateStatus?: { outcome: 'created' | 'partial'; taskId: string; comment: 'added' | 'failed' | 'none' } }> {
+    if (!await ensureCalendarAgendaEvent(eventKey)) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
+    const storageKey = await resolveCalendarTaskMappingStorageKey(eventKey, scope);
+    if (calendarTaskCreateInFlight.has(storageKey)) throw new Error('CALENDAR_TASK_CREATE_IN_FLIGHT');
+    const before = await readCalendarTaskMappings();
+    if (before.mappings[storageKey]) throw new Error('CALENDAR_TASK_ALREADY_LINKED');
+
+    calendarTaskCreateInFlight.add(storageKey);
+    try {
+        const result = await createTaskFromCalendarEvent(eventKey, scope, customItemId, listId, parentTaskId);
+        const task = result.task;
+        await saveCalendarTaskMapping(eventKey, scope, { id: task.id, name: task.name });
+        const view = await withCalendarTaskMappings(googleCalendarRuntime.currentView());
+        return { ...view, calendarCreateStatus: { outcome: result.commentStatus === 'failed' ? 'partial' : 'created', taskId: task.id, comment: result.commentStatus } };
+    } finally {
+        calendarTaskCreateInFlight.delete(storageKey);
+    }
+}
+
+async function getClickUpCustomTaskTypes(): Promise<ClickUpCustomTaskType[]> {
+    await ensureAPI();
+    const teamId = await resolveFocusedTimerTeamId();
+    if (!teamId) return [];
+    return sanitizeCustomTaskTypesResponse(await clickupAPI!.getCustomTaskTypes(teamId));
+}
+
+async function getCalendarTaskTypeConfig(): Promise<ReturnType<typeof sanitizeCalendarTaskTypeSelection>> {
+    const stored = await chrome.storage.local.get(CALENDAR_TASK_TYPE_CONFIG_KEY);
+    return sanitizeCalendarTaskTypeSelection(stored[CALENDAR_TASK_TYPE_CONFIG_KEY]);
+}
+
+async function setCalendarTaskTypeConfig(customItemId: number): Promise<NonNullable<ReturnType<typeof sanitizeCalendarTaskTypeSelection>>> {
+    const types = await getClickUpCustomTaskTypes();
+    const type = findCustomTaskType(types, customItemId);
+    if (!type) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const selection = { customItemId: type.id, name: type.name, updatedAt: Date.now() };
+    await chrome.storage.local.set({ [CALENDAR_TASK_TYPE_CONFIG_KEY]: selection });
+    return selection;
+}
+
+async function createTaskFromCalendarEvent(
+    eventKey: string,
+    scope: CalendarTaskLinkScope,
+    customItemId: number,
+    listId: string,
+    parentTaskId?: string,
+): Promise<{ task: ClickUpTask; commentStatus: 'added' | 'failed' | 'none' }> {
+    await ensureAPI();
+    const candidate = calendarAgendaCache.get(eventKey);
+    if (!candidate) throw new Error('CALENDAR_EVENT_UNAVAILABLE');
+    if (scope === 'series' && !candidate.recurringEventId) throw new Error('CALENDAR_SERIES_UNAVAILABLE');
+    const selection = await getCalendarTaskTypeConfig();
+    if (!selection || selection.customItemId !== customItemId) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const types = await getClickUpCustomTaskTypes();
+    const type = findCustomTaskType(types, customItemId);
+    if (!type || type.name !== selection.name) throw new Error('CALENDAR_TASK_TYPE_INVALID');
+    const destinationStore = await chrome.storage.local.get([
+        STORAGE_KEYS.CACHED_TEAMS,
+        STORAGE_KEYS.CACHED_HIERARCHY,
+        STORAGE_KEYS.PREFERRED_TEAM,
+    ]);
+    const teamId = typeof destinationStore[STORAGE_KEYS.PREFERRED_TEAM] === 'string'
+        ? destinationStore[STORAGE_KEYS.PREFERRED_TEAM]
+        : destinationStore[STORAGE_KEYS.CACHED_TEAMS]?.teams?.[0]?.id;
+    const teamCache = getTeamHierarchyCache(destinationStore[STORAGE_KEYS.CACHED_HIERARCHY], teamId);
+    const destination = resolveAuthorizedDestination({ listId }, flattenHierarchySpaces(teamCache?.data?.spaces));
+    if (!destination?.listId) throw new Error('CALENDAR_DESTINATION_UNAVAILABLE');
+    if (parentTaskId && (!teamId || !await validateFocusedTask(parentTaskId, teamId))) throw new Error('CALENDAR_PARENT_TASK_INVALID');
+    const liveList = await clickupAPI!.getList(destination.listId);
+    if (String(liveList?.id || '') !== destination.listId || liveList.archived === true) {
+        throw new Error('CALENDAR_DESTINATION_UNAVAILABLE');
+    }
+    const dueDate = dateToClickUpDueDate(calendarEventDay(candidate.start));
+    const task = await clickupAPI!.createTask(destination.listId, {
+        name: candidate.title,
+        ...(dueDate !== null ? { start_date: dueDate, start_date_time: false, due_date: dueDate, due_date_time: false } : {}),
+        ...(parentTaskId ? { parent: parentTaskId } : {}),
+        custom_item_id: customItemId,
+    });
+    const meetUrl = canonicalMeetUrlFromCalendarAgenda(calendarAgendaCache, eventKey);
+    if (!meetUrl) return { task, commentStatus: 'none' };
+    try {
+        await clickupAPI!.addComment(task.id, meetUrl);
+        return { task, commentStatus: 'added' };
+    } catch {
+        return { task, commentStatus: 'failed' };
+    }
+}
+
+function calendarEventDay(value: string): string {
+    return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : value;
 }
 
 async function deleteMeetMapping(roomKey: string): Promise<{ success: boolean }> {
@@ -2169,55 +2689,6 @@ async function getCachedHierarchy(teamId: string) {
 // Task Linking Logic
 // ============================================================================
 
-const EMAIL_REGEX = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/;
-
-// Check if a task is linked to this email thread
-// Check if a task is linked to this email thread
-function isTaskLinked(task: any, threadId: string, customFieldName: string = 'gmail thread id'): boolean {
-    const extractedId = extractThreadId(task, customFieldName);
-    return extractedId === threadId;
-}
-
-function extractThreadId(task: any, customFieldName: string): string | null {
-    // 1. Check for Configured Custom Field
-    if (task.custom_fields && Array.isArray(task.custom_fields)) {
-        const threadIdField = task.custom_fields.find((field: any) =>
-            field.name.toLowerCase() === customFieldName && field.value
-        );
-        if (threadIdField) {
-            return threadIdField.value; // It's a text field
-        }
-    }
-
-    // Pattern: Thread ID: xxxxxxxxxxxx or threadId=xxxxxxxxxxxx
-    const patterns = [
-        /_Thread ID: ([a-f0-9]+)_/i,
-        /Thread ID: ([a-f0-9]+)/i,
-        /threadId=([a-f0-9]+)/i,
-        /inbox\/([a-f0-9]+)/i
-    ];
-
-    // Check task name
-    for (const pattern of patterns) {
-        const match = task.name?.match(pattern);
-        if (match) return match[1];
-    }
-
-    // Check description
-    for (const pattern of patterns) {
-        const match = task.description?.match(pattern);
-        if (match) return match[1];
-    }
-
-    // Check text_content
-    for (const pattern of patterns) {
-        const match = task.text_content?.match(pattern);
-        if (match) return match[1];
-    }
-
-    return null;
-}
-
 async function findLinkedTasks(threadId: string): Promise<ClickUpTask[]> {
     if (!isConfirmedThreadId(threadId)) return [];
     const mappings = await getEmailTaskMappingsForRead();
@@ -2235,6 +2706,75 @@ async function getEmailTaskMappingsForRead(): Promise<EmailTaskMappingsV2> {
         store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2] || {},
         store[STORAGE_KEYS.EMAIL_TASK_MAPPINGS] || {}
     );
+}
+
+function dashboardWeekStart(now: number): number {
+    const value = new Date(now);
+    value.setHours(0, 0, 0, 0);
+    value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+    return value.getTime();
+}
+
+async function getDashboardSummarySnapshot(forceRefresh = false): Promise<DashboardSummary & { source: 'network' | 'cache'; expiresAt: number }> {
+    const teams = await getTeams();
+    const preferredStore = await chrome.storage.local.get(STORAGE_KEYS.PREFERRED_TEAM);
+    const teamId = selectAuthorizedTeamId(teams.teams, preferredStore[STORAGE_KEYS.PREFERRED_TEAM]);
+    const currentUserId = await getValidatedCurrentUserId();
+    if (!teamId || !currentUserId || !clickupAPI) throw new Error('DASHBOARD_CONTEXT_UNAVAILABLE');
+
+    const cacheKey = `${teamId}:${currentUserId}`;
+    let now = Date.now();
+    const cached = dashboardSnapshotCache.get(cacheKey);
+    if (!forceRefresh && cached && cached.expiresAt > now) {
+        return { ...cached.summary, source: 'cache', expiresAt: cached.expiresAt };
+    }
+
+    const existing = dashboardSnapshotInFlight.get(cacheKey);
+    if (existing) {
+        if (forceRefresh) {
+            try { await existing; } catch { /* el refresh realiza su propia lectura */ }
+            dashboardSnapshotCache.delete(cacheKey);
+            now = Date.now();
+        } else {
+        const summary = await existing;
+        const current = dashboardSnapshotCache.get(cacheKey);
+        return { ...summary, source: 'cache', expiresAt: current?.expiresAt || now };
+        }
+    }
+
+    const request = (async (): Promise<DashboardSummary> => {
+        const weekStart = dashboardWeekStart(now);
+        const [openTasks, recentlyUpdatedTasks, timeEntries, runningTimer, mappings] = await Promise.all([
+            clickupAPI!.getDashboardOpenTasks(teamId, currentUserId),
+            clickupAPI!.getDashboardRecentlyUpdatedTasks(teamId, currentUserId, weekStart),
+            clickupAPI!.getTimeEntries(teamId, weekStart, now, currentUserId),
+            clickupAPI!.getRunningTimer(teamId),
+            getEmailTaskMappingsForRead(),
+        ]);
+        const gmailLinksWeek = Object.values(mappings)
+            .flat()
+            .filter((mapping) => Number(mapping.createdAt) >= weekStart && Number(mapping.createdAt) <= now)
+            .length;
+        return buildDashboardSummary({
+            openTasks,
+            recentlyUpdatedTasks,
+            timeEntries,
+            runningTimer,
+            gmailLinksWeek,
+            currentUserId,
+            now,
+        });
+    })();
+
+    dashboardSnapshotInFlight.set(cacheKey, request);
+    try {
+        const summary = await request;
+        const expiresAt = Date.now() + DASHBOARD_SNAPSHOT_TTL_MS;
+        dashboardSnapshotCache.set(cacheKey, { summary, expiresAt });
+        return { ...summary, source: 'network', expiresAt };
+    } finally {
+        dashboardSnapshotInFlight.delete(cacheKey);
+    }
 }
 
 function sanitizeDefaultListConfig(value: unknown): { listId: string; path?: string; listName?: string } | undefined {
@@ -2304,7 +2844,8 @@ async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ s
             [STORAGE_KEYS.EMAIL_TASK_MAPPINGS_V2]: {},
             schemaVersion,
         });
-        hierarchyCache = {};
+        taskSearchCaches.clear();
+        dashboardSnapshotCache.clear();
     });
 
     mappingWriteQueue = next.catch(() => undefined);
@@ -2576,7 +3117,9 @@ async function searchTasks(query: string, teamId?: string) {
     const taskId = extractTaskIdCandidate(cleanQuery);
     if (taskId) {
         try {
-            const task = await clickupAPI!.getTask(taskId);
+            const task = await clickupAPI!.getTask(taskId, isCustomTaskIdCandidate(taskId)
+                ? { customTaskId: true, teamId }
+                : undefined);
             if (task && task.id) {
                 seedTaskSearchCache(teamId, [task]);
                 return { tasks: [task] };
@@ -2591,15 +3134,17 @@ async function searchTasks(query: string, teamId?: string) {
     try {
         const cache = getTaskSearchCache(teamId);
         let matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
+        let pagesLoaded = 0;
 
         while (!cache.complete
             && matches.length < TASK_SEARCH_RESULT_LIMIT
-            && !hasHighConfidenceTaskSearchResult(matches, cleanQuery)) {
+            && pagesLoaded < TASK_SEARCH_PAGE_BUDGET) {
             await loadNextTaskSearchPage(teamId, cache);
+            pagesLoaded += 1;
             matches = rankTaskSearchResults([...cache.tasks.values()], cleanQuery, TASK_SEARCH_RESULT_LIMIT);
         }
 
-        return { tasks: matches };
+        return { tasks: matches, hasMore: !cache.complete, indexedCount: cache.tasks.size };
     } catch (e) {
         Logger.error('SEARCH_FAILED', e);
         return { tasks: [] };
@@ -2724,7 +3269,7 @@ async function updateTimerBadge(state: 'playing' | 'stopped' | 'paused' | 'meeti
 // Task Creation Functions
 // ============================================================================
 
-async function createTaskFromEmail(emailData: EmailData): Promise<ClickUpTask> {
+async function createTaskFromEmail(): Promise<ClickUpTask> {
     await ensureAPI();
     // With Default List removed, this function requires a list target.
     throw new Error('Usá el formulario de tarea para crear tareas.');
@@ -2820,6 +3365,14 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     }
 
     return task;
+}
+
+async function uploadGmailImageAttachment(data: GmailImageUploadPayload): Promise<{ success: true }> {
+    const bytes = decodeAndValidateGmailImage(data);
+    if (!bytes) throw new Error('INVALID_GMAIL_IMAGE_ATTACHMENT');
+    await ensureAPI();
+    await clickupAPI!.uploadBinaryAttachment(data.taskId, bytes, data.filename, data.mimeType);
+    return { success: true };
 }
 
 async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask> {

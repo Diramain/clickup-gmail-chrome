@@ -1,7 +1,5 @@
 export const GOOGLE_CALENDAR_CORE_SCOPES = Object.freeze([
-    'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
-    'https://www.googleapis.com/auth/calendar.events.freebusy',
-    'https://www.googleapis.com/auth/calendar.events.owned',
+    'https://www.googleapis.com/auth/calendar.events.owned.readonly',
 ]);
 
 export const GOOGLE_MEET_SETTINGS_SCOPE = 'https://www.googleapis.com/auth/meetings.space.settings';

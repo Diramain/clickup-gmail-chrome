@@ -133,12 +133,17 @@ describe('functional/data blockers', () => {
         expect(background).not.toMatch(/updateEmailTaskMappings\(\(\) => currentMappings/);
     });
 
-    test('original file attachments are disabled and remote upload helper is removed', () => {
+    test('selected Gmail images use the content-script fetch boundary and generic ClickUp multipart upload', () => {
         const modal = source('src/modal.ts');
-        expect(modal).toMatch(/id="cu-attach-files" disabled/);
-        expect(modal).toMatch(/Esta versión sólo admite el adjunto HTML sanitizado del email/);
+        const background = source('background.ts');
+        expect(modal).toMatch(/credentials: 'include'/);
+        expect(modal).toMatch(/isAllowedGmailAttachmentUrl\(response\.url\)/);
+        expect(modal).toMatch(/GMAIL_ATTACHMENT_MAX_FILE_BYTES/);
+        expect(modal).toMatch(/GMAIL_ATTACHMENT_MAX_TOTAL_BYTES/);
         expect(source('src/services/api.service.ts')).not.toMatch(/uploadFileFromUrl|credentials:\s*'include'/);
-        expect(modal).toMatch(/const attachWithFiles = false/);
+        expect(source('src/services/api.service.ts')).toMatch(/formData\.append\('attachment'/);
+        expect(background).not.toMatch(/fetch\([^\n]*mail\.google\.com|credentials:\s*['"]include['"]/);
+        expect(modal).not.toMatch(/chrome\.storage/);
     });
 
     test('storage setEmailTasks is report-only over soft limit', () => {

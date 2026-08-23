@@ -48,7 +48,7 @@ export function reconcileThreadBarState(bar: HTMLElement, threadId: string | nul
     const button = bar.querySelector('.cu-add-btn') as HTMLButtonElement | null;
     const label = bar.querySelector('.cu-add-label') as HTMLElement | null;
     const title = confirmed ? 'Crear tarea de ClickUp desde este email' : 'Esperando datos de Gmail';
-    const labelText = confirmed ? 'Agregar a ClickUp' : 'Esperando datos de Gmail…';
+    const labelText = confirmed ? 'Crear tarea' : 'Esperando datos de Gmail…';
     const disabled = !confirmed;
 
     if (button) {
@@ -58,6 +58,14 @@ export function reconcileThreadBarState(bar: HTMLElement, threadId: string | nul
         if (button.title !== title) button.title = title;
     }
     if (label && label.textContent !== labelText) label.textContent = labelText;
+    const attachButton = bar.querySelector('.cu-attach-btn') as HTMLButtonElement | null;
+    if (attachButton) {
+        if (attachButton.disabled !== disabled) attachButton.disabled = disabled;
+        const ariaDisabled = String(disabled);
+        if (attachButton.getAttribute('aria-disabled') !== ariaDisabled) attachButton.setAttribute('aria-disabled', ariaDisabled);
+        const attachTitle = confirmed ? 'Vincular este email a una tarea existente' : 'Esperando datos de Gmail';
+        if (attachButton.title !== attachTitle) attachButton.title = attachTitle;
+    }
     return confirmed;
 }
 

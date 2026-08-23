@@ -15,6 +15,50 @@ body {
     min-width: 320px;
 }
 
+body.full-app-surface {
+    min-width: 0;
+    width: 100%;
+    background: #17251f;
+}
+
+.full-app-surface .popup-container {
+    padding: 0;
+}
+
+.full-app-surface .popup-header,
+.full-app-surface .tab-nav,
+.full-app-surface .popup-footer,
+.full-app-surface #openWindow {
+    display: none !important;
+}
+
+.full-app-surface #logged-in {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 18px;
+}
+
+.full-app-surface #login-required,
+.full-app-surface #safeDiagnostics {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.full-app-surface .tab-content {
+    display: flex !important;
+    flex-direction: column;
+    gap: 16px;
+}
+
+@media (max-width: 1080px) {
+    .full-app-surface #logged-in { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+    .full-app-surface #logged-in { grid-template-columns: 1fr; }
+}
+
 .popup-container {
     padding: 20px;
 }
@@ -199,6 +243,41 @@ body {
 .connection-state-ok {
     color: #79d5a7;
     border-color: rgba(121, 213, 167, 0.28);
+}
+
+.auth-primary-card {
+    border-color: rgba(73, 204, 249, 0.32);
+    background: linear-gradient(145deg, rgba(73, 204, 249, 0.09), rgba(137, 48, 253, 0.06));
+}
+
+.auth-primary-card .connection-badge {
+    display: inline-block;
+    margin-bottom: 10px;
+    color: #8fe3ff;
+    border-color: rgba(73, 204, 249, 0.35);
+}
+
+.credential-note {
+    margin: 10px 0;
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.auth-primary-card > a {
+    color: #8fe3ff;
+    font-size: 11px;
+}
+
+.auth-advanced-card > summary {
+    color: #d9c8ff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.auth-advanced-card[open] > summary {
+    margin-bottom: 14px;
 }
 
 .connection-permissions {
@@ -756,8 +835,6 @@ select option {
 
 .meet-mappings {
     margin-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 10px;
 }
 
 .meet-mappings summary {
@@ -766,23 +843,15 @@ select option {
     color: #49CCF9;
 }
 
-.meet-mapping-item {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    margin-top: 8px;
-    padding: 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-}
-
-.meet-mapping-name {
-    overflow: hidden;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.meet-mappings-table-region { max-width: 100%; overflow-x: auto; margin-top: 10px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; }
+.meet-mappings-table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: 11px; }
+.meet-mappings-table th, .meet-mappings-table td { padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); text-align: left; vertical-align: middle; }
+.meet-mappings-table th { color: rgba(255, 255, 255, 0.65); font-size: 9px; text-transform: uppercase; }
+.meet-mappings-table tbody tr:last-child td { border-bottom: 0; }
+.meet-mapping-name { max-width: 180px; overflow-wrap: anywhere; font-weight: 700; }
+.meet-mappings-table code { color: rgba(255, 255, 255, 0.7); font-size: 10px; }
+.meet-mapping-state { display: inline-flex; padding: 4px 6px; border-radius: 99px; color: #69db9b; background: rgba(105, 219, 155, 0.1); font-size: 9px; font-weight: 700; }
+.meet-mapping-state.is-inactive { color: rgba(255, 255, 255, 0.65); background: rgba(255, 255, 255, 0.06); }
 
 .meet-mapping-actions {
     display: flex;

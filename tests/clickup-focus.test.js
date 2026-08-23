@@ -478,7 +478,7 @@ describe('Focused timer integration guardrails', () => {
     test('message gate allows only payload-free navigation notifications from ClickUp', () => {
         const security = source('src/message-security.ts');
         expect(security).toMatch(/CLICKUP_ACTIONS[^\n]*'focusedClickUpNavigation'/);
-        expect(security).toMatch(/origin\.startsWith\('https:\/\/app\.clickup\.com\/'\)/);
+        expect(security).toMatch(/hasExactHttpsHost\(origin, 'app\.clickup\.com'\)/);
         expect(security).toMatch(/case 'focusedClickUpNavigation':[\s\S]*Object\.keys\(data\)\.length === 0/);
         expect(security).not.toMatch(/case 'focusedClickUpNavigation':[\s\S]{0,200}(data\.url|message\.url)/);
     });

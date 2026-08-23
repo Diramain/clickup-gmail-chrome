@@ -29,19 +29,15 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build extension
-        run: npm run build
+      - name: Build release
+        run: npm run build:release
+
+      - name: Validate release
+        run: npm run validate:release
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: extension-build
-          path: |
-            background.js
-            popup/popup.js
-            src/*.js
-            manifest.json
-            icons/
-            styles/
-            popup/popup.html
+          path: dist/extension
           retention-days: 7

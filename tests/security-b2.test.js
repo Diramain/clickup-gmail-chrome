@@ -31,11 +31,12 @@ describe('B2 sanitizer and message security', () => {
         const html = sanitizer.sanitizeGmailHtml(`
             <div onclick="evil()" style="background:url(https://x.test/a)">Hi<script>x()</script></div>
             <iframe srcdoc="<script>x()</script>"></iframe><form action="https://x.test"><input></form>
-            <svg onload="x()"></svg><math></math><img src="https://tracker.test/pixel.png" onerror="x()">
-            <a href="javascript:alert(1)">bad</a><a href="https://example.com/message">ok</a>
+            <style>.x{background:url(https://tracker.test/css)}</style>
+            <svg onload="x()"></svg><math></math><img src="https://tracker.test/pixel.png" srcset="https://tracker.test/2x.png 2x" onerror="x()">
+            <a href="javascript:alert(1)">bad</a><a href="https://example.com/message" ping="https://tracker.test/ping">ok</a>
         `);
 
-        expect(html).not.toMatch(/script|iframe|form|input|svg|math|onclick|onerror|srcdoc|javascript:|tracker\.test|url\(/i);
+        expect(html).not.toMatch(/script|iframe|form|input|svg|math|style|onclick|onerror|srcdoc|srcset|ping=|javascript:|tracker\.test|url\(/i);
         expect(html).toContain('https://example.com/message');
         expect(html).toContain('rel="noopener noreferrer nofollow"');
     });
@@ -66,7 +67,21 @@ describe('B2 sanitizer and message security', () => {
         expect(messages.validateExtensionMessage({ action: 'createTaskFull', listId: 'list', taskData: { name: '', assignees: ['bad'] }, emailData: { threadId: 'th', subject: 's', from: 'f', html: '<p>ok</p>' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'searchTasks', data: { query: 'x'.repeat(300) } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'addTimeEntry', data: { teamId: 't', taskId: 'x', duration: -1 } }, { id: runtimeId, url: 'https://app.clickup.com/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
+        const bulkChange = { action: 'applyBulkTaskChange', data: { taskId: 'task-1', listId: 'list-1', status: 'Done', dueDate: null, assigneeId: 1 } };
+        expect(messages.validateExtensionMessage(bulkChange, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId).ok).toBe(true);
+        expect(messages.validateExtensionMessage(bulkChange, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_ORIGIN' });
+        expect(messages.validateExtensionMessage({ ...bulkChange, data: { ...bulkChange.data, extra: true } }, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
+        expect(messages.validateExtensionMessage({ action: 'applyBulkTaskChange', data: { taskId: '../bad', listId: 'list-1', status: 'Done' } }, { id: runtimeId, url: 'chrome-extension://ext-id/app/app.html' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
         expect(messages.validateExtensionMessage({ action: 'attachToTask', taskId: 't', emailData: { threadId: 'th', subject: 's', from: 'f', html: '', attachments: [{ filename: 'x'.repeat(300), mimeType: 'text/plain' }] } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId)).toEqual({ ok: false, code: 'INVALID_SCHEMA' });
+        const pngBase64 = 'iVBORw0KGgo=';
+        const upload = { action: 'uploadGmailImageAttachment', data: { taskId: 'task-1', filename: 'image.png', mimeType: 'image/png', byteLength: 8, base64: pngBase64 } };
+        expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(true);
+        expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://app.clickup.com/' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'chrome-extension://ext-id/task-modal.html' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage(upload, { id: runtimeId, url: 'https://mail.google.com.evil.test/' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, mimeType: 'image/svg+xml' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, filename: 'image.svg' } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
+        expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, byteLength: 9 } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
     });
 
     test('accepts legitimate popup action schemas without widening Gmail-sensitive actions', () => {

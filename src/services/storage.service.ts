@@ -4,8 +4,6 @@
  */
 
 import type {
-    ClickUpTeamsResponse,
-    ClickUpUserResponse,
     CachedListItem,
     EmailTaskMapping
 } from '../types/clickup';
@@ -84,31 +82,12 @@ interface OAuthConfig {
     redirectUrl: string;
 }
 
-interface DefaultListConfig {
-    teamId: string;
-    spaceId: string;
-    listId: string;
-    path?: string;
-}
-
 interface HierarchyCache {
     teamId: string;
     lists: CachedListItem[];
     spaces: any[];
     members: any[];
     timestamp: number;
-}
-
-interface EmailTasksSyncStatus {
-    lastSync: number;
-    tasksFound: number;
-    errors: string[];
-}
-
-// Storage schema (for future migrations)
-interface StorageSchema {
-    schemaVersion: number;
-    [key: string]: any;
 }
 
 // ============================================================================
@@ -357,6 +336,6 @@ class StorageService {
 export const storageService = new StorageService();
 
 // Initialize on load
-storageService.initialize().catch(err => {
+storageService.initialize().catch(_err => {
     console.error('[Storage] INIT_FAILED');
 });

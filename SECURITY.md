@@ -1,13 +1,23 @@
-# Security Documentation
+# TaskBridge for ClickUp Security
+
+## Supported Versions
+
+Security fixes are applied to the current `2.0.x` line. Older GitHub releases and unpacked builds should be upgraded before reporting behavior that may already have been corrected.
+
+## Reporting a Vulnerability
+
+Use [GitHub's private vulnerability reporting](https://github.com/Diramain/taskbridge-for-clickup/security/advisories/new) for suspected security issues. Do not disclose vulnerabilities, credentials, emails, ClickUp IDs, private URLs, Gmail or Meet content, or personal data in a public Issue.
+
+Public GitHub Issues are reserved for ordinary bug reports and feature proposals. Review every diagnostic export or screenshot before attaching it, even when TaskBridge generated it through Safe Diagnostics.
 
 ## Token Encryption
 
-The OAuth access token and OAuth client secret are encrypted at rest using **AES-256-GCM** via the Web Crypto API.
+The personal token, OAuth access token, and OAuth client secret are encrypted at rest using **AES-256-GCM** via the Web Crypto API.
 
 ### How it works:
 1. On first auth, a unique AES-256 encryption key is generated
 2. The key is stored in `chrome.storage.local`
-3. The OAuth access token is encrypted before storage
+3. The selected ClickUp credential is validated before it replaces the current connection and is encrypted before storage
 4. Legacy plain-text tokens are automatically migrated to encrypted format; obsolete refresh-token values are removed
 
 ### Files:
@@ -25,11 +35,17 @@ Since browser extensions cannot truly hide secrets in client-side code, we recom
 2. **Create a new OAuth app** if you suspect compromise
 3. **Consider a backend proxy** for production apps with many users
 
-The OAuth client secret is stored locally after the user enters it during setup. In v1.2.3 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before storage in `chrome.storage.local`.
+The OAuth client secret is stored locally after the user enters it during setup. In v2.0.1 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before storage in `chrome.storage.local`.
 
 This is best-effort at-rest protection: the encryption key is stored in the same browser profile, so it does not protect against a compromised host or compromised browser profile. The client secret is decrypted only when needed for OAuth or token exchange with ClickUp.
 
 For broad distribution or higher-risk deployments, a backend OAuth proxy remains recommended so the client secret does not need to live in the browser extension profile.
+
+## Personal Token Handling
+
+ClickUp documents personal tokens for individual and testing use. TaskBridge accepts only a bounded `pk_` token shape from the trusted setup pages, validates it against ClickUp's `/user` endpoint before persistence, and never writes it to a draft, URL, log, diagnostic event, export, or visible status string.
+
+Each user must use their own token. Personal tokens are long-lived and carry the ClickUp access of their owner, so they must not be shared as an organization-wide credential. Switching successfully to a personal token deletes the previous OAuth configuration and account-derived caches; switching successfully to OAuth replaces the token and records the OAuth authorization mode.
 
 ## Reauthentication on `401`
 
@@ -38,7 +54,7 @@ ClickUp's documented OAuth token endpoint exchanges `client_id`, `client_secret`
 1. confirms the current token against `/user` before treating endpoint-specific denial as a lost session;
 2. removes the rejected token and caches only when `/user` rejects both supported header shapes and that exact token is still current;
 3. ignores late failures from replaced tokens/wrappers and serializes auth-state changes;
-4. preserves the encrypted OAuth app configuration, pauses automatic tracking authority, and shows an explicit reconnection path.
+4. preserves the selected authentication method, preserves encrypted OAuth app configuration only for OAuth reconnection, pauses automatic tracking authority, and shows the correct token-replacement or OAuth-reconnection path.
 
 Transient network/upstream errors and endpoint-specific `401` responses with a valid `/user` probe do not clear the session or ask the user to replace OAuth configuration. A user validated during the last five minutes may be reused locally when opening the popup.
 

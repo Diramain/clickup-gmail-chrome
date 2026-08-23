@@ -5,6 +5,10 @@
 
 declare namespace chrome {
     namespace storage {
+        interface StorageChange {
+            oldValue?: any;
+            newValue?: any;
+        }
         interface StorageArea {
             get(keys?: string | string[] | object | null): Promise<{ [key: string]: any }>;
             set(items: { [key: string]: any }): Promise<void>;
@@ -15,6 +19,7 @@ declare namespace chrome {
         const local: StorageArea;
         const sync: StorageArea;
         const session: StorageArea;
+        const onChanged: chrome.events.Event<(changes: { [key: string]: StorageChange }, areaName: string) => void>;
     }
 
     namespace runtime {

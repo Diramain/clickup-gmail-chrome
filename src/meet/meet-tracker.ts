@@ -1,9 +1,11 @@
 import { createMeetRoomKey, hasConfirmedMeetSession, resolveMeetPageContext } from './meet-room';
 import { advanceMeetDetector, INITIAL_MEET_DETECTOR_STATE, type MeetDetectorState } from './meet-detector';
+import { MeetTaskPromptController } from './meet-task-prompt-ui';
 
 const POLL_MS = 1_000;
 let detectorState: MeetDetectorState = { ...INITIAL_MEET_DETECTOR_STATE };
 let featureEnabled = false;
+const promptController = new MeetTaskPromptController(document, (message) => chrome.runtime.sendMessage(message));
 
 async function evaluateMeetState(): Promise<void> {
     if (!featureEnabled) return;
@@ -17,6 +19,8 @@ async function evaluateMeetState(): Promise<void> {
     });
     detectorState = result.state;
     for (const event of result.events) await notify(event.event, event.roomKey);
+    if (roomKey && result.state.phase === 'joined') await promptController.sync(roomKey);
+    else promptController.remove();
 }
 
 async function notify(event: 'candidate' | 'joined' | 'left' | 'heartbeat', roomKey: string): Promise<void> {
@@ -55,6 +59,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         featureEnabled = message.data.enabled;
         detectorState = { ...INITIAL_MEET_DETECTOR_STATE };
         if (!featureEnabled) {
+            promptController.remove();
             sendResponse({ success: true });
             return false;
         }
@@ -72,6 +77,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
 });
 window.addEventListener('pagehide', () => {
+    promptController.remove();
     if (detectorState.phase === 'joined' && detectorState.roomKey) {
         void notify('left', detectorState.roomKey);
     }

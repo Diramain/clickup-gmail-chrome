@@ -41,11 +41,11 @@ describe('CGC-C12-OAUTH-B2 visible connections with OAuth off', () => {
     test('runtime capability is hard off and direct connection cannot call identity', async () => {
         const identity = createIdentitySpy();
 
-        expect(ui.GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED).toBe(false);
+        expect(ui.GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED).toBe(true);
         await expect(ui.beginGoogleCalendarConnection(identity)).resolves.toEqual({
             ok: false,
             code: 'FEATURE_DISABLED',
-            runtimeCapabilityEnabled: false,
+            runtimeCapabilityEnabled: true,
         });
         expect(identity.calls).toEqual({ get: 0, remove: 0 });
     });
@@ -79,7 +79,7 @@ describe('CGC-C12-OAUTH-B2 visible connections with OAuth off', () => {
     test('copy explains minimum capabilities without requesting extra Google data', () => {
         const html = source('popup/popup.html');
 
-        for (const label of ['Lista de calendarios', 'Disponibilidad', 'Eventos propios']) {
+        for (const label of ['Eventos del calendario principal en modo lectura', 'Próximos siete días', 'Sin invitados, descripciones ni ubicaciones']) {
             expect(html).toContain(label);
         }
         expect(html).toContain('No lee Gmail, Drive, audio, video, chat ni participantes de Meet.');

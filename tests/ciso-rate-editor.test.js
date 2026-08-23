@@ -75,6 +75,36 @@ describe('CISO editor sanitization and rate governor', () => {
         expect(modal.htmlToClickUpMarkdown('<a href="https://safe.test">ok</a>')).toContain('[ok](https://safe.test)');
     });
 
+    test('ClickUp Markdown round-trips documented task description formatting safely', () => {
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        const markdown = '# Título **importante**\n\n- Uno con _énfasis_\n- Dos con `código`\n\n> Una cita\n\n[seguro](https://safe.test) [inseguro](javascript:alert(1))';
+        const html = modal.clickUpMarkdownToHtml(markdown);
+
+        expect(html).toContain('<h1>Título <strong>importante</strong></h1>');
+        expect(html).toContain('<ul><li>Uno con <em>énfasis</em></li><li>Dos con <code>código</code></li></ul>');
+        expect(html).toContain('<blockquote>Una cita</blockquote>');
+        expect(html).toContain('<a href="https://safe.test"');
+        expect(html).toContain('>seguro</a>');
+        expect(html).not.toMatch(/javascript:/i);
+        expect(modal.htmlToClickUpMarkdown(html)).toContain('# Título **importante**');
+        expect(modal.htmlToClickUpMarkdown(html)).toContain('- Uno con _énfasis_');
+    });
+
+    test('visual code insertion and pasted pre blocks produce documented inline code', () => {
+        document.body.innerHTML = '<div id="cu-editor-visual" contenteditable="true"></div>';
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.modal = document.body;
+        document.execCommand = jest.fn();
+
+        modal.insertElement('code');
+        const htmlArg = document.execCommand.mock.calls.find(call => call[0] === 'insertHTML')[2];
+        expect(htmlArg).toContain('<code>');
+        expect(htmlArg).not.toContain('<pre');
+        expect(modal.htmlToClickUpMarkdown('<pre><code>line 1\nline 2</code></pre>')).toBe('`line 1 line 2`');
+    });
+
     test('thread id helpers escape regex metacharacters and confirm real ids', () => {
         const { commentsContainThreadId, escapeRegExp, isConfirmedThreadId } = loadTsModule('src/link-hardening.ts');
         expect(escapeRegExp('a.*[b](c)')).toBe('a\\.\\*\\[b\\]\\(c\\)');
@@ -125,6 +155,27 @@ describe('CISO editor sanitization and rate governor', () => {
 
         const absurd = new ClickUpRateGovernor(async () => undefined, () => now, { intervalMs: 600, blockedUntil: now + 10 * 24 * 60 * 60 * 1000 });
         expect(absurd.getState().blockedUntil).toBe(0);
+    });
+
+    test('API requests abort after the bounded timeout', async () => {
+        jest.useFakeTimers();
+        const originalFetch = global.fetch;
+        global.fetch = jest.fn((_input, init) => new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        }));
+        try {
+            const { ClickUpAPIWrapper } = loadTsModule('src/services/api.service.ts');
+            const api = new ClickUpAPIWrapper('synthetic-token', {
+                reserve: async () => undefined,
+                observe: () => undefined,
+            });
+            const rejection = expect(api.request('/team')).rejects.toMatchObject({ name: 'TimeoutError' });
+            await jest.advanceTimersByTimeAsync(30_000);
+            await rejection;
+        } finally {
+            global.fetch = originalFetch;
+            jest.useRealTimers();
+        }
     });
 
     test('429 Retry-After defers the governor globally before local retry sleep', async () => {

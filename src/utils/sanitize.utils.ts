@@ -8,8 +8,13 @@ export type SanitizedHTML = string & { readonly __sanitizedHtml: true };
 
 const BLOCKED_ELEMENTS = [
     'script', 'iframe', 'object', 'embed', 'form', 'input', 'button',
-    'svg', 'math', 'meta', 'base', 'link', 'noscript'
+    'svg', 'math', 'meta', 'base', 'link', 'style', 'noscript'
 ];
+
+const SAFE_HTML_ATTRIBUTES = new Set([
+    'alt', 'align', 'colspan', 'dir', 'height', 'href', 'lang', 'rowspan',
+    'src', 'start', 'style', 'title', 'valign', 'value', 'width',
+]);
 
 const CLICKUP_HOSTS = new Set(['app.clickup.com', 'api.clickup.com']);
 const SAFE_IMAGE_DATA_URL = /^data:image\/(png|gif|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i;
@@ -27,7 +32,7 @@ export function sanitizeGmailHtml(html: string): SanitizedHTML {
             const name = attr.name.toLowerCase();
             const value = attr.value || '';
 
-            if (name.startsWith('on') || name === 'srcdoc' || name === 'action' || name === 'formaction') {
+            if (!SAFE_HTML_ATTRIBUTES.has(name)) {
                 el.removeAttribute(attr.name);
                 return;
             }
@@ -40,7 +45,7 @@ export function sanitizeGmailHtml(html: string): SanitizedHTML {
             }
 
             if (name === 'href') {
-                if (isSafeEmailLink(value)) {
+                if (el.tagName.toLowerCase() === 'a' && isSafeEmailLink(value)) {
                     el.setAttribute('target', '_blank');
                     el.setAttribute('rel', 'noopener noreferrer nofollow');
                 } else {
@@ -56,7 +61,7 @@ export function sanitizeGmailHtml(html: string): SanitizedHTML {
                     } else {
                         el.removeAttribute('src');
                     }
-                } else if (!isSafeExternalUrl(value)) {
+                } else {
                     el.removeAttribute(attr.name);
                 }
             }

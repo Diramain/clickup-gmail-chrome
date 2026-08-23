@@ -62,16 +62,16 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(dataManagement.canClearLocalData(now, now, 'CLEAR DATA')).toEqual({ ok: true, code: 'OK' });
     });
 
-    test('manifest/package metadata and popup footer identify the 1.2.3 author', () => {
+    test('manifest/package metadata use one version and identify the author', () => {
         const manifest = JSON.parse(source('manifest.json'));
         const packageJson = JSON.parse(source('package.json'));
         const packageLock = JSON.parse(source('package-lock.json'));
         const popupHtml = source('popup/popup.html');
 
-        expect(manifest.version).toBe('1.2.3');
-        expect(packageJson.version).toBe('1.2.3');
-        expect(packageLock.version).toBe('1.2.3');
-        expect(packageLock.packages[''].version).toBe('1.2.3');
+        expect(manifest.version).toMatch(/^\d+\.\d+\.\d+(?:\.\d+)?$/);
+        expect(packageJson.version).toBe(manifest.version);
+        expect(packageLock.version).toBe(manifest.version);
+        expect(packageLock.packages[''].version).toBe(manifest.version);
         expect(manifest.author).toBe('Leandro Iramain');
         expect(packageJson.author).toBe('Leandro Iramain');
         expect(manifest.homepage_url).toBe('https://leandroiramain.com.ar');
@@ -96,13 +96,15 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(RELEASE_FILES).toContain('manifest.json');
         expect(RELEASE_FILES).toContain('background.js');
         expect(RELEASE_FILES).toContain('popup/popup.html');
+        expect(RELEASE_FILES).toContain('app/app.html');
+        expect(RELEASE_FILES).toContain('app/app.js');
         expect(RELEASE_FILES).toContain('task-modal-entry.js');
         expect(RELEASE_FILES).toContain('src/meet/meet-tracker.js');
         expect(RELEASE_FILES.some((file) => file.endsWith('.ts') || file.startsWith('docs/') || file.startsWith('node_modules/') || file.includes('backup'))).toBe(false);
         for (const file of RELEASE_FILES) {
             expect(BLOCKED_PATTERNS.some((pattern) => pattern.test(file))).toBe(false);
         }
-        expect(validateScript).toMatch(/Version must be 1\.2\.3/);
+        expect(validateScript).not.toMatch(/Version must be \d/);
         expect(validateScript).toMatch(/Manifest references missing file/);
         expect(validateScript).toMatch(/Release allowlist mismatch/);
         expect(validateScript).toMatch(/Blocked file in release directory/);

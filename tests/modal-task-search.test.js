@@ -36,6 +36,20 @@ function modalFixture() {
 }
 
 describe('Attach-to-existing modal search', () => {
+    test('renders before hierarchy hydration completes', async () => {
+        window.matchMedia = jest.fn(() => ({ matches: false }));
+        const { TaskModal } = loadTsModule('src/modal.ts');
+        const modal = new TaskModal();
+        modal.loadFullHierarchy = jest.fn(() => new Promise(() => {}));
+        modal.loadDefaultList = jest.fn(() => Promise.resolve());
+        modal.prefillCurrentUser = jest.fn(() => Promise.resolve());
+
+        await modal.show({ threadId: 'thread123', subject: 'Email', from: '', html: '' });
+
+        expect(document.querySelector('.cu-modal-container')).not.toBeNull();
+        expect(modal.loadFullHierarchy).toHaveBeenCalledTimes(1);
+    });
+
     test('does not render unrelated upstream results for a title query', async () => {
         chrome.runtime.sendMessage.mockResolvedValue({
             tasks: [
@@ -94,6 +108,13 @@ describe('Attach-to-existing modal search', () => {
 
     test('resolves the preferred workspace through the background-owned message boundary', () => {
         expect(source('src/modal.ts')).toContain("chrome.runtime.sendMessage({ action: 'getPreferredTeam' })");
+        expect(source('src/modal.ts')).toContain("status?.authenticated !== true");
         expect(source('src/modal.ts')).not.toContain('chrome.storage.local');
+    });
+
+    test('allows the visual description editor to be resized vertically', () => {
+        const css = source('styles/modal.css');
+        expect(css).toMatch(/\.cu-editor-visual\s*\{[\s\S]*?resize:\s*vertical;/);
+        expect(css).not.toMatch(/\.cu-editor-visual\s*\{[\s\S]*?max-height:\s*160px;/);
     });
 });

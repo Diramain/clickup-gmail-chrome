@@ -189,6 +189,7 @@ export class ClickUpAPIWrapper {
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_STATUS_CODES = [429, 500, 502, 503, 504];
+    private static readonly REQUEST_TIMEOUT_MS = 30_000;
 
     constructor(
         token: string,
@@ -333,9 +334,20 @@ export class ClickUpAPIWrapper {
 
     private async fetchWithGovernor(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
         await this.governor.reserve();
-        const response = await fetch(input, init);
-        this.governor.observe(response.headers);
-        return response;
+        const controller = new AbortController();
+        const callerSignal = init?.signal;
+        const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+        if (callerSignal?.aborted) abortFromCaller();
+        else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+        const timeout = setTimeout(() => controller.abort(new DOMException('ClickUp request timed out', 'TimeoutError')), ClickUpAPIWrapper.REQUEST_TIMEOUT_MS);
+        try {
+            const response = await fetch(input, { ...init, signal: controller.signal });
+            this.governor.observe(response.headers);
+            return response;
+        } finally {
+            clearTimeout(timeout);
+            callerSignal?.removeEventListener('abort', abortFromCaller);
+        }
     }
 
     private async createReauthenticationError(): Promise<ApiError> {
@@ -594,8 +606,20 @@ export class ClickUpAPIWrapper {
         return tasks;
     }
 
-    async getTask(taskId: string): Promise<ClickUpTask> {
-        return this.request(`/task/${taskId}`);
+    async getTask(taskId: string, options?: { customTaskId?: boolean; teamId?: string }): Promise<ClickUpTask> {
+        if (!isSafeApiId(taskId, 100)) throw this.createApiError('Invalid task id', 400);
+        if (!options?.customTaskId) return this.request(`/task/${taskId}`);
+        if (!options.teamId || !/^\d{1,20}$/.test(options.teamId)) throw this.createApiError('Invalid workspace id', 400);
+        const params = new URLSearchParams({ custom_task_ids: 'true', team_id: options.teamId });
+        return this.request(`/task/${taskId}?${params.toString()}`);
+    }
+
+    async updateTask(taskId: string, payload: Record<string, unknown>): Promise<ClickUpTask> {
+        if (!isSafeApiId(taskId, 100)) throw this.createApiError('Invalid task id', 400);
+        return this.request(`/task/${taskId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        }, 0, false, false);
     }
 
     async getWorkspaceTasksPage(teamId: string, page: number): Promise<ClickUpTasksResponse> {
@@ -616,6 +640,50 @@ export class ClickUpAPIWrapper {
 
     async getTasks(listId: string): Promise<ClickUpTasksResponse> {
         return this.request(`/list/${listId}/task`);
+    }
+
+    private async getDashboardTaskPages(teamId: string, params: URLSearchParams, maxPages = 10): Promise<ClickUpTask[]> {
+        const tasks: ClickUpTask[] = [];
+        for (let page = 0; page < maxPages; page += 1) {
+            params.set('page', String(page));
+            const response = await this.request<ClickUpTasksResponse>(`/team/${teamId}/task?${params.toString()}`);
+            const pageTasks = response.tasks || [];
+            tasks.push(...pageTasks);
+            if (pageTasks.length < 100) return tasks;
+        }
+        throw this.createApiError('Dashboard task page limit reached', 413);
+    }
+
+    async getDashboardDueTasks(teamId: string, assigneeId: number, dueBefore: number): Promise<ClickUpTask[]> {
+        if (!isSafeApiId(teamId, 100) || !Number.isInteger(assigneeId) || assigneeId <= 0) throw this.createApiError('Invalid dashboard task filter', 400);
+        const params = new URLSearchParams({
+            include_closed: 'false',
+            subtasks: 'true',
+            due_date_lt: String(dueBefore),
+        });
+        params.append('assignees[]', String(assigneeId));
+        return this.getDashboardTaskPages(teamId, params);
+    }
+
+    async getDashboardOpenTasks(teamId: string, assigneeId: number): Promise<ClickUpTask[]> {
+        if (!isSafeApiId(teamId, 100) || !Number.isInteger(assigneeId) || assigneeId <= 0) throw this.createApiError('Invalid dashboard task filter', 400);
+        const params = new URLSearchParams({
+            include_closed: 'false',
+            subtasks: 'true',
+        });
+        params.append('assignees[]', String(assigneeId));
+        return this.getDashboardTaskPages(teamId, params);
+    }
+
+    async getDashboardRecentlyUpdatedTasks(teamId: string, assigneeId: number, updatedAfter: number): Promise<ClickUpTask[]> {
+        if (!isSafeApiId(teamId, 100) || !Number.isInteger(assigneeId) || assigneeId <= 0) throw this.createApiError('Invalid dashboard task filter', 400);
+        const params = new URLSearchParams({
+            include_closed: 'true',
+            subtasks: 'true',
+            date_updated_gt: String(updatedAfter),
+        });
+        params.append('assignees[]', String(assigneeId));
+        return this.getDashboardTaskPages(teamId, params);
     }
 
     async getRecentTasks(teamId: string, dateFrom: number): Promise<ClickUpTask[]> {
@@ -713,6 +781,14 @@ export class ClickUpAPIWrapper {
             formData.append('email', emailLinkData);
         }
 
+        return this.requestFormData(`/task/${taskId}/attachment`, formData);
+    }
+
+    async uploadBinaryAttachment(taskId: string, bytes: Uint8Array, filename: string, mimeType: string): Promise<any> {
+        const formData = new FormData();
+        const blobBytes = new Uint8Array(bytes.byteLength);
+        blobBytes.set(bytes);
+        formData.append('attachment', new Blob([blobBytes], { type: mimeType }), filename);
         return this.requestFormData(`/task/${taskId}/attachment`, formData);
     }
 

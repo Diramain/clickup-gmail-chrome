@@ -71,4 +71,16 @@ describe('Task search by ID or title', () => {
         expect(ranked).toHaveLength(1);
         expect(search.hasHighConfidenceTaskSearchResult(ranked, 'agregar captcha')).toBe(true);
     });
+
+    test('runtime search continues in bounded page batches and exposes more results', () => {
+        const background = fs.readFileSync(path.join(__dirname, '..', 'background.ts'), 'utf8');
+        const popup = fs.readFileSync(path.join(__dirname, '..', 'popup/popup.ts'), 'utf8');
+
+        expect(background).toContain('const TASK_SEARCH_PAGE_BUDGET = 5');
+        expect(background).toContain('pagesLoaded < TASK_SEARCH_PAGE_BUDGET');
+        expect(background).toContain('hasMore: !cache.complete');
+        expect(popup).toContain('Buscar más tareas');
+        expect(popup).toContain('result.tasks.length >= 10 || !result.hasMore');
+        expect(popup).toContain('searchResults.innerHTML = result.tasks.map');
+    });
 });

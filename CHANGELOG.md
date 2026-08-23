@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-08-23
+
+### Added
+- Visible feedback and repository links in the full application and minimal popup.
+- Structured GitHub Issue forms for bug reports and feature proposals, with explicit guidance against sharing sensitive data publicly.
+
+### Changed
+- Spiritfox uses a light content surface, dark navigation, and the official brand lockup in both the full application and popup.
+- GitHub README, contribution guidance, security policy, CI release validation, and wiki synchronization now reflect the current product and release process.
+
+### Security and privacy
+- GitHub private vulnerability reporting is enabled and linked from the extension, Issue forms, README, user guide, security policy, and wiki.
+- Public Issue forms explicitly warn against attaching credentials, private URLs, Gmail or Meet content, account identifiers, or unreviewed diagnostics.
+
+## [2.0.0-beta.1] - 2026-08-22
+
+### Added
+- Dual ClickUp authentication: validated personal tokens as the recommended setup and BYO OAuth as an advanced owner/admin option.
+- Responsive full-tab application with dashboard, task search, agenda, tracking, connections, and settings surfaces.
+- Read-only Google Calendar Agenda and Week views with seven-day range, overlapping-event layout, recurring occurrence/series mappings, and explicit ClickUp List destinations.
+- Persistent Meet-to-task mapping management with task names, statuses, enable/disable, and delete actions.
+- Configurable working days and daily hour targets with calculated weekly goals.
+- Explicit Gmail image attachments for PNG, JPEG, GIF, and WebP with MIME/signature checks and bounded file/operation sizes.
+- Gmail integration visibility preference mediated by the background service worker.
+
+### Changed
+- Replaced the toolbar workflow with a minimal launcher for the full application while retaining the setup surface.
+- Compacted the Gmail task modal into a responsive two-column form.
+- Aligned task descriptions with ClickUp Markdown: headings, emphasis, lists, links, quotes, and inline code; visual and Markdown views now round-trip edits.
+- Enabled TypeScript unused-local and unused-parameter checks and removed confirmed dead declarations and modules.
+- Production release packaging now includes the complete full-tab application and local fonts/assets.
+
+### Security and privacy
+- Personal tokens are validated before encrypted persistence, never drafted or echoed, and accepted only from trusted extension setup pages with an exact message schema.
+- Successful authentication-method changes clear the previous OAuth/token boundary, authorization mode, account caches, and stale rate state; no credentials are hardcoded into the package.
+- Gmail HTML sanitization now uses an explicit attribute allowlist and removes remote-loading attributes including `srcset` and `ping` plus embedded style elements.
+- ClickUp API requests have a 30-second timeout and preserve caller cancellation.
+- API and encryption-key initialization use single-flight promises to prevent concurrent startup races.
+- Calendar actions refresh expired in-memory event details before creating/linking tasks or opening Meet.
+- Popup task search ignores stale out-of-order responses.
+
+### Validation
+- Strict TypeScript compilation, full Jest suite, production/dev builds, exact release preflight, and blocked-file checks pass locally.
+- The GitHub asset is an unsigned prerelease ZIP for unpacked installation. OAuth, Gmail, Calendar, Meet, and ClickUp writes with real accounts remain operator QA.
+
 ## [1.2.3] - 2026-08-13
 
 ### Changed
@@ -199,10 +244,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[1.2.3]: https://github.com/Diramain/clickup-gmail-chrome/compare/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd...main
-[1.2.0]: https://github.com/Diramain/clickup-gmail-chrome/commit/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd
-[1.1.4]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.3...v1.1.4
-[1.1.3]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.2...v1.1.3
-[1.1.2]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.1.0...v1.1.2
-[1.1.0]: https://github.com/Diramain/clickup-gmail-chrome/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/Diramain/clickup-gmail-chrome/releases/tag/v1.0.0
+[2.0.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v2.0.0-beta.1...v2.0.1
+[2.0.0-beta.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.4...v2.0.0-beta.1
+[1.2.3]: https://github.com/Diramain/taskbridge-for-clickup/compare/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd...main
+[1.2.0]: https://github.com/Diramain/taskbridge-for-clickup/commit/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd
+[1.1.4]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.0...v1.1.2
+[1.1.0]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/Diramain/taskbridge-for-clickup/releases/tag/v1.0.0

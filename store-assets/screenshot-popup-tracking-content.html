@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Popup de tracking sintético</title>
+  <link rel="stylesheet" href="../popup/minimal.css">
+  <style>
+    html, body { width: 430px; min-width: 430px; height: 752px; overflow: hidden; }
+    .mini-shell { padding: 18px; }
+    .timer-card { background: linear-gradient(145deg, #fff, #f8f7ff); }
+    #miniTimerDisplay { color: #5138d8; }
+    .icon-action.stop { color: #fff !important; background: #d64045 !important; }
+  </style>
+</head>
+<body>
+  <main class="mini-shell">
+    <header class="mini-header">
+      <div class="mini-brand">
+        <svg class="mini-mark" viewBox="0 0 180 180" aria-hidden="true"><path d="M25.4 129.1 49.2 110.9C61.9 127.4 75.3 135 90.3 135c14.8 0 27.9-7.5 40-23.9l24.1 17.8C137 152.5 115.3 165 90.3 165s-46.9-12.4-64.9-35.9Z"/><path d="m90.2 49.8-42.4 36.6-19.6-22.8 62.1-53.4 61.5 53.5-19.6 22.6Z"/></svg>
+        <div><span class="eyebrow">CLICKUP GMAIL</span><h1>Acceso rápido</h1></div>
+      </div>
+      <span class="status" data-state="connected">ClickUp conectado</span>
+    </header>
+
+    <section class="mini-card timer-card" aria-label="Temporizador activo">
+      <div class="card-heading"><div><span class="eyebrow">TEMPORIZADOR</span><h2>Preparar lanzamiento TaskBridge</h2></div><span class="live-state" data-running="true">En curso</span></div>
+      <p id="miniTimerDisplay">01:18:42:36</p>
+      <p class="subtle">Registro activo en la tarea seleccionada.</p>
+      <div class="timer-actions">
+        <button class="icon-action play" type="button" disabled><span aria-hidden="true">▶</span><span>Play</span></button>
+        <button class="icon-action stop" type="button"><span aria-hidden="true">■</span><span>Detener</span></button>
+      </div>
+    </section>
+
+    <section class="mini-card meet-quick-card" aria-label="Google Meet">
+      <div class="card-heading"><div><span class="eyebrow">GOOGLE MEET</span><h2>Revisión semanal vinculada</h2></div><label class="mini-toggle compact"><span class="sr-only">Priorizar Meet</span><input type="checkbox" checked><span aria-hidden="true"></span></label></div>
+      <p class="subtle">La reunión usa la tarea “Preparar lanzamiento TaskBridge”.</p>
+      <p class="privacy-note">Sólo usa la señal local de una Meet confirmada. No lee audio, video, chat, captions, participantes ni título.</p>
+    </section>
+
+    <section class="mini-card automation-card" aria-label="Seguimiento automático">
+      <span class="eyebrow">SEGUIMIENTO AUTOMÁTICO</span>
+      <h2>Preferencias rápidas</h2>
+      <label class="toggle-row">Iniciar al enfocar <span class="mini-toggle"><input type="checkbox" checked><span aria-hidden="true"></span></span></label>
+      <label class="toggle-row">Detener al cambiar/cerrar <span class="mini-toggle"><input type="checkbox" checked><span aria-hidden="true"></span></span></label>
+    </section>
+
+    <p class="note">La configuración completa vive en la pestaña.</p>
+    <button class="primary" type="button">Abrir app completa</button>
+    <nav class="mini-footer-links" aria-label="Ayuda y proyecto"><a href="#">Enviar feedback</a><span aria-hidden="true">·</span><a href="#">GitHub</a></nav>
+  </main>
+</body>
+</html>

@@ -15,13 +15,15 @@ export function normalizeTaskSearchText(value: string): string {
 
 export function extractTaskIdCandidate(input: string): string | null {
     const trimmed = String(input || '').trim();
-    const urlMatch = trimmed.match(/(?:app\.)?clickup\.com\/t\/([a-zA-Z0-9]+)/i);
+    const urlMatch = trimmed.match(/(?:app\.)?clickup\.com\/t\/([a-zA-Z0-9_-]{3,100})/i);
     if (urlMatch) return urlMatch[1];
 
-    const hashMatch = trimmed.match(/^#([a-zA-Z0-9]{3,20})$/);
+    const hashMatch = trimmed.match(/^#([a-zA-Z0-9_-]{3,100})$/);
     if (hashMatch) return hashMatch[1];
 
-    if (/^[a-zA-Z0-9]{5,20}$/.test(trimmed) && /\d/.test(trimmed)) {
+    if (/^[A-Za-z][A-Za-z0-9]{1,30}-\d{1,30}$/.test(trimmed)) return trimmed;
+
+    if (/^[a-zA-Z0-9]{5,100}$/.test(trimmed) && /\d/.test(trimmed)) {
         return trimmed;
     }
 

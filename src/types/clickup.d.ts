@@ -275,6 +275,14 @@ export interface AttachmentInfo {
     size?: number;
 }
 
+export interface GmailImageAttachmentUpload {
+    taskId: string;
+    filename: string;
+    mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+    byteLength: number;
+    base64: string;
+}
+
 export interface EmailTaskMapping {
     id: string;
     name: string;
@@ -290,8 +298,9 @@ export interface EmailTaskMapping {
 }
 
 export interface StorageData {
-    clickupToken?: string;
+    clickupToken?: string | { iv: string; data: string; version: number };
     clickupRefreshToken?: string | null;
+    clickupAuthMethod?: 'personal-token' | 'oauth';
     oauthConfig?: {
         clientId: string;
         clientSecret: string;
@@ -310,6 +319,7 @@ export interface StorageData {
 
 export type MessageAction =
     | 'authenticate'
+    | 'authenticatePersonalToken'
     | 'logout'
     | 'checkAuth'
     | 'getStatus'
@@ -328,6 +338,9 @@ export type MessageAction =
     | 'createTaskFromEmail'
     | 'createTaskSimple'
     | 'attachToTask'
+    | 'uploadGmailImageAttachment'
+    | 'getGmailIntegrationPreference'
+    | 'setGmailIntegrationPreference'
     | 'validateTask'
     | 'validateTaskLink'
     | 'findLinkedTasks'
@@ -338,6 +351,21 @@ export type MessageAction =
     | 'getTaskById'
     | 'preloadFullHierarchy'
     | 'getHierarchyCache'
+    | 'getDestinationOptions'
+    | 'setDefaultDestination'
+    | 'getDashboardSummary'
+    | 'refreshDashboardSummary'
+    | 'applyBulkTaskChange'
+    | 'getGoogleCalendarAgenda'
+    | 'connectGoogleCalendar'
+    | 'refreshGoogleCalendarAgenda'
+    | 'disconnectGoogleCalendar'
+    | 'linkGoogleCalendarEventTask'
+    | 'createGoogleCalendarEventTask'
+    | 'getCalendarTaskTypeConfig'
+    | 'getClickUpCustomTaskTypes'
+    | 'setCalendarTaskTypeConfig'
+    | 'openGoogleCalendarMeet'
     | 'getEmailTaskMappings'
     | 'getDefaultListConfig'
     | 'syncEmailTasks'
@@ -354,6 +382,10 @@ export type MessageAction =
     | 'focusedClickUpNavigation'
     | 'meetSessionEvent'
     | 'getMeetDetectionEnabled'
+    | 'getMeetTaskPromptState'
+    | 'suggestMeetTasks'
+    | 'assignMeetPromptTask'
+    | 'dismissMeetPrompt'
     | 'getMeetPriorityStatus'
     | 'getMeetMappings'
     | 'assignMeetTask'
@@ -412,6 +444,7 @@ export interface CachedListItem {
 export interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
+    authMethod?: 'personal-token' | 'oauth';
     requiresReauth?: boolean;
     authUnavailable?: boolean;
     user?: ClickUpUserResponse | ClickUpUser;

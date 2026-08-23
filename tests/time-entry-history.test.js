@@ -83,6 +83,9 @@ describe('Recent time entries for the authenticated user', () => {
         expect(popup).toContain("document.visibilityState === 'visible'");
         expect(popup).toContain('prepareRecentTimeEntries(result || [], runningTimer, 10)');
         expect(popup).toContain('recentRunningDuration');
+        expect(popup).toContain("isRunning ? 'En curso' : 'Finalizada'");
+        expect(source('app/app.css')).toContain('.recent-entries-card { width: 70%; }');
+        expect(source('app/app.css')).toContain('grid-template-columns: minmax(0, 1fr) 84px 52px');
         expect(popup).toContain('class=\"entry-task-link\"');
         expect(popup).toContain("window.open(safeClickUpUrl(link.href), '_blank', 'noopener,noreferrer')");
         expect(popup).toContain('const normalizedTimer = { ...timer, start: startTime } as TimeEntry');

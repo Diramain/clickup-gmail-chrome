@@ -19,6 +19,7 @@ import {
     type LinkValidationResult,
 } from './link-hardening';
 import { safeClickUpUrl, sanitizeGmailHtml } from './utils/sanitize.utils';
+import { isAllowedGmailAttachmentUrl, isAllowedGmailImageMimeType, sanitizeGmailAttachmentFilename } from './gmail-attachment-security';
 
 // Declare global types for content script context
 declare const Logger: ILogger;
@@ -48,8 +49,18 @@ interface TaskCreatedEvent extends CustomEvent<{ task: TaskMapping; threadId: st
 Logger.info('Gmail content script loading...');
 
 // Listen for messages from popup immediately
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    if (request.action === 'gmailIntegrationPreferenceChanged' && typeof request.enabled === 'boolean') {
+        gmailIntegrationEnabled = request.enabled;
+        applyGmailIntegrationState();
+        sendResponse({ success: true });
+        return;
+    }
     if (request.action === 'openTaskModal') {
+        if (!gmailIntegrationEnabled) {
+            sendResponse({ success: false });
+            return;
+        }
         Logger.info(' Received openTaskModal command from popup');
         const threadId = getThreadId();
         if (threadId) {
@@ -64,6 +75,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 let linkedTasks: Record<string, TaskMapping[]> = {};
 const validationInFlight = new Map<string, Promise<void>>();
+const messageBodyByBar = new WeakMap<HTMLElement, HTMLElement>();
+let gmailIntegrationEnabled = true;
+let gmailObserver: MutationObserver | null = null;
 
 // Debounce utility
 let scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,9 +95,15 @@ function debouncedScan(): void {
 // Initialization
 // ============================================================================
 
-function initialize(): void {
+async function initialize(): Promise<void> {
     Logger.info('Initializing...');
-    startObserver();
+    try {
+        const preference = await chrome.runtime.sendMessage({ action: 'getGmailIntegrationPreference' }) as { enabled?: boolean };
+        gmailIntegrationEnabled = preference?.enabled !== false;
+    } catch {
+        gmailIntegrationEnabled = true;
+    }
+    applyGmailIntegrationState();
     loadLinkedTasks();
 
     window.addEventListener('cu-task-created', ((e: TaskCreatedEvent) => {
@@ -92,6 +112,19 @@ function initialize(): void {
     }) as EventListener);
 
 
+}
+
+function applyGmailIntegrationState(): void {
+    if (!gmailIntegrationEnabled) {
+        gmailObserver?.disconnect();
+        gmailObserver = null;
+        if (scanDebounceTimer) clearTimeout(scanDebounceTimer);
+        scanDebounceTimer = null;
+        document.querySelectorAll('.cu-email-bar, .cu-inbox-task-badge').forEach(element => element.remove());
+        document.querySelectorAll('.cu-modal-container').forEach(element => element.remove());
+        return;
+    }
+    startObserver();
 }
 
 // ============================================================================
@@ -120,12 +153,13 @@ async function loadLinkedTasks(): Promise<void> {
 // ============================================================================
 
 function startObserver(): void {
+    if (gmailObserver || !gmailIntegrationEnabled) return;
     Logger.debug('Starting MutationObserver...');
-    const observer = new MutationObserver(() => {
+    gmailObserver = new MutationObserver(() => {
         requestAnimationFrame(debouncedScan);
     });
 
-    observer.observe(document.body, {
+    gmailObserver.observe(document.body, {
         childList: true,
         subtree: true,
         attributes: true,
@@ -147,6 +181,7 @@ function startObserver(): void {
 // ============================================================================
 
 function scanEmails(): void {
+    if (!gmailIntegrationEnabled) return;
     const emailBodies = GmailAdapter.getAllEmailBodies();
     if (emailBodies.length > 0) {
         Logger.debug(`ScanEmails: found ${emailBodies.length} email bodies`);
@@ -159,7 +194,14 @@ function scanEmails(): void {
             if (!mountHost) return;
 
             const threadId = getThreadId();
-            ensureThreadBar(mountHost as HTMLElement, body as HTMLElement, threadId, createClickUpBar, reconcileClickUpBar);
+            const bar = ensureThreadBar(
+                mountHost as HTMLElement,
+                body as HTMLElement,
+                threadId,
+                (id) => createClickUpBar(id, body as HTMLElement),
+                reconcileClickUpBar,
+            );
+            messageBodyByBar.set(bar, body as HTMLElement);
         } catch (error) {
             Logger.warn('EMAIL_BODY_SCAN_FAILED');
         }
@@ -167,6 +209,7 @@ function scanEmails(): void {
 }
 
 function scanInbox(): void {
+    if (!gmailIntegrationEnabled) return;
     const inboxRows = document.querySelectorAll('tr.zA');
 
     inboxRows.forEach((row) => {
@@ -251,26 +294,15 @@ function getEmailSubject(): string {
     return GmailAdapter.getSubject();
 }
 
-function getSenderEmail(): string {
-    return GmailAdapter.getSenderEmail();
+function getSenderEmail(scope?: Element | null): string {
+    return GmailAdapter.getSenderEmail(scope);
 }
 
-function getEmailBody(): string {
-    return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml());
+function getEmailBody(body?: Element | null): string {
+    return sanitizeGmailHtml(GmailAdapter.getEmailBodyHtml(body));
 }
 
-// ============================================================================
-// ClickUp Bar Injection
-// ============================================================================
-
-function injectClickUpBar(container: HTMLElement, body: HTMLElement, threadId: string | null): void {
-    const bar = createClickUpBar(threadId);
-    body.parentElement?.insertBefore(bar, body);
-    Logger.info(' Bar injected');
-    if (isConfirmedThreadId(threadId)) verifyThreadTasks(threadId, bar);
-}
-
-function createClickUpBar(threadId: string | null): HTMLElement {
+function createClickUpBar(threadId: string | null, messageBody?: HTMLElement): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'cu-email-bar';
     if (isConfirmedThreadId(threadId)) {
@@ -288,14 +320,21 @@ function createClickUpBar(threadId: string | null): HTMLElement {
 
     bar.innerHTML = `
     <div class="cu-bar-content">
+      <div class="cu-bar-actions">
       <button class="cu-add-btn" title="${pending ? 'Esperando datos de Gmail' : 'Crear tarea de ClickUp desde este email'}" ${pending ? 'disabled aria-disabled="true"' : ''}>
         <svg width="16" height="16" viewBox="0 0 180 180" fill="currentColor">
           <path d="M25.4 129.1L49.2 110.9C61.9 127.4 75.3 135 90.3 135C105.1 135 118.2 127.5 130.3 111.1L154.4 128.9C137 152.5 115.3 165 90.3 165C65.3 165 43.4 152.6 25.4 129.1Z"/>
           <polygon points="90.2 49.8 47.8 86.4 28.2 63.6 90.3 10.2 151.8 63.7 132.2 86.3"/>
         </svg>
-        <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Agregar a ClickUp'}</span>
+        <span class="cu-add-label">${pending ? 'Esperando datos de Gmail…' : 'Crear tarea'}</span>
       </button>
-      <div class="cu-linked-tasks"></div>
+      <button class="cu-attach-btn" type="button" title="${pending ? 'Esperando datos de Gmail' : 'Vincular este email a una tarea existente'}" ${pending ? 'disabled aria-disabled="true"' : ''}>Vincular existente</button>
+      </div>
+      <section class="cu-linked-section" aria-label="Tareas vinculadas">
+        <div class="cu-linked-heading"><strong>Tareas vinculadas</strong><span class="cu-linked-count">0</span></div>
+        <p class="cu-linked-empty">Este email todavía no tiene tareas vinculadas.</p>
+        <div class="cu-linked-tasks"></div>
+      </section>
     </div>
     `;
 
@@ -304,7 +343,14 @@ function createClickUpBar(threadId: string | null): HTMLElement {
         e.preventDefault();
         const currentThreadId = bar.dataset.threadId || null;
         if (!isConfirmedThreadId(currentThreadId)) return;
-        openTaskModal(currentThreadId);
+        openTaskModal(currentThreadId, 'create', messageBodyByBar.get(bar) || messageBody);
+    });
+    const attachBtn = bar.querySelector('.cu-attach-btn') as HTMLButtonElement | null;
+    attachBtn?.addEventListener('click', (event) => {
+        event.preventDefault();
+        const currentThreadId = bar.dataset.threadId || null;
+        if (!isConfirmedThreadId(currentThreadId)) return;
+        openTaskModal(currentThreadId, 'attach', messageBodyByBar.get(bar) || messageBody);
     });
 
     return bar;
@@ -314,8 +360,7 @@ function reconcileClickUpBar(bar: HTMLElement, threadId: string | null): void {
     const confirmedThreadId = isConfirmedThreadId(threadId) ? threadId : null;
     reconcileThreadBarState(bar, confirmedThreadId);
 
-    const container = bar.querySelector('.cu-linked-tasks');
-    if (container) reconcileLinkedTaskAnchors(container, confirmedThreadId ? toVisibleLinkedTasks(linkedTasks[confirmedThreadId] || []) : []);
+    reconcileLinkedTasksSection(bar, confirmedThreadId ? toVisibleLinkedTasks(linkedTasks[confirmedThreadId] || []) : []);
 
     if (confirmedThreadId) verifyThreadTasks(confirmedThreadId, bar);
 }
@@ -377,8 +422,7 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
         Logger.info(' Updating thread task statuses after validation');
         const nextTasks = currentTasks.map(task => updates.get(task.id) || task);
         linkedTasks[threadId] = nextTasks;
-        const container = barElement.querySelector('.cu-linked-tasks');
-        if (container) reconcileLinkedTaskAnchors(container, toVisibleLinkedTasks(nextTasks));
+        reconcileLinkedTasksSection(barElement, toVisibleLinkedTasks(nextTasks));
     }
 }
 
@@ -386,19 +430,25 @@ async function runThreadValidation(threadId: string, barElement: Element, dueTas
 // Modal Functions
 // ============================================================================
 
-function openTaskModal(threadId: string): void {
+function openTaskModal(threadId: string, initialTab: 'create' | 'attach' = 'create', messageBody?: HTMLElement): void {
+    const body = messageBody?.isConnected ? messageBody : GmailAdapter.getEmailBodyElement();
+    const messageContainer = body ? GmailAdapter.getMessageContainer(body) : null;
+    const attachments = GmailAdapter.getAttachmentUrls(messageContainer)
+        .filter(attachment => isAllowedGmailImageMimeType(attachment.mimeType)
+            && isAllowedGmailAttachmentUrl(attachment.url)
+            && sanitizeGmailAttachmentFilename(attachment.filename));
     const emailData: EmailData = {
         threadId: threadId,
         subject: getEmailSubject(),
-        from: getSenderEmail(),
-        html: getEmailBody(),
+        from: getSenderEmail(messageContainer),
+        html: getEmailBody(body),
         htmlSanitized: true,
-        attachments: GmailAdapter.getAttachmentUrls()
+        attachments,
     };
 
     if (typeof TaskModal !== 'undefined') {
         const modal = new TaskModal();
-        modal.show(emailData);
+        void modal.show(emailData, initialTab);
     } else {
         Logger.error('TASK_MODAL_NOT_FOUND');
         showNotification('No se pudo abrir el formulario de tarea', 'error');
@@ -429,8 +479,16 @@ function updateLinkedTasksDisplay(threadId: string, task: TaskMapping): void {
     const existingIndex = linkedTasks[threadId].findIndex(candidate => candidate.id === task.id);
     if (existingIndex >= 0) linkedTasks[threadId][existingIndex] = nextTask;
     else linkedTasks[threadId].push(nextTask);
-    const tasksContainer = bar.querySelector('.cu-linked-tasks');
-    if (tasksContainer) reconcileLinkedTaskAnchors(tasksContainer, toVisibleLinkedTasks(linkedTasks[threadId]));
+    reconcileLinkedTasksSection(bar, toVisibleLinkedTasks(linkedTasks[threadId]));
+}
+
+function reconcileLinkedTasksSection(barElement: Element, tasks: TaskMapping[]): void {
+    const container = barElement.querySelector('.cu-linked-tasks');
+    if (container) reconcileLinkedTaskAnchors(container, tasks);
+    const count = barElement.querySelector('.cu-linked-count');
+    if (count) count.textContent = String(tasks.length);
+    const empty = barElement.querySelector<HTMLElement>('.cu-linked-empty');
+    if (empty) empty.hidden = tasks.length > 0;
 }
 
 function showNotification(message: string, type: 'success' | 'error'): void {
@@ -486,8 +544,10 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => {
-    scanEmails();
-    scanInbox();
+    if (gmailIntegrationEnabled) {
+            scanEmails();
+            scanInbox();
+    }
 }, 5000);
 
 // ============================================================================
@@ -495,7 +555,7 @@ setInterval(() => {
 // ============================================================================
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
+    document.addEventListener('DOMContentLoaded', () => void initialize());
 } else {
-    initialize();
+    void initialize();
 }

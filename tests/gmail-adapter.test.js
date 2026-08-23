@@ -79,6 +79,20 @@ describe('GmailAdapter production selectors', () => {
 
         expect(GmailAdapter.getThreadId()).toBeNull();
     });
+
+    test('scopes sender, body, and attachment metadata to the clicked Gmail message container', () => {
+        document.body.innerHTML = `
+            <div class="gs" id="first"><span class="gD" email="first@example.test"></span><div class="a3s aiL">first</div><a download_url="image/png:first.png:https://mail.google.com/mail/u/0/?att=1"></a></div>
+            <div class="gs" id="second"><span class="gD" email="second@example.test"></span><div class="a3s aiL">second</div><a download_url="image/jpeg:second.jpg:https://mail.google.com/mail/u/0/?att=2"></a></div>`;
+        const secondBody = document.querySelector('#second .a3s');
+        const second = GmailAdapter.getMessageContainer(secondBody);
+
+        expect(GmailAdapter.getSenderEmail(second)).toBe('second@example.test');
+        expect(GmailAdapter.getEmailBodyHtml(secondBody)).toBe('second');
+        expect(GmailAdapter.getAttachmentUrls(second)).toEqual([
+            { mimeType: 'image/jpeg', filename: 'second.jpg', url: 'https://mail.google.com/mail/u/0/?att=2' },
+        ]);
+    });
 });
 
 describe('Gmail thread bar mounting', () => {
@@ -222,6 +236,21 @@ describe('Gmail thread bar mounting', () => {
         observer.disconnect();
 
         expect(mutations).toHaveLength(0);
-        expect(bar.querySelector('.cu-add-label').textContent).toBe('Agregar a ClickUp');
+        expect(bar.querySelector('.cu-add-label').textContent).toBe('Crear tarea');
+    });
+
+    test('reconciles create and attach controls without enabling an unconfirmed thread', () => {
+        const bar = document.createElement('div');
+        bar.innerHTML = '<button class="cu-add-btn"><span class="cu-add-label"></span></button><button class="cu-attach-btn"></button><div class="cu-linked-tasks"></div>';
+
+        reconcileThreadBarState(bar, null);
+        expect(bar.querySelector('.cu-add-btn').disabled).toBe(true);
+        expect(bar.querySelector('.cu-attach-btn').disabled).toBe(true);
+        expect(bar.querySelector('.cu-add-label').textContent).toBe('Esperando datos de Gmail…');
+
+        reconcileThreadBarState(bar, 'thread-1');
+        expect(bar.querySelector('.cu-add-btn').disabled).toBe(false);
+        expect(bar.querySelector('.cu-attach-btn').disabled).toBe(false);
+        expect(bar.querySelector('.cu-attach-btn').title).toContain('Vincular');
     });
 });

@@ -214,7 +214,7 @@ describe('ClickUp authentication recovery', () => {
         const invalidation = sectionBetween(
             background,
             'async function invalidateAuthenticationSession',
-            '\ninitializeAPI();',
+            '\nvoid initializeAPI()',
         );
         const initialization = sectionBetween(
             background,
@@ -259,7 +259,7 @@ describe('ClickUp authentication recovery', () => {
         const invalidation = sectionBetween(
             background,
             'async function invalidateAuthenticationSession',
-            '\ninitializeAPI();',
+            '\nvoid initializeAPI()',
         );
 
         expect(invalidation.indexOf('getSecureToken(STORAGE_KEYS.AUTH_TOKEN)'))

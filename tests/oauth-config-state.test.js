@@ -145,6 +145,21 @@ describe('OAuth encrypted config shape', () => {
         const stored = await chrome.storage.local.get('oauthConfig');
         expect(stored.oauthConfig).toBeUndefined();
     });
+
+    test('concurrent first use creates only one encryption key', async () => {
+        await chrome.storage.local.remove('encryptionKey');
+        const generateKey = jest.spyOn(globalThis.crypto.subtle, 'generateKey');
+        const cryptoService = loadTsModule('src/services/crypto.service.ts');
+        try {
+            await Promise.all([
+                cryptoService.encryptToken('synthetic-token-a'),
+                cryptoService.encryptToken('synthetic-token-b'),
+            ]);
+            expect(generateKey).toHaveBeenCalledTimes(1);
+        } finally {
+            generateKey.mockRestore();
+        }
+    });
 });
 
 describe('OAuth popup state matrix', () => {

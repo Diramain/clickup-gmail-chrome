@@ -45,14 +45,14 @@ describe('CGC-C12-OAUTH-B1 local Google Identity adapter', () => {
     });
 
     test('fails closed without returning the token when a core scope is missing', async () => {
-        const port = createIdentityPort({ grantedScopes: coreScopes.slice(0, 2) });
+        const port = createIdentityPort({ grantedScopes: [] });
 
         const result = await identity.requestGoogleCalendarToken(true, port);
 
         expect(result).toEqual({
             ok: false,
             code: 'SCOPES_NOT_GRANTED',
-            missingScopes: [coreScopes[2]],
+            missingScopes: [coreScopes[0]],
         });
         expect(result).not.toHaveProperty('token');
     });

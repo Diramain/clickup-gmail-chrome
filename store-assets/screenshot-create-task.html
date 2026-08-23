@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskBridge - crear tarea desde Gmail</title>
+  <link rel="stylesheet" href="../styles/modal.css">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 1280px; height: 800px; margin: 0; overflow: hidden; font-family: Arial, Helvetica, sans-serif; }
+    .gmail-demo { height: 100%; color: #303134; background: #f6f8fc; }
+    .gmail-top { height: 64px; display: flex; align-items: center; gap: 22px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e4e7ec; }
+    .gmail-logo { font-size: 20px; font-weight: 700; color: #5f6368; }
+    .gmail-search { width: 520px; padding: 13px 18px; border-radius: 26px; color: #687087; background: #edf2fa; }
+    .gmail-layout { display: grid; grid-template-columns: 220px 1fr; height: calc(100% - 64px); }
+    .gmail-nav { padding: 24px 18px; color: #596273; background: #f6f8fc; }
+    .gmail-compose { margin-bottom: 24px; padding: 14px 18px; border-radius: 16px; background: #c2e7ff; font-weight: 700; }
+    .gmail-nav div + div { margin-top: 16px; }
+    .gmail-message { margin: 18px 28px; padding: 28px; border-radius: 16px; background: #fff; box-shadow: 0 4px 18px rgba(45,55,78,.08); }
+    .gmail-message h1 { margin: 0 0 18px; font-size: 22px; }
+    .gmail-message p { max-width: 680px; color: #687087; line-height: 1.6; }
+    .cu-modal-container { background: rgba(18,20,31,.56); backdrop-filter: blur(3px); }
+    .cu-modal-window { height: min(760px, calc(100vh - 24px)); }
+    .cu-location-path { display: block; padding: 9px 11px; border: 1px solid #ddd; border-radius: 5px; color: #372d68; background: #f8f7ff; font-size: 13px; font-weight: 700; }
+    .cu-editor-visual { min-height: 112px; }
+    .cu-selected-assignees { margin-top: 6px; }
+    .demo-assignee { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 99px; color: #5138d8; background: #eeeaff; font-size: 11px; font-weight: 700; }
+    .cu-attachment-picker { padding: 9px 12px; }
+    .demo-file { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .demo-file input { accent-color: #7B68EE; }
+  </style>
+</head>
+<body>
+  <div class="gmail-demo" aria-hidden="true">
+    <header class="gmail-top"><div class="gmail-logo">Gmail</div><div class="gmail-search">Buscar en el correo</div></header>
+    <div class="gmail-layout">
+      <aside class="gmail-nav"><div class="gmail-compose">Redactar</div><div>Recibidos</div><div>Destacados</div><div>Enviados</div><div>Borradores</div></aside>
+      <main class="gmail-message"><h1>Próximos pasos para el lanzamiento</h1><p>Hola equipo: comparto el resumen ficticio de la reunión y los próximos pasos acordados para preparar la campaña.</p></main>
+    </div>
+  </div>
+
+  <div class="cu-modal-container">
+    <div class="cu-modal-window" role="dialog" aria-modal="true" aria-labelledby="demo-modal-title">
+      <div class="cu-modal-header"><div><h2 id="demo-modal-title">Crear o vincular en ClickUp</h2></div><button class="cu-modal-close" type="button" aria-label="Cerrar formulario">×</button></div>
+      <div class="cu-modal-tabs" role="tablist"><button class="cu-tab cu-tab-active" type="button">Crear tarea</button><button class="cu-tab" type="button">Vincular existente</button></div>
+      <div class="cu-modal-body">
+        <div class="cu-tab-content cu-tab-create active">
+          <div class="cu-form-row cu-span-full"><label>Ubicación</label><span class="cu-location-path">Marketing / Lanzamiento / Backlog</span></div>
+          <div class="cu-form-row cu-form-row-inline"><div class="cu-form-group"><label>Fecha de inicio</label><input type="date" class="cu-input" value="2026-08-26"></div><div class="cu-form-group"><label>Fecha de vencimiento</label><input type="date" class="cu-input" value="2026-08-28"></div></div>
+          <div class="cu-form-row cu-form-row-inline"><div class="cu-form-group"><label>Prioridad</label><select class="cu-input cu-select"><option>🟠 Alta</option></select></div><div class="cu-form-group"><label>Estado</label><select class="cu-input cu-select"><option>POR HACER</option></select></div></div>
+          <div class="cu-form-row"><div class="cu-form-group"><label>Responsable</label><div class="cu-selected-assignees"><span class="demo-assignee">Equipo de producto</span></div></div></div>
+          <div class="cu-form-row"><label>Nombre de la tarea</label><input type="text" class="cu-input cu-input-large" value="Preparar lanzamiento de la nueva campaña"></div>
+          <div class="cu-form-row cu-span-full">
+            <label>Descripción</label>
+            <div class="cu-editor-container">
+              <div class="cu-editor-tabs"><button type="button" class="cu-editor-tab active">Vista visual</button><button type="button" class="cu-editor-tab">Markdown</button></div>
+              <div class="cu-editor-toolbar"><button type="button"><b>B</b></button><button type="button"><i>I</i></button><span class="cu-toolbar-sep"></span><button type="button">H▾</button><span class="cu-toolbar-sep"></span><button type="button">• Lista</button><button type="button">1. Lista</button><span class="cu-toolbar-sep"></span><button type="button">🔗</button></div>
+              <div class="cu-editor-visual"><p><strong>Objetivo</strong></p><p>Preparar materiales y validar los próximos pasos del lanzamiento.</p><ul><li>Revisar piezas de campaña</li><li>Confirmar responsables y fechas</li></ul></div>
+            </div>
+            <p class="cu-editor-hint">Formato ClickUp: encabezados, énfasis, listas, enlaces, citas y código en línea.</p>
+          </div>
+          <div class="cu-form-row cu-form-row-inline"><div class="cu-form-group"><label>Estimación de tiempo</label><input type="text" class="cu-input" value="2h 30m"></div><div class="cu-form-group"><label>Tiempo registrado</label><input type="text" class="cu-input" placeholder="ej. 10m"></div></div>
+          <div class="cu-form-row cu-email-options"><label class="cu-checkbox-label"><input type="checkbox" checked> Conservar enlace a Gmail y adjuntar una copia HTML sanitizada</label></div>
+        </div>
+        <fieldset class="cu-attachment-picker cu-attach-files-row"><legend>Imágenes adjuntas del mensaje</legend><label class="demo-file"><input type="checkbox" checked> brief-campaña.png · 428 KiB</label></fieldset>
+      </div>
+      <div class="cu-modal-footer"><button class="cu-btn cu-btn-secondary">Cancelar</button><button class="cu-btn cu-btn-primary">Crear tarea</button></div>
+      <div class="cu-resize-handle"></div>
+    </div>
+  </div>
+</body>
+</html>
