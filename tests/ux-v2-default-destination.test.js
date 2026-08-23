@@ -17,6 +17,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/connections-state') return loadTsModule('src/connections-state.ts');
         if (request === '../src/task-search-view') return loadTsModule('src/task-search-view.ts');
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
+        if (request === '../diagnostics/recorder') return { initCausalRecorder: () => undefined };
         if (request === '../popup/popup') return {};
         if (request === './link-hardening') return loadTsModule('src/link-hardening.ts');
         if (request === './bulk-task-update') return loadTsModule('src/bulk-task-update.ts');
