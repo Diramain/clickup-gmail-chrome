@@ -20,14 +20,25 @@
     .gmail-message h1 { margin: 0 0 18px; font-size: 22px; }
     .gmail-message p { max-width: 680px; color: #687087; line-height: 1.6; }
     .cu-modal-container { background: rgba(18,20,31,.56); backdrop-filter: blur(3px); }
-    .cu-modal-window { height: min(760px, calc(100vh - 24px)); }
+    .cu-modal-window { width: min(840px, calc(100vw - 24px)); height: min(760px, calc(100vh - 24px)); }
     .cu-location-path { display: block; padding: 9px 11px; border: 1px solid #ddd; border-radius: 5px; color: #372d68; background: #f8f7ff; font-size: 13px; font-weight: 700; }
     .cu-editor-visual { min-height: 112px; }
     .cu-selected-assignees { margin-top: 6px; }
     .demo-assignee { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 99px; color: #5138d8; background: #eeeaff; font-size: 11px; font-weight: 700; }
-    .cu-attachment-picker { padding: 9px 12px; }
-    .demo-file { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-    .demo-file input { accent-color: #7B68EE; }
+    .cu-attachment-picker { padding: 10px 12px; }
+    .cu-attachment-toggle[aria-pressed="true"] { color: #fff; background: #6c5ce7; border-color: #6c5ce7; }
+    .cu-attachment-list-thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cu-attachment-option-image { min-width: 0; }
+    .demo-preview {
+      display: grid !important;
+      place-items: center;
+      color: #fff;
+      background: linear-gradient(135deg, #26c6da, #7b68ee 55%, #ff2bb5) !important;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .demo-safety-note { margin: 8px 0 0; color: #6e7080; font-size: 10px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -62,11 +73,55 @@
           <div class="cu-form-row cu-form-row-inline"><div class="cu-form-group"><label>Estimación de tiempo</label><input type="text" class="cu-input" value="2h 30m"></div><div class="cu-form-group"><label>Tiempo registrado</label><input type="text" class="cu-input" placeholder="ej. 10m"></div></div>
           <div class="cu-form-row cu-email-options"><label class="cu-checkbox-label"><input type="checkbox" checked> Conservar enlace a Gmail y adjuntar una copia HTML sanitizada</label></div>
         </div>
-        <fieldset class="cu-attachment-picker cu-attach-files-row"><legend>Imágenes adjuntas del mensaje</legend><label class="demo-file"><input type="checkbox" checked> brief-campaña.png · 428 KiB</label></fieldset>
+        <fieldset class="cu-attachment-picker cu-attach-files-row">
+          <legend>Adjuntos del mensaje correcto</legend>
+          <div class="cu-attachment-toolbar">
+            <p class="cu-hint">5 archivos disponibles · 3 seleccionados</p>
+            <div class="cu-attachment-actions" role="group" aria-label="Vista de adjuntos">
+              <button class="cu-attachment-toggle" type="button" aria-pressed="false">Lista</button>
+              <button class="cu-attachment-toggle" type="button" aria-pressed="true">Miniaturas</button>
+            </div>
+          </div>
+          <div class="cu-attachment-list cu-attachment-list-thumbnails">
+            <label class="cu-attachment-option cu-attachment-option-image">
+              <span class="cu-attachment-preview demo-preview">IMAGEN INLINE</span>
+              <input type="checkbox" checked>
+              <span>brief-campaña.png</span>
+              <small>428 KiB</small>
+            </label>
+            <label class="cu-attachment-option">
+              <input type="checkbox" checked>
+              <span>resumen-lanzamiento.pdf</span>
+              <small>1.2 MiB</small>
+            </label>
+            <label class="cu-attachment-option">
+              <input type="checkbox" checked>
+              <span>plan-de-trabajo.docx</span>
+              <small>684 KiB</small>
+            </label>
+            <label class="cu-attachment-option">
+              <input type="checkbox">
+              <span>notas-equipo.txt</span>
+              <small>12 KiB</small>
+            </label>
+            <label class="cu-attachment-option">
+              <input type="checkbox">
+              <span>materiales-aprobados.zip</span>
+              <small>4.8 MiB</small>
+            </label>
+          </div>
+          <p class="demo-safety-note">Selección explícita, límites por archivo y validación de extensión, tipo y contenido. SVG, macros, ejecutables y scripts quedan excluidos.</p>
+        </fieldset>
       </div>
       <div class="cu-modal-footer"><button class="cu-btn cu-btn-secondary">Cancelar</button><button class="cu-btn cu-btn-primary">Crear tarea</button></div>
       <div class="cu-resize-handle"></div>
     </div>
   </div>
+  <script>
+    requestAnimationFrame(() => {
+      const body = document.querySelector('.cu-modal-body');
+      if (body) body.scrollTop = body.scrollHeight;
+    });
+  </script>
 </body>
 </html>

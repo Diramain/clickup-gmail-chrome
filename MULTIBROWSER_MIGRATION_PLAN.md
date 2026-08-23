@@ -7,7 +7,10 @@ distribuciones independientes.
 ## Baseline
 
 - Fecha del plan: 2026-08-23.
-- Fuente estable: `main` en `dd556a40dc413bdb71dfa08dbbff44ab605ef572`.
+- Base integrada: `main` en `dd556a40dc413bdb71dfa08dbbff44ab605ef572`.
+- Release candidate Chrome: `2.1.0` en
+  `chore/remove-inboxsdk-remnants`, commit
+  `c620ad5 feat: release TaskBridge v2.1.0`.
 - Release de rollback: `v2.0.1`.
 - Distribuciones objetivo: Chrome Web Store y Firefox Add-ons (AMO).
 - Repositorio: uno.
@@ -15,6 +18,8 @@ distribuciones independientes.
 - Artefactos, manifiestos, OAuth, firma y publicacion: separados por navegador.
 - El workspace experimental anterior de Firefox fue eliminado y no es una
   fuente valida para esta migracion.
+- La ficha HKS vigente aun describe ese workspace eliminado y queda
+  `needs-review`; no usar sus manifests, builds ni decisiones como entrada.
 
 ## Estados
 
@@ -94,12 +99,12 @@ Responsable: owner. Cargar como extension descomprimida
 anotar solo el comportamiento observado sin correos, tokens ni payloads reales.
 
 - [x] A17. Cargar el build en un perfil Chrome de prueba.
-- [ ] A18. Abrir Gmail y navegar entre bandeja e hilos.
-- [ ] A19. Confirmar lectura de asunto, remitente, cuerpo e ID estable del hilo.
+- [x] A18. Abrir Gmail y navegar entre bandeja e hilos.
+- [x] A19. Confirmar lectura de asunto, remitente, cuerpo e ID estable del hilo.
 - [x] A20. Abrir el modal de crear/vincular tarea.
-- [ ] A21. Confirmar render de tareas vinculadas.
-- [ ] A22. Crear una tarea en un destino de prueba autorizado.
-- [~] A23. Probar seleccion explicita de adjuntos compatibles.
+- [x] A21. Confirmar render de tareas vinculadas.
+- [x] A22. Crear una tarea en un destino de prueba autorizado.
+- [x] A23. Probar seleccion explicita de adjuntos compatibles.
   Correctivo listo para retest: `v2.0.1` limitaba la busqueda al `.gs` del
   cuerpo, pero Gmail tambien renderiza tarjetas en footers hermanos, incluso
   fuera de `.adn` en respuestas. El adapter asigna cada tarjeta al cuerpo
@@ -108,22 +113,31 @@ anotar solo el comportamiento observado sin correos, tokens ni payloads reales.
   SVG, formatos Office con macros, ejecutables y scripts. Tambien descubre
   imagenes embebidas sin tarjeta de adjunto cuando Gmail las sirve desde
   `mail.google.com`; no habilita hosts de imagenes externos.
-- [ ] A24. Probar hilos con varios mensajes, recarga y cambio de hilo.
-- [!] A25. Confirmar ausencia de errores nuevos y datos sensibles en consola.
-  Bloqueado: la primera pasada uso una instancia sin autenticacion ClickUp y
-  registro `MODAL_HIERARCHY_AUTH_REQUIRED` / `Not authenticated`. La traza
-  diagnostica segura no contiene secretos; repetir con una sola instancia de la
-  extension habilitada y conectada.
+- [x] A24. Probar hilos con varios mensajes, recarga y cambio de hilo.
+- [x] A25. Confirmar ausencia de errores nuevos y datos sensibles en consola.
+  Retest completado por el owner con la misma version `2.1.0` enviada a CWS;
+  todos los correctivos reportados quedaron validados en Chrome.
 
 ### Gate A
 
 - [x] A26. No quedan menciones activas de InboxSDK en fuente o distribucion.
 - [x] A27. QA automatizada verde.
-- [ ] A28. QA manual Chrome verde.
+- [x] A28. QA manual Chrome verde.
 - [x] A29. Revision del diff y del rollback completada.
 - [ ] A30. PR aprobado e integrado.
 
-**Estado Plan A:** `RELEASE_CANDIDATE_2.1.0_APPROVED_FOR_STORE_REVIEW`.
+### Seguimiento Chrome Web Store
+
+- [x] A31. Cargar el ZIP exacto `2.1.0` y confirmar la version del borrador.
+- [x] A32. Cancelar la revision obsoleta `2.0.0` sin afectar la version publica
+  `1.2.0`.
+- [x] A33. Actualizar descripcion e imagenes de la ficha para reflejar adjuntos
+  ampliados, imagenes inline, miniaturas, limites y exclusiones de seguridad.
+- [x] A34. Enviar `2.1.0` a revision sin publicacion automatica.
+- [~] A35. Esperar la respuesta de Chrome Web Store; `1.2.0` permanece publica
+  hasta la aprobacion y publicacion manual de `2.1.0`.
+
+**Estado Plan A:** `QA_CHROME_GREEN_A30_PENDING`.
 
 ---
 
@@ -265,7 +279,25 @@ verde; Calendar no presenta una capacidad falsa.
 **Gate B8:** paquete apto para envio; publicacion externa todavia requiere una
 aprobacion explicita.
 
-**Estado Plan B:** `BLOQUEADO_POR_PLAN_A`.
+### Fase B9: Cierre Web Y Descubribilidad
+
+- [ ] B9.1. Actualizar la pagina publica de TaskBridge solo cuando la
+  disponibilidad real de Chrome o Firefox cambie.
+- [ ] B9.2. Publicar el enlace AMO unicamente despues de que exista una ficha
+  aprobada y accesible; no anunciar compatibilidad Firefox antes de Gate B7.
+- [ ] B9.3. Mantener accesibles la pagina principal, privacidad, terminos y
+  soporte, con claims alineados al comportamiento distribuido.
+- [ ] B9.4. Actualizar `lastmod` en `sitemap.xml` solo si cambia contenido
+  publico; no modificar el sitemap por una release sin cambios en esas paginas.
+- [ ] B9.5. Confirmar que `robots.txt` declara el sitemap y permite indexacion de
+  las paginas publicas de TaskBridge.
+- [ ] B9.6. Verificar sitemap en Google Search Console y solicitar indexacion de
+  las URLs modificadas, sin convertir SEO en bloqueo de rollback o seguridad.
+
+**Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
+valido y sin URLs falsas o retiradas.
+
+**Estado Plan B:** `BLOQUEADO_POR_A30`.
 
 ---
 
@@ -289,6 +321,10 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | A21, A23 | Refresco de tareas eliminadas y respuestas Gmail SW corregidos | Doble confirmacion remota inmediata; revalidacion al volver a Gmail; 61/61 focales; suite 537 verdes y asercion documental corregida 8/8; typecheck, build y preflight verdes | Pendiente |
 | 2026-08-23 | A23 | Vista de miniaturas opcional lista para QA manual | Carga diferida solo para imagenes permitidas; documentos conservan filas; seleccion independiente; suite 539/539, typecheck, build y preflight verdes | Pendiente |
 | 2026-08-23 | A13-A16, A29 | Release candidate `2.1.0` verificada | Suite 539/539; typecheck, build, preflight y ZIP integros; SHA-256 `a10fbf53e9e227054a3c6cb62c00dd770aaf6048079911fa7fdbc1a95b3566b8`; rollback `v2.0.1` preservado | Pendiente |
+| 2026-08-23 | A31-A35 | `2.1.0` enviada a Chrome Web Store | Borrador `2.1.0` confirmado pendiente de revision; `1.2.0` sigue publica; publicacion automatica desactivada | No aplica |
+| 2026-08-23 | A33 | Ficha CWS alineada con `2.1.0` | Descripcion actualizada; icono 128x128, cinco capturas 1280x800 y mosaicos 440x280/1400x560 validados como PNG RGB sin alfa | No aplica |
+| 2026-08-23 | A18-A25, A28 | QA manual Chrome verde | Owner valido en Chrome la misma version `2.1.0` enviada a CWS y confirmo todos los correctivos como funcionales | No aplica |
+| 2026-08-23 | B9 discovery | Sitemap publico ya incluye TaskBridge | `/taskbridge/`, `/taskbridge/privacy/` y `/taskbridge/terms/` presentes; `robots.txt` declara `sitemap.xml`; sin cambio requerido hasta modificar contenido publico | No aplica |
 
 ## Registro De Decisiones
 
@@ -299,10 +335,14 @@ correos, payloads reales ni trazas sensibles.
 | DEC-03 | 2026-08-23 | Limpiar InboxSDK antes del port | Partir de una base comprobada y auditable |
 | DEC-04 | 2026-08-23 | Mantener `v2.0.1` como rollback | Release estable, publicada y verificada |
 | DEC-05 | 2026-08-23 | El owner ejecuta A17-A25 | La QA requiere sesiones Gmail/ClickUp autenticadas y una escritura de prueba |
+| DEC-06 | 2026-08-23 | El envio a CWS no cierra Gate A | La revision externa no reemplaza QA manual Chrome ni integracion a `main` |
+| DEC-07 | 2026-08-23 | No reutilizar la copia Firefox historica documentada en HKS | Fue eliminada y contradice la estrategia vigente de una sola fuente; HKS queda `needs-review` |
+| DEC-08 | 2026-08-23 | Actualizar sitemap solo ante cambios publicos | Las URLs TaskBridge ya estan incluidas; una release sin cambios de pagina no justifica alterar `lastmod` |
 
 ## Estado General
 
-- Plan A: `RELEASE_CANDIDATE_2.1.0_APPROVED_FOR_STORE_REVIEW`.
-- Plan B: `BLOQUEADO_POR_PLAN_A`.
-- Publicacion Chrome: fuera de alcance de este plan hasta un gate separado.
+- Plan A: `QA_CHROME_GREEN_A30_PENDING`.
+- Plan B: `BLOQUEADO_POR_A30`.
+- Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
+  automatica desactivada.
 - Publicacion AMO: no autorizada.
