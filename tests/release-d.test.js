@@ -91,8 +91,25 @@ describe('FASE D release metadata, safe data, and preflight', () => {
     });
 
     test('release allowlist and preflight exclude blocked categories', () => {
-        const { RELEASE_FILES, BLOCKED_PATTERNS } = require('../scripts/release-allowlist');
+        const {
+            RELEASE_TARGETS,
+            RELEASE_FILES,
+            RELEASE_FILES_BY_TARGET,
+            RELEASE_SOURCE_OVERRIDES,
+            BLOCKED_PATTERNS,
+            releaseArchiveName,
+        } = require('../scripts/release-allowlist');
         const validateScript = source('scripts/validate-release.js');
+        const packageJson = JSON.parse(source('package.json'));
+        const firefoxManifest = JSON.parse(source('manifest.firefox.json'));
+        expect(RELEASE_TARGETS.chrome.directory).toBe('dist/chrome');
+        expect(RELEASE_TARGETS.firefox.directory).toBe('dist/firefox');
+        expect(releaseArchiveName('chrome', packageJson.version)).toBe('taskbridge-for-clickup-chrome-2.1.0.zip');
+        expect(releaseArchiveName('firefox', packageJson.version)).toBe('taskbridge-for-clickup-firefox-2.1.0.zip');
+        expect(RELEASE_FILES_BY_TARGET.chrome).toEqual(RELEASE_FILES);
+        expect(RELEASE_FILES_BY_TARGET.firefox).toEqual(RELEASE_FILES);
+        expect(RELEASE_SOURCE_OVERRIDES.chrome['icons/icon-128.png']).toBe('store-assets/taskbridge-icon-128x128.png');
+        expect(RELEASE_SOURCE_OVERRIDES.firefox['icons/icon-128.png']).toBe('store-assets/taskbridge-icon-128x128.png');
         expect(RELEASE_FILES).toContain('manifest.json');
         expect(RELEASE_FILES).toContain('background.js');
         expect(RELEASE_FILES).toContain('popup/popup.html');
@@ -109,5 +126,28 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(validateScript).toMatch(/Release allowlist mismatch/);
         expect(validateScript).toMatch(/Blocked file in release directory/);
         expect(validateScript).toMatch(/Legacy Gmail SDK marker in release file/);
+        expect(firefoxManifest.background).toEqual({ scripts: ['background.js'] });
+        expect(firefoxManifest.oauth2).toBeUndefined();
+        expect(firefoxManifest.browser_specific_settings.gecko).toMatchObject({
+            id: 'taskbridge-for-clickup@leandroiramain.com.ar',
+            strict_min_version: '140.0',
+        });
+        expect(firefoxManifest.browser_specific_settings.gecko.data_collection_permissions.required).toContain('personallyIdentifyingInfo');
+    });
+
+    test('deterministic ZIP output is byte-identical for the same files', () => {
+        const os = require('os');
+        const { createDeterministicZip } = require('../scripts/deterministic-zip');
+        const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'taskbridge-zip-'));
+        const sourceDir = path.join(temp, 'source');
+        fs.mkdirSync(path.join(sourceDir, 'nested'), { recursive: true });
+        fs.writeFileSync(path.join(sourceDir, 'manifest.json'), '{"version":"1"}\n');
+        fs.writeFileSync(path.join(sourceDir, 'nested', 'runtime.js'), 'void 0;\n');
+        const first = path.join(temp, 'first.zip');
+        const second = path.join(temp, 'second.zip');
+        createDeterministicZip(sourceDir, first);
+        createDeterministicZip(sourceDir, second);
+        expect(fs.readFileSync(first)).toEqual(fs.readFileSync(second));
+        fs.rmSync(temp, { recursive: true, force: true });
     });
 });

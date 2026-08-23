@@ -1,4 +1,13 @@
-const RELEASE_DIR = 'dist/extension';
+const RELEASE_TARGETS = Object.freeze({
+    chrome: Object.freeze({
+        directory: 'dist/chrome',
+        manifestSource: 'manifest.json',
+    }),
+    firefox: Object.freeze({
+        directory: 'dist/firefox',
+        manifestSource: 'manifest.firefox.json',
+    }),
+});
 
 const RELEASE_FILES = [
     'background.js',
@@ -37,6 +46,22 @@ const RELEASE_FILES = [
     'task-modal.html',
 ];
 
+const RELEASE_FILES_BY_TARGET = Object.freeze({
+    chrome: Object.freeze([...RELEASE_FILES]),
+    firefox: Object.freeze([...RELEASE_FILES]),
+});
+
+const RELEASE_SOURCE_OVERRIDES = Object.freeze({
+    chrome: Object.freeze({
+        'manifest.json': 'manifest.json',
+        'icons/icon-128.png': 'store-assets/taskbridge-icon-128x128.png',
+    }),
+    firefox: Object.freeze({
+        'manifest.json': 'manifest.firefox.json',
+        'icons/icon-128.png': 'store-assets/taskbridge-icon-128x128.png',
+    }),
+});
+
 const BLOCKED_PATTERNS = [
     /^\.env/i,
     /(^|\/)\.env/i,
@@ -59,4 +84,32 @@ const BLOCKED_PATTERNS = [
     /clickup-gmail-backup-.*\.json$/i,
 ];
 
-module.exports = { RELEASE_DIR, RELEASE_FILES, BLOCKED_PATTERNS };
+function requestedTargets(argv = process.argv.slice(2)) {
+    const option = argv.find((argument) => argument.startsWith('--target='));
+    const requested = option ? option.slice('--target='.length) : 'all';
+    if (requested === 'all') return Object.keys(RELEASE_TARGETS);
+    if (!Object.prototype.hasOwnProperty.call(RELEASE_TARGETS, requested)) {
+        throw new Error(`Unknown release target: ${requested}`);
+    }
+    return [requested];
+}
+
+function releaseArchiveName(target, version) {
+    if (!Object.prototype.hasOwnProperty.call(RELEASE_TARGETS, target)) {
+        throw new Error(`Unknown release target: ${target}`);
+    }
+    if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version)) {
+        throw new Error(`Invalid release version: ${version}`);
+    }
+    return `taskbridge-for-clickup-${target}-${version}.zip`;
+}
+
+module.exports = {
+    RELEASE_TARGETS,
+    RELEASE_FILES,
+    RELEASE_FILES_BY_TARGET,
+    RELEASE_SOURCE_OVERRIDES,
+    BLOCKED_PATTERNS,
+    requestedTargets,
+    releaseArchiveName,
+};

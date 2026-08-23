@@ -52,7 +52,10 @@ describe('CGC-CALENDAR-014 read-only agenda local canary', () => {
         expect(manifest.oauth2.scopes).toEqual(expected);
         expect(identity.GOOGLE_CALENDAR_CORE_SCOPES).toEqual(expected);
         expect(manifest.host_permissions).toContain('https://www.googleapis.com/*');
-        expect(source('src/calendar/calendar-capability.ts')).toContain('GOOGLE_CALENDAR_RUNTIME_ENABLED = true');
+        const capability = loadTsModule('src/calendar/calendar-capability.ts');
+        expect(capability.GOOGLE_CALENDAR_RUNTIME_ENABLED).toBe(true);
+        expect(capability.isGoogleCalendarRuntimeSupported('chrome-extension://extension-id/')).toBe(true);
+        expect(capability.isGoogleCalendarRuntimeSupported('moz-extension://extension-id/')).toBe(false);
     });
 
     test('sanitizes and bounds Google events while reducing Meet links to canonical room codes', () => {

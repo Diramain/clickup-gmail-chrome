@@ -69,6 +69,11 @@ npm run validate:release
 
 Use `npm run watch` only for local iteration. Do not commit generated JavaScript, `dist/`, ZIP files, credentials, browser profiles, exported diagnostics, or real Gmail/ClickUp/Meet data.
 
+`npm run build:release` creates validated Chrome and Firefox candidates in
+`dist/chrome` and `dist/firefox`, then writes deterministic ZIP files and hashes
+to `dist/artifacts`. Use `build:release:chrome` or `build:release:firefox` when
+validating one CI target.
+
 ## Loading in Chrome
 
 1. Go to `chrome://extensions`
