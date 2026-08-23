@@ -133,7 +133,7 @@ npm install
 # Build
 npm run build
 
-# Build the supported local release directory and validate it
+# Build and validate the Chrome and Firefox release candidates
 npm run build:release
 npm run validate:release
 
@@ -144,10 +144,15 @@ npm test
 # 1. Go to chrome://extensions
 # 2. Enable "Developer mode"
 # 3. Click "Load unpacked"
-# 4. Select this folder
+# 4. Select dist/chrome
 ```
 
-Only `npm run build:release` plus `npm run validate:release` is supported for the local release directory. Legacy shell packaging scripts are not part of the v2.0 release process.
+`npm run build:release` creates isolated `dist/chrome` and `dist/firefox`
+directories plus versioned ZIP files and SHA-256 hashes under `dist/artifacts`.
+Target-specific commands are available as `build:release:chrome` and
+`build:release:firefox`. The Firefox package remains a migration candidate and
+must not be submitted to AMO until the Firefox functional and security gates
+are complete. Legacy shell packaging scripts are not supported.
 
 ---
 

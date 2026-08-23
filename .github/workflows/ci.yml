@@ -7,9 +7,9 @@ on:
     branches: [main, master]
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,15 +29,65 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build release
-        run: npm run build:release
+  chrome-release:
+    needs: test
+    runs-on: ubuntu-latest
 
-      - name: Validate release
-        run: npm run validate:release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Upload build artifact
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and validate Chrome release
+        run: npm run build:release:chrome
+
+      - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4
         with:
-          name: extension-build
-          path: dist/extension
+          name: taskbridge-chrome
+          path: |
+            dist/chrome
+            dist/artifacts/taskbridge-for-clickup-chrome-*.zip
+            dist/artifacts/SHA256SUMS
+          retention-days: 7
+
+  firefox-release:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and validate Firefox release
+        run: npm run build:release:firefox
+
+      - name: Lint Firefox release
+        run: npm exec --yes --package=web-ext@10.6.0 -- web-ext lint --source-dir dist/firefox
+
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbridge-firefox
+          path: |
+            dist/firefox
+            dist/artifacts/taskbridge-for-clickup-firefox-*.zip
+            dist/artifacts/SHA256SUMS
           retention-days: 7

@@ -87,7 +87,11 @@ npm run build:release
 npm run validate:release
 ```
 
-`scripts/release-allowlist.js` is the exact production package contract. It excludes TypeScript, tests, docs, credentials, backups, source maps, and nested release artifacts. `dist/extension` is reproducible and must pass `validate:release` before packaging.
+`scripts/release-allowlist.js` is the exact package contract for both targets.
+It excludes TypeScript, tests, docs, credentials, backups, source maps, and
+nested release artifacts. Chrome and Firefox are generated into isolated
+`dist/chrome` and `dist/firefox` directories, validated independently, and
+packaged deterministically with SHA-256 hashes in `dist/artifacts`.
 
 Generated JavaScript and release directories are intentionally ignored by Git.
 
@@ -101,7 +105,8 @@ Generated JavaScript and release directories are intentionally ignored by Git.
 
 - Public bug reports and feature proposals use the repository Issue forms.
 - Suspected vulnerabilities use GitHub private vulnerability reporting and must not be disclosed in a public Issue.
-- Pull requests target `main` and must pass the CI typecheck, test, release build, and release validation checks.
+- Pull requests target `main` and must pass typecheck, tests, the independent
+  Chrome and Firefox release jobs, and Firefox `web-ext lint`.
 - `.github/workflows/wiki-sync.yml` publishes maintained documentation to the separate GitHub wiki repository after relevant changes reach `main`.
 - Release ZIP files are generated from the exact `scripts/release-allowlist.js` contract; `dist/` is never committed.
 

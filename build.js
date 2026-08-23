@@ -1,5 +1,5 @@
 /**
- * Build script for Chrome extension
+ * Build script for the shared Chrome and Firefox extension runtime
  * Compiles TypeScript and bundles with esbuild
  */
 
@@ -49,7 +49,7 @@ const commonBuildOptions = {
     bundle: false,
     format: 'iife',
     platform: 'browser',
-    target: ['chrome100'],
+    target: ['chrome102', 'firefox140'],
     sourcemap: isWatch ? 'inline' : false,
     minify: !isWatch,
 };

@@ -124,7 +124,8 @@ anotar solo el comportamiento observado sin correos, tokens ni payloads reales.
 - [x] A27. QA automatizada verde.
 - [x] A28. QA manual Chrome verde.
 - [x] A29. Revision del diff y del rollback completada.
-- [ ] A30. PR aprobado e integrado.
+- [x] A30. PR #2 aprobado e integrado en `main` mediante merge commit
+  `92a54437c993fecba37943d2b59ec1c500080108`.
 
 ### Seguimiento Chrome Web Store
 
@@ -137,7 +138,7 @@ anotar solo el comportamiento observado sin correos, tokens ni payloads reales.
 - [~] A35. Esperar la respuesta de Chrome Web Store; `1.2.0` permanece publica
   hasta la aprobacion y publicacion manual de `2.1.0`.
 
-**Estado Plan A:** `QA_CHROME_GREEN_A30_PENDING`.
+**Estado Plan A:** `GATE_A_GREEN`.
 
 ---
 
@@ -161,30 +162,74 @@ ClickUp, Meet y tiempo antes de habilitar Google Calendar.
 
 ### Fase B0: Contrato Y Matriz De Compatibilidad
 
-- [ ] B0.1. Definir versiones minimas soportadas de Chrome y Firefox.
-- [ ] B0.2. Inventariar APIs WebExtensions usadas y clasificar: compartida,
+- [x] B0.1. Definir versiones minimas soportadas de Chrome y Firefox.
+- [x] B0.2. Inventariar APIs WebExtensions usadas y clasificar: compartida,
   adaptador requerido o implementacion por navegador.
-- [ ] B0.3. Congelar criterios funcionales de Gmail, ClickUp, Meet, tiempo y
+- [x] B0.3. Congelar criterios funcionales de Gmail, ClickUp, Meet, tiempo y
   Calendar.
-- [ ] B0.4. Definir nombres, versiones y contenido exacto de ambos artefactos.
-- [ ] B0.5. Definir Gecko ID estable sin reutilizar identidad de Chrome.
+- [x] B0.4. Definir nombres, versiones y contenido exacto de ambos artefactos.
+- [x] B0.5. Definir Gecko ID estable sin reutilizar identidad de Chrome.
 
-**Gate B0:** matriz revisada, alcance cerrado y cero cambios funcionales.
+#### Contrato B0
+
+- Chrome minimo: `102`, sin cambiar el baseline vigente durante el port.
+- Firefox minimo: `140.0` ESR desktop. No se declara soporte Android.
+- Version de producto compartida inicial: `2.1.0`.
+- Artefacto Chrome: `taskbridge-for-clickup-chrome-2.1.0.zip`, generado en
+  `dist/chrome` con manifiesto Chrome MV3 y service worker.
+- Artefacto Firefox: `taskbridge-for-clickup-firefox-2.1.0.zip`, generado en
+  `dist/firefox` con manifiesto Firefox MV3 y background scripts.
+- Ambos artefactos contienen la misma aplicacion, popup, content scripts,
+  estilos, iconos y modales allowlisted. Solo difieren manifiesto, bootstrap de
+  background y adapters de identidad/plataforma.
+- Gecko ID estable: `taskbridge-for-clickup@leandroiramain.com.ar`. Es una
+  identidad publica de extension, no una credencial, y no reutiliza el ID CWS.
+- El manifiesto Firefox debe declarar `browser_specific_settings.gecko`,
+  incluida la declaracion de recoleccion requerida por AMO vigente, antes de
+  cualquier envio para firma.
+
+#### Matriz De Compatibilidad B0
+
+| Superficie | Clasificacion | Contrato Firefox |
+| --- | --- | --- |
+| `runtime`, mensajes y puertos | Compartida | Normalizar Promise/callback y `lastError` sin debilitar errores |
+| `tabs`, `windows`, `alarms`, `action` | Compartida | Mantener comportamiento y cubrir diferencias con pruebas focales |
+| `storage.local`, `storage.session` | Adaptador requerido | Conservar acceso solo para contextos confiables y detectar capacidades |
+| Background MV3 | Especifica por navegador | Chrome usa `service_worker`; Firefox usa `scripts` como event page |
+| ClickUp OAuth | Adaptador requerido | Registrar y usar redirect derivado del Gecko ID |
+| Google Calendar OAuth | Especifica por navegador | Chrome conserva `getAuthToken`; Firefox queda desactivado hasta implementar `launchWebAuthFlow` y cache propia |
+| Origen interno confiable | Adaptador requerido | Derivar desde `runtime.getURL('/')`; aceptar solo el origen exacto del runtime |
+| Gmail y adjuntos | Compartida | Misma seleccion explicita, allowlists, limites y asociacion por mensaje |
+| ClickUp, Meet y tiempo | Compartida | Misma semantica, escrituras explicitas y ausencia de logs sensibles |
+| Diagnosticos con `showSaveFilePicker` | Opcional por navegador | Fallar cerrado o usar exportacion iniciada por el usuario |
+
+#### Criterio Funcional Congelado
+
+- Chrome debe conservar Gmail, ClickUp, Meet, tiempo y Calendar sin regresiones.
+- El primer Firefox debe cubrir Gmail, ClickUp, Meet y tiempo con las mismas
+  restricciones de seguridad y consentimiento de `2.1.0`.
+- Calendar permanece oculto o desactivado en Firefox hasta completar B4; no se
+  simula soporte parcial ni se reutiliza el cliente OAuth de Chrome.
+- B0 no cambia runtime, permisos, manifests ni comportamiento distribuido.
+
+**Gate B0:** `VERDE`; matriz revisada, alcance cerrado y cero cambios
+funcionales.
 
 ### Fase B1: Build Multi-Browser
 
-- [ ] B1.1. Crear manifiestos fuente o generador determinista para Chrome y
+- [x] B1.1. Crear manifiestos fuente o generador determinista para Chrome y
   Firefox.
-- [ ] B1.2. Mantener `background.service_worker` para Chrome.
-- [ ] B1.3. Usar `background.scripts` para Firefox.
-- [ ] B1.4. Generar `dist/chrome` y `dist/firefox` sin mezclar archivos.
-- [ ] B1.5. Mantener allowlists y validadores separados por target.
-- [ ] B1.6. Producir ZIP independientes y hashes SHA-256.
-- [ ] B1.7. Agregar `web-ext lint` para Firefox.
-- [ ] B1.8. Agregar jobs CI separados para Chrome y Firefox.
+- [x] B1.2. Mantener `background.service_worker` para Chrome.
+- [x] B1.3. Usar `background.scripts` para Firefox.
+- [x] B1.4. Generar `dist/chrome` y `dist/firefox` sin mezclar archivos.
+- [x] B1.5. Mantener allowlists y validadores separados por target.
+- [x] B1.6. Producir ZIP independientes y hashes SHA-256.
+- [x] B1.7. Agregar `web-ext lint` para Firefox. Job fijado a `web-ext@10.6.0`
+  y validado en CI.
+- [x] B1.8. Agregar jobs CI separados para Chrome y Firefox.
 
-**Gate B1:** ambos paquetes reproducibles; Chrome sin regresiones; Firefox carga
-temporalmente sin errores de manifiesto.
+**Gate B1:** `VERDE`; ambos paquetes son reproducibles, Chrome conserva suite
+verde y Firefox instala temporalmente sin errores de manifiesto o startup.
 
 ### Fase B2: Adaptador WebExtensions
 
@@ -297,7 +342,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `BLOQUEADO_POR_A30`.
+**Estado Plan B:** `B1_GREEN_B2_READY`.
 
 ---
 
@@ -325,6 +370,10 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | A33 | Ficha CWS alineada con `2.1.0` | Descripcion actualizada; icono 128x128, cinco capturas 1280x800 y mosaicos 440x280/1400x560 validados como PNG RGB sin alfa | No aplica |
 | 2026-08-23 | A18-A25, A28 | QA manual Chrome verde | Owner valido en Chrome la misma version `2.1.0` enviada a CWS y confirmo todos los correctivos como funcionales | No aplica |
 | 2026-08-23 | B9 discovery | Sitemap publico ya incluye TaskBridge | `/taskbridge/`, `/taskbridge/privacy/` y `/taskbridge/terms/` presentes; `robots.txt` declara `sitemap.xml`; sin cambio requerido hasta modificar contenido publico | No aplica |
+| 2026-08-23 | A30 | Gate A integrado | PR #2 con CI verde; merge commit `92a54437c993fecba37943d2b59ec1c500080108` en `main` | `v2.0.1` preservado |
+| 2026-08-23 | B0 | Contrato y matriz multi-browser cerrados | Inventario estatico del repo y documentacion MDN vigente; rama `feat/firefox-port` creada desde el merge de A30 | No aplica |
+| 2026-08-23 | B1.1-B1.6, B1.8 | Build multi-browser implementado | 34 archivos por target; runtime compartido byte-identico; 540/540 pruebas; Calendar fail-closed en `moz-extension:`; ZIP Chrome `32f630cca218df21987f81401e5de233cc076d15eabc98a8e3de096060cec41c`, Firefox `5f4fc62a96901b2770cbf303baa4f16610b07785c22b5120c19677151607b4e5`; integridad ZIP verde | Rebuild determinista con hashes identicos |
+| 2026-08-23 | B1.7 y Gate B1 | CI y carga temporal Firefox verdes | PR #3: tests, Chrome release y Firefox release con `web-ext lint` verdes; Firefox 154 en perfil descartable instalo y desinstalo el Gecko ID esperado con cero errores de startup | Perfil temporal terminado; sin persistencia ni publicacion |
 
 ## Registro De Decisiones
 
@@ -338,11 +387,15 @@ correos, payloads reales ni trazas sensibles.
 | DEC-06 | 2026-08-23 | El envio a CWS no cierra Gate A | La revision externa no reemplaza QA manual Chrome ni integracion a `main` |
 | DEC-07 | 2026-08-23 | No reutilizar la copia Firefox historica documentada en HKS | Fue eliminada y contradice la estrategia vigente de una sola fuente; HKS queda `needs-review` |
 | DEC-08 | 2026-08-23 | Actualizar sitemap solo ante cambios publicos | Las URLs TaskBridge ya estan incluidas; una release sin cambios de pagina no justifica alterar `lastmod` |
+| DEC-09 | 2026-08-23 | Baseline Firefox `140.0` ESR desktop | Mantener una base soportada y actualizable; Chrome conserva temporalmente su minimo `102` |
+| DEC-10 | 2026-08-23 | Gecko ID `taskbridge-for-clickup@leandroiramain.com.ar` | Firma, redirects y actualizaciones Firefox necesitan identidad estable separada de CWS |
+| DEC-11 | 2026-08-23 | Calendar desactivado en el primer corte Firefox | Firefox no implementa `identity.getAuthToken`; habilitarlo exige adapter y registro OAuth propios |
+| DEC-12 | 2026-08-23 | Dos ZIP versionados desde contenido compartido | Evitar mezcla de manifiestos, OAuth, backgrounds y archivos de distribucion |
 
 ## Estado General
 
-- Plan A: `QA_CHROME_GREEN_A30_PENDING`.
-- Plan B: `BLOQUEADO_POR_A30`.
+- Plan A: `GATE_A_GREEN`.
+- Plan B: `B1_GREEN_B2_READY`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
