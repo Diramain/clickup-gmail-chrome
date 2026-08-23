@@ -4,6 +4,8 @@ const { RELEASE_DIR, RELEASE_FILES, BLOCKED_PATTERNS } = require('./release-allo
 
 const root = path.resolve(__dirname, '..');
 const outDir = path.join(root, RELEASE_DIR);
+const blockedContentTerm = new RegExp(['inbox', 'sdk'].join(''), 'i');
+const textExtensions = new Set(['.css', '.html', '.js', '.json', '.svg']);
 
 function fail(message) {
     console.error(`❌ ${message}`);
@@ -41,6 +43,10 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 
 for (const file of actual) {
     if (BLOCKED_PATTERNS.some((pattern) => pattern.test(file))) fail(`Blocked file in release directory: ${file}`);
+    if (textExtensions.has(path.extname(file))) {
+        const content = fs.readFileSync(path.join(outDir, file), 'utf8');
+        if (blockedContentTerm.test(content)) fail(`Legacy Gmail SDK marker in release file: ${file}`);
+    }
 }
 
 const releaseManifestPath = path.join(outDir, 'manifest.json');

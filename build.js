@@ -127,8 +127,7 @@ async function buildTypeScript() {
 }
 
 async function buildJavaScript() {
-    // SKIPPED: content.js is legacy InboxSDK code
-    // Current implementation uses gmail-native.js which is loaded directly
+    // The current Gmail integration loads gmail-native.js directly.
     console.log('⏩ Skipping legacy JavaScript bundle (gmail-native.js is used instead)');
     return true;
 }

@@ -137,7 +137,7 @@ describe('functional/data blockers', () => {
         const modal = source('src/modal.ts');
         const background = source('background.ts');
         expect(modal).toMatch(/credentials: 'include'/);
-        expect(modal).toMatch(/isAllowedGmailAttachmentUrl\(response\.url\)/);
+        expect(modal).toMatch(/isAllowedGmailAttachmentResponseSource\(response\.url, response\.type\)/);
         expect(modal).toMatch(/GMAIL_ATTACHMENT_MAX_FILE_BYTES/);
         expect(modal).toMatch(/GMAIL_ATTACHMENT_MAX_TOTAL_BYTES/);
         expect(source('src/services/api.service.ts')).not.toMatch(/uploadFileFromUrl|credentials:\s*'include'/);

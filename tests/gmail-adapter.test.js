@@ -32,6 +32,10 @@ describe('GmailAdapter production selectors', () => {
         document.body.innerHTML = '';
     });
 
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     test('imports production TypeScript adapter', () => {
         expect(GmailAdapter.SELECTORS.emailBody).toContain('.a3s.aiL');
     });
@@ -82,15 +86,50 @@ describe('GmailAdapter production selectors', () => {
 
     test('scopes sender, body, and attachment metadata to the clicked Gmail message container', () => {
         document.body.innerHTML = `
-            <div class="gs" id="first"><span class="gD" email="first@example.test"></span><div class="a3s aiL">first</div><a download_url="image/png:first.png:https://mail.google.com/mail/u/0/?att=1"></a></div>
-            <div class="gs" id="second"><span class="gD" email="second@example.test"></span><div class="a3s aiL">second</div><a download_url="image/jpeg:second.jpg:https://mail.google.com/mail/u/0/?att=2"></a></div>`;
+            <div class="adn" id="first">
+                <div class="gs"><span class="gD" email="first@example.test"></span><div class="a3s aiL">first</div></div>
+                <div class="hq"><a download_url="image/png:first.png:https://mail.google.com/mail/u/0/?att=1"></a></div>
+            </div>
+            <div class="adn" id="second">
+                <div class="gs"><span class="gD" email="second@example.test"></span><div class="a3s aiL">second</div></div>
+            </div>
+            <div class="hq" id="second-attachment-footer"><a download_url="application/pdf:second.pdf:https://mail.google.com/mail/u/0/?att=2"></a></div>`;
         const secondBody = document.querySelector('#second .a3s');
         const second = GmailAdapter.getMessageContainer(secondBody);
+        const attachmentElement = document.querySelector('#second-attachment-footer [download_url]');
 
+        expect(second.id).toBe('second');
         expect(GmailAdapter.getSenderEmail(second)).toBe('second@example.test');
         expect(GmailAdapter.getEmailBodyHtml(secondBody)).toBe('second');
-        expect(GmailAdapter.getAttachmentUrls(second)).toEqual([
-            { mimeType: 'image/jpeg', filename: 'second.jpg', url: 'https://mail.google.com/mail/u/0/?att=2' },
+        expect(GmailAdapter.getAllEmailBodies()).toEqual([
+            document.querySelector('#first .a3s'),
+            secondBody,
+        ]);
+        expect(Boolean(secondBody.compareDocumentPosition(attachmentElement) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+        expect(GmailAdapter.getAttachmentUrls(second, secondBody)).toEqual([
+            { mimeType: 'application/pdf', filename: 'second.pdf', url: 'https://mail.google.com/mail/u/0/?att=2' },
+        ]);
+        expect(GmailAdapter.getAttachmentUrls(document.querySelector('#first'), document.querySelector('#first .a3s'))).toEqual([
+            { mimeType: 'image/png', filename: 'first.png', url: 'https://mail.google.com/mail/u/0/?att=1' },
+        ]);
+    });
+
+    test('discovers Gmail-hosted body images without accepting remote images or tracking pixels', () => {
+        document.body.innerHTML = `
+            <div class="a3s aiL" id="body">
+                <img src="https://mail.google.com/mail/u/0/?view=fimg&amp;attid=1" width="180" height="80">
+                <img src="https://mail.google.com/mail/u/0/?view=fimg&amp;attid=1" width="180" height="80">
+                <img src="https://mail.google.com/mail/u/0/?view=fimg&amp;attid=2" width="1" height="1">
+                <img src="https://example.test/remote.jpg" width="200" height="100">
+            </div>`;
+
+        expect(GmailAdapter.getInlineImageUrls(document.querySelector('#body'))).toEqual([
+            {
+                url: 'https://mail.google.com/mail/u/0/?view=fimg&attid=1',
+                filename: 'imagen-en-el-cuerpo-1',
+                mimeType: 'image/*',
+                inline: true,
+            },
         ]);
     });
 });

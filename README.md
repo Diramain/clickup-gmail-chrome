@@ -8,21 +8,20 @@ A Chrome extension that connects Gmail, Google Calendar, Google Meet, and ClickU
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
 ![CI](https://github.com/Diramain/taskbridge-for-clickup/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/Version-2.0.1-blue.svg)
+![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
 ![TaskBridge dashboard](store-assets/taskbridge-screenshot-01-dashboard-1280x800.png)
 
-## What's New in v2.0.1
+## What's New in v2.1.0
 
-- **Simpler connection** - Use your own validated ClickUp personal token from the quick setup. BYO OAuth remains available as an advanced option.
-- **Full-tab workspace** - Dashboard, tasks, agenda, tracking, Gmail, synchronization, connections, and diagnostics share one responsive application.
-- **Calendar and Meet** - Read-only seven-day Calendar views and reduced recurring-event mappings support optional Meet Priority workflows.
-- **Safer Gmail workflows** - Create or link ClickUp tasks with sanitized email HTML and explicitly selected image attachments.
-- **Updated visual system** - The hidden Spiritfox theme now uses its official lockup, dark navigation, and light working surfaces.
-- **Community support** - Feedback links, structured Issue forms, and private vulnerability reporting are available directly from the extension and GitHub.
+- **Native Gmail integration** - InboxSDK remnants are removed from source and release artifacts.
+- **Broader attachments** - Explicitly select supported images, PDF, Office, text, ZIP, and RAR files from individual thread messages.
+- **Inline image discovery** - Gmail-hosted body images appear as selectable attachments with an optional lazy thumbnail view.
+- **Reliable linked tasks** - Deleted or unlinked ClickUp tasks are revalidated and removed from the Gmail bar promptly.
+- **Optional tracked time** - Empty tracked-time input no longer blocks task creation.
 
 Meet Priority remains opt-in and off by default. Calendar access is read-only and limited to events owned by the signed-in Google account. The extension does not request audio, video, microphone, camera, capture, participant, chat, captions, history, or notification permissions.
 
@@ -59,7 +58,7 @@ Meet Priority remains opt-in and off by default. Calendar access is read-only an
 - **Email Tasks Sync** - Sync existing email-task links when migrating PC/browser
 - **Thread ID Tracking** - Email links stored in task description for efficient sync
 - **Sanitized Email HTML Attachment** - Attach a sanitized HTML snapshot of the email to ClickUp tasks
-- **Explicit Image Attachments** - Select PNG, JPEG, GIF, or WebP images with per-file and per-operation limits
+- **Explicit Gmail Attachments** - Select supported Gmail-hosted body images, documents, spreadsheets, presentations, text files, or archives with per-file and per-operation limits
 
 ---
 

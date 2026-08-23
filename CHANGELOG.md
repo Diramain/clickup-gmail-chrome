@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.1.0] - 2026-08-23
+
+### Changed
+- Gmail attachment selection now associates files with the correct message in a multi-message thread, including response attachment footers outside the message container.
+- Explicit Gmail uploads now support bounded PDF, Office, text, ZIP, and RAR files in addition to images.
+- Gmail-hosted images embedded in the message body can now be selected explicitly even when Gmail does not render a separate attachment card.
+- Partial upload notices now identify a safe failure category without logging filenames, URLs, task identifiers, or file contents.
+- Empty tracked-time input is omitted instead of being sent as an invalid `null` value.
+- Gmail attachment downloads accept the exact `mail-attachment.googleusercontent.com` delivery redirect while continuing to reject other redirect hosts.
+- Gmail attachment delivery also accepts numbered `ciN.googleusercontent.com` hosts and non-opaque URL-less responses from Gmail's service worker; opaque and unrelated hosts remain blocked.
+- Deleted or unlinked ClickUp tasks receive an immediate second remote confirmation and are removed from the Gmail bar without waiting through two five-minute validation windows.
+- The attachment selector can switch between compact rows and lazy image thumbnails without previewing documents or changing selection state.
+
+### Security and privacy
+- Gmail uploads require an allowlisted filename extension and MIME type, a recognized file signature or valid UTF-8 text, explicit user selection, and the existing per-file and per-action limits. SVG, macro-enabled Office formats, executables, and scripts remain excluded.
+
 ## [2.0.1] - 2026-08-23
 
 ### Added
@@ -244,6 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[Unreleased]: https://github.com/Diramain/taskbridge-for-clickup/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/Diramain/taskbridge-for-clickup/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v2.0.0-beta.1...v2.0.1
 [2.0.0-beta.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.4...v2.0.0-beta.1
 [1.2.3]: https://github.com/Diramain/taskbridge-for-clickup/compare/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd...main

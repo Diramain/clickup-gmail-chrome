@@ -87,16 +87,19 @@ describe('B1 privacy hardening', () => {
         expect(result.draftClientSecret).toBeUndefined();
     });
 
-    test('privacy policy matches v2.0.0 local data, work-session tracking, Meet minimization, export, and retention claims', () => {
+    test('privacy policy matches current local data, work-session tracking, Meet minimization, export, and retention claims', () => {
         const policy = source('PRIVACY_POLICY.md');
 
-        expect(policy).toContain('**Last Updated:** 2026-08-22');
+        expect(policy).toContain('**Last Updated:** 2026-08-23');
         expect(policy).toMatch(/reads Gmail data only when you initiate a create or attach action/i);
         expect(policy).toMatch(/subject[\s\S]*sender[\s\S]*Gmail thread ID[\s\S]*Gmail URL/i);
         expect(policy).toMatch(/sanitized HTML representation of the email as a ClickUp task attachment/i);
         expect(policy).toMatch(/checkbox is enabled by default/i);
-        expect(policy).toMatch(/explicitly select image attachments/i);
-        expect(policy).toMatch(/PNG, JPEG, GIF, and WebP[\s\S]*SVG is excluded/i);
+        expect(policy).toMatch(/explicitly select supported attachments/i);
+        expect(policy).toMatch(/PNG, JPEG, GIF, WebP, PDF, DOC\/DOCX, XLS\/XLSX, PPT\/PPTX, TXT, CSV, ZIP, and RAR/i);
+        expect(policy).toMatch(/images displayed inside the email body only when Gmail serves them from HTTPS `mail\.google\.com`/i);
+        expect(policy).toMatch(/thumbnail view loads validated Gmail-hosted images[\s\S]*does not select them or send them to ClickUp/i);
+        expect(policy).toMatch(/SVG, macro-enabled Office formats, executables, and scripts are also excluded/i);
         expect(policy).toMatch(/10 MiB per file and 20 MiB per action/i);
         expect(policy).toMatch(/background service worker does not fetch Gmail attachments/i);
         expect(policy).toMatch(/Attachment URLs and bytes are not persisted or logged/i);

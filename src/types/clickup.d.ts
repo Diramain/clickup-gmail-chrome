@@ -273,12 +273,13 @@ export interface AttachmentInfo {
     filename: string;
     mimeType: string;
     size?: number;
+    inline?: true;
 }
 
-export interface GmailImageAttachmentUpload {
+export interface GmailAttachmentUpload {
     taskId: string;
     filename: string;
-    mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+    mimeType: string;
     byteLength: number;
     base64: string;
 }
@@ -338,7 +339,7 @@ export type MessageAction =
     | 'createTaskFromEmail'
     | 'createTaskSimple'
     | 'attachToTask'
-    | 'uploadGmailImageAttachment'
+    | 'uploadGmailAttachment'
     | 'getGmailIntegrationPreference'
     | 'setGmailIntegrationPreference'
     | 'validateTask'

@@ -254,6 +254,11 @@ export function toVisibleLinkedTasks(tasks: EmailTaskMappingV2[] = []): EmailTas
     return tasks.filter(task => task.linkStatus !== 'not_found' && task.linkStatus !== 'unlinked');
 }
 
+export function needsInactiveLinkConfirmation(task: EmailTaskMappingV2, result: LinkValidationResult): boolean {
+    return (result.status === 'not_found' && task.linkStatus === 'not_found_candidate')
+        || (result.status === 'unlinked' && task.linkStatus === 'unlinked_candidate');
+}
+
 export function shouldValidateLink(task: Pick<EmailTaskMappingV2, 'lastValidatedAt'>, now = Date.now(), ttlMs = LINK_REVALIDATION_TTL_MS): boolean {
     return !task.lastValidatedAt || now - task.lastValidatedAt >= ttlMs;
 }

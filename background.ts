@@ -102,7 +102,7 @@ import {
     invalidateGoogleCalendarToken,
     requestGoogleCalendarToken,
 } from './src/google/google-identity.service';
-import { decodeAndValidateGmailImage, type GmailImageUploadPayload } from './src/gmail-attachment-security';
+import { decodeAndValidateGmailAttachment, type GmailAttachmentUploadPayload } from './src/gmail-attachment-security';
 import { GMAIL_INTEGRATION_PREFERENCE_KEY, normalizeGmailIntegrationPreference } from './src/gmail-preferences';
 import { normalizePersonalToken, resolveClickUpAuthMethod, type ClickUpAuthMethod } from './src/clickup-auth';
 
@@ -1039,8 +1039,8 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                 emailData: message.emailData || (data ? data.emailData : undefined)
             });
 
-        case 'uploadGmailImageAttachment':
-            return await uploadGmailImageAttachment(data as GmailImageUploadPayload);
+        case 'uploadGmailAttachment':
+            return await uploadGmailAttachment(data as GmailAttachmentUploadPayload);
 
         case 'getGmailIntegrationPreference': {
             const stored = await chrome.storage.local.get(GMAIL_INTEGRATION_PREFERENCE_KEY);
@@ -3367,9 +3367,9 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     return task;
 }
 
-async function uploadGmailImageAttachment(data: GmailImageUploadPayload): Promise<{ success: true }> {
-    const bytes = decodeAndValidateGmailImage(data);
-    if (!bytes) throw new Error('INVALID_GMAIL_IMAGE_ATTACHMENT');
+async function uploadGmailAttachment(data: GmailAttachmentUploadPayload): Promise<{ success: true }> {
+    const bytes = decodeAndValidateGmailAttachment(data);
+    if (!bytes) throw new Error('INVALID_GMAIL_ATTACHMENT');
     await ensureAPI();
     await clickupAPI!.uploadBinaryAttachment(data.taskId, bytes, data.filename, data.mimeType);
     return { success: true };

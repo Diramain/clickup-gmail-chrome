@@ -10,11 +10,13 @@ import { extractTaskIdCandidate, rankTaskSearchResults } from './task-search';
 import {
     GMAIL_ATTACHMENT_MAX_FILE_BYTES,
     GMAIL_ATTACHMENT_MAX_TOTAL_BYTES,
+    getGmailImageExtension,
+    isAllowedGmailAttachmentType,
+    isAllowedGmailAttachmentResponseSource,
     isAllowedGmailAttachmentUrl,
-    isAllowedGmailImageMimeType,
+    isAllowedGmailInlineImageCandidate,
     sanitizeGmailAttachmentFilename,
     type GmailAttachmentMetadata,
-    type GmailImageMimeType,
 } from './gmail-attachment-security';
 
 // ============================================================================
@@ -27,7 +29,7 @@ interface EmailData {
     from: string;
     html: string;
     htmlSanitized?: true;
-    attachments?: { url: string; filename: string; mimeType: string }[];
+    attachments?: GmailAttachmentMetadata[];
 }
 
 interface ListItem {
@@ -330,8 +332,14 @@ export class TaskModal {
           </div>
 
           <fieldset class="cu-attachment-picker cu-attach-files-row">
-            <legend>Imágenes adjuntas del mensaje</legend>
-            <p class="cu-hint">Elegí explícitamente qué imágenes subir. PNG, JPEG, GIF o WebP; máximo 10 MiB por archivo y 20 MiB en total. SVG no está permitido.</p>
+            <legend>Archivos adjuntos del mensaje</legend>
+            <div class="cu-attachment-toolbar">
+              <p class="cu-hint">Elegí explícitamente qué archivos subir. Incluye imágenes alojadas por Gmail dentro del cuerpo, PDF, Office, TXT, CSV, ZIP o RAR; máximo 10 MiB por archivo y 20 MiB en total.</p>
+              <div class="cu-attachment-actions">
+                <button type="button" id="cu-toggle-attachment-preview" class="cu-attachment-toggle" aria-pressed="false" hidden>Miniaturas</button>
+                <button type="button" id="cu-toggle-attachments" class="cu-attachment-toggle" aria-pressed="false">Marcar todos</button>
+              </div>
+            </div>
             <div id="cu-attachment-list" class="cu-attachment-list"></div>
             <p id="cu-attachment-status" class="cu-hint" role="status" aria-live="polite"></p>
           </fieldset>
@@ -366,9 +374,10 @@ export class TaskModal {
 
         const attachments = (this.emailData.attachments || [])
             .map((attachment, originalIndex) => ({ attachment, originalIndex }))
-            .filter(({ attachment }) => isAllowedGmailImageMimeType(attachment.mimeType)
-                && isAllowedGmailAttachmentUrl(attachment.url)
-                && sanitizeGmailAttachmentFilename(attachment.filename));
+            .filter(({ attachment }) => isAllowedGmailInlineImageCandidate(attachment)
+                || (isAllowedGmailAttachmentType(attachment.filename, attachment.mimeType)
+                    && isAllowedGmailAttachmentUrl(attachment.url)
+                    && sanitizeGmailAttachmentFilename(attachment.filename)));
         const attachCount = attachments.length;
         const attachFilesRow = this.modal!.querySelector('.cu-attach-files-row') as HTMLElement;
         const attachmentList = this.modal!.querySelector('#cu-attachment-list') as HTMLElement;
@@ -378,16 +387,19 @@ export class TaskModal {
             attachments.forEach(({ attachment, originalIndex }) => {
                 const label = document.createElement('label');
                 label.className = 'cu-attachment-option';
+                if (this.isAttachmentPreviewable(attachment)) label.classList.add('cu-attachment-option-image');
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.dataset.attachmentIndex = String(originalIndex);
                 const name = document.createElement('span');
                 name.textContent = attachment.filename;
                 const type = document.createElement('small');
-                type.textContent = attachment.mimeType.replace('image/', '').toUpperCase();
+                type.textContent = attachment.inline ? 'EN EL CUERPO' : attachment.mimeType.replace('image/', '').toUpperCase();
                 label.append(checkbox, name, type);
                 attachmentList.append(label);
             });
+            (this.modal!.querySelector('#cu-toggle-attachment-preview') as HTMLButtonElement).hidden = !attachments.some(({ attachment }) => this.isAttachmentPreviewable(attachment));
+            this.updateAttachmentToggleState();
         } else {
             attachFilesRow.hidden = true;
         }
@@ -568,6 +580,16 @@ export class TaskModal {
         // Submit
         this.modal!.querySelector('.cu-btn-submit')!.addEventListener('click', () => this.submit());
 
+        const attachmentList = this.modal!.querySelector('#cu-attachment-list') as HTMLElement;
+        attachmentList.addEventListener('change', () => this.updateAttachmentToggleState());
+        this.modal!.querySelector('#cu-toggle-attachments')!.addEventListener('click', () => {
+            const checkboxes = Array.from(attachmentList.querySelectorAll<HTMLInputElement>('[data-attachment-index]'));
+            const selectAll = checkboxes.some(checkbox => !checkbox.checked);
+            checkboxes.forEach(checkbox => { checkbox.checked = selectAll; });
+            this.updateAttachmentToggleState();
+        });
+        this.modal!.querySelector('#cu-toggle-attachment-preview')!.addEventListener('click', () => this.toggleAttachmentPreview());
+
         // Task search
         const taskSearchInput = this.modal!.querySelector('#cu-task-search') as HTMLInputElement;
         taskSearchInput.addEventListener('input', () => {
@@ -595,6 +617,45 @@ export class TaskModal {
                 const results = this.modal.querySelector('.cu-task-search-results');
                 if (results) results.classList.add('hidden');
             }
+        });
+    }
+
+    updateAttachmentToggleState(): void {
+        const button = this.modal!.querySelector('#cu-toggle-attachments') as HTMLButtonElement;
+        const checkboxes = Array.from(this.modal!.querySelectorAll<HTMLInputElement>('[data-attachment-index]'));
+        const allSelected = checkboxes.length > 0 && checkboxes.every(checkbox => checkbox.checked);
+        button.textContent = allSelected ? 'Desmarcar todos' : 'Marcar todos';
+        button.setAttribute('aria-pressed', String(allSelected));
+    }
+
+    isAttachmentPreviewable(attachment: GmailAttachmentMetadata): boolean {
+        return isAllowedGmailInlineImageCandidate(attachment)
+            || (getGmailImageExtension(attachment.mimeType) !== null
+                && isAllowedGmailAttachmentType(attachment.filename, attachment.mimeType)
+                && isAllowedGmailAttachmentUrl(attachment.url));
+    }
+
+    toggleAttachmentPreview(): void {
+        const button = this.modal!.querySelector('#cu-toggle-attachment-preview') as HTMLButtonElement;
+        const list = this.modal!.querySelector('#cu-attachment-list') as HTMLElement;
+        const showThumbnails = button.getAttribute('aria-pressed') !== 'true';
+        list.classList.toggle('cu-attachment-list-thumbnails', showThumbnails);
+        button.setAttribute('aria-pressed', String(showThumbnails));
+        button.textContent = showThumbnails ? 'Vista lista' : 'Miniaturas';
+        if (!showThumbnails || !this.emailData) return;
+
+        list.querySelectorAll<HTMLElement>('.cu-attachment-option-image').forEach(option => {
+            if (option.querySelector('.cu-attachment-preview')) return;
+            const input = option.querySelector<HTMLInputElement>('[data-attachment-index]');
+            const attachment = input ? this.emailData!.attachments?.[Number(input.dataset.attachmentIndex)] : undefined;
+            if (!attachment || !this.isAttachmentPreviewable(attachment)) return;
+            const image = document.createElement('img');
+            image.className = 'cu-attachment-preview';
+            image.src = attachment.url;
+            image.alt = '';
+            image.loading = 'lazy';
+            image.decoding = 'async';
+            option.append(image);
         });
     }
 
@@ -1381,7 +1442,7 @@ export class TaskModal {
                 listId: this.selectedListId,
                 taskData: taskData,
                 emailData,
-                timeTracked: timeTracked,
+                ...(timeTracked ? { timeTracked } : {}),
                 teamId: this.teamId
             }) as TaskResult;
 
@@ -1389,7 +1450,7 @@ export class TaskModal {
                 const uploads = await this.uploadSelectedAttachments(response.id);
                 this.showSuccessPopup(response, uploads.failed);
                 if ((response as any).warning || uploads.failed > 0) {
-                    this.showToast(`Tarea creada; ${uploads.failed > 0 ? `${uploads.failed} imagen${uploads.failed === 1 ? '' : 'es'} no se pudieron subir` : 'el email tuvo advertencias'}.`, 'error');
+                    this.showToast(`Tarea creada; ${uploads.failed > 0 ? `${uploads.failed} archivo${uploads.failed === 1 ? '' : 's'} no se pudieron subir${uploads.failureReason ? `: ${uploads.failureReason}` : ''}` : 'el email tuvo advertencias'}.`, 'error');
                 }
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
                     detail: { task: response, threadId: this.emailData!.threadId }
@@ -1423,8 +1484,8 @@ export class TaskModal {
                 const uploads = await this.uploadSelectedAttachments(response.id || taskId);
                 const failed = uploads.failed;
                 this.showToast((response as any).warning || failed > 0
-                    ? `Email vinculado; ${failed > 0 ? `${failed} imagen${failed === 1 ? '' : 'es'} no se pudieron subir` : 'se completó con advertencias'}.`
-                    : `Email vinculado${uploads.uploaded > 0 ? ` con ${uploads.uploaded} imagen${uploads.uploaded === 1 ? '' : 'es'}` : ''}.`,
+                    ? `Email vinculado; ${failed > 0 ? `${failed} archivo${failed === 1 ? '' : 's'} no se pudieron subir${uploads.failureReason ? `: ${uploads.failureReason}` : ''}` : 'se completó con advertencias'}.`
+                    : `Email vinculado${uploads.uploaded > 0 ? ` con ${uploads.uploaded} archivo${uploads.uploaded === 1 ? '' : 's'}` : ''}.`,
                 (response as any).warning || failed > 0 ? 'error' : 'success');
 
                 window.dispatchEvent(new CustomEvent('cu-task-created', {
@@ -1450,7 +1511,7 @@ export class TaskModal {
         btn.disabled = false;
     }
 
-    async uploadSelectedAttachments(taskId: string): Promise<{ uploaded: number; failed: number }> {
+    async uploadSelectedAttachments(taskId: string): Promise<{ uploaded: number; failed: number; failureReason?: string }> {
         if (!this.emailData) return { uploaded: 0, failed: 0 };
         const selected = Array.from(this.modal!.querySelectorAll<HTMLInputElement>('[data-attachment-index]:checked'))
             .map(input => this.emailData!.attachments?.[Number(input.dataset.attachmentIndex)])
@@ -1459,42 +1520,63 @@ export class TaskModal {
         let totalBytes = 0;
         let uploaded = 0;
         let failed = 0;
+        let failureReason: string | undefined;
 
-        for (const attachment of selected) {
-            const filename = sanitizeGmailAttachmentFilename(attachment.filename);
-            if (!filename || !isAllowedGmailImageMimeType(attachment.mimeType) || !isAllowedGmailAttachmentUrl(attachment.url)) {
+        for (const [attachmentIndex, attachment] of selected.entries()) {
+            const inline = isAllowedGmailInlineImageCandidate(attachment);
+            let filename = inline ? attachment.filename : sanitizeGmailAttachmentFilename(attachment.filename);
+            if ((!inline && (!filename || !isAllowedGmailAttachmentType(filename, attachment.mimeType))) || !isAllowedGmailAttachmentUrl(attachment.url)) {
                 failed++;
+                failureReason ||= 'los metadatos del archivo no son válidos';
                 continue;
             }
             status.textContent = `Procesando ${uploaded + failed + 1} de ${selected.length}…`;
             try {
                 const response = await fetch(attachment.url, { credentials: 'include', redirect: 'follow', cache: 'no-store' });
-                if (!response.ok || !isAllowedGmailAttachmentUrl(response.url)) throw new Error('ATTACHMENT_RESPONSE_REJECTED');
+                if (!response.ok) throw new Error('ATTACHMENT_HTTP_REJECTED');
+                if (!isAllowedGmailAttachmentResponseSource(response.url, response.type)) throw new Error('ATTACHMENT_REDIRECT_REJECTED');
                 const responseMime = (response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
-                if (!isAllowedGmailImageMimeType(responseMime) || responseMime !== attachment.mimeType.toLowerCase()) throw new Error('ATTACHMENT_MIME_REJECTED');
+                if (inline) {
+                    const extension = getGmailImageExtension(responseMime);
+                    if (!extension) throw new Error('ATTACHMENT_MIME_REJECTED');
+                    filename = `imagen-en-el-cuerpo-${attachmentIndex + 1}.${extension}`;
+                }
+                if (!isAllowedGmailAttachmentType(filename, responseMime)) throw new Error('ATTACHMENT_MIME_REJECTED');
                 const declaredSize = Number(response.headers.get('content-length'));
                 if (Number.isFinite(declaredSize) && declaredSize > GMAIL_ATTACHMENT_MAX_FILE_BYTES) throw new Error('ATTACHMENT_TOO_LARGE');
                 const bytes = new Uint8Array(await response.arrayBuffer());
                 if (bytes.length === 0 || bytes.length > GMAIL_ATTACHMENT_MAX_FILE_BYTES || totalBytes + bytes.length > GMAIL_ATTACHMENT_MAX_TOTAL_BYTES) throw new Error('ATTACHMENT_SIZE_REJECTED');
                 totalBytes += bytes.length;
                 const uploadResponse = await chrome.runtime.sendMessage({
-                    action: 'uploadGmailImageAttachment',
+                    action: 'uploadGmailAttachment',
                     data: {
                         taskId,
                         filename,
-                        mimeType: responseMime as GmailImageMimeType,
+                        mimeType: responseMime,
                         byteLength: bytes.length,
                         base64: this.bytesToBase64(bytes),
                     },
                 }) as { success?: boolean };
                 if (uploadResponse?.success !== true) throw new Error('ATTACHMENT_UPLOAD_REJECTED');
                 uploaded++;
-            } catch {
+            } catch (error) {
                 failed++;
+                const code = error instanceof Error ? error.message : '';
+                if (code === 'ATTACHMENT_TOO_LARGE' || code === 'ATTACHMENT_SIZE_REJECTED') {
+                    failureReason ||= 'se superó el límite de tamaño';
+                } else if (code === 'ATTACHMENT_MIME_REJECTED') {
+                    failureReason ||= 'el formato recibido no coincide con el archivo';
+                } else if (code === 'ATTACHMENT_HTTP_REJECTED') {
+                    failureReason ||= 'Gmail devolvió un error al descargar';
+                } else if (code === 'ATTACHMENT_REDIRECT_REJECTED') {
+                    failureReason ||= 'Gmail redirigió a un host no permitido';
+                } else {
+                    failureReason ||= 'ClickUp rechazó la subida';
+                }
             }
         }
         status.textContent = selected.length > 0 ? `${uploaded} subida${uploaded === 1 ? '' : 's'} · ${failed} fallida${failed === 1 ? '' : 's'}` : '';
-        return { uploaded, failed };
+        return { uploaded, failed, failureReason };
     }
 
     bytesToBase64(bytes: Uint8Array): string {
@@ -1528,7 +1610,7 @@ export class TaskModal {
                 <div class="cu-success-icon">✓</div>
                  <div class="cu-success-title">${failedAttachments > 0 ? 'Tarea creada parcialmente' : 'Tarea creada'}</div>
                  <div class="cu-success-task-name">${this.escapeHtml(task.name)}</div>
-                 ${failedAttachments > 0 ? `<p class="cu-success-warning">La tarea y el email se guardaron, pero ${failedAttachments} imagen${failedAttachments === 1 ? '' : 'es'} fallaron.</p>` : ''}
+                 ${failedAttachments > 0 ? `<p class="cu-success-warning">La tarea y el email se guardaron, pero ${failedAttachments} archivo${failedAttachments === 1 ? '' : 's'} fallaron.</p>` : ''}
                 <button class="cu-btn cu-btn-primary cu-success-view-btn" data-url="${escapeHTML(safeClickUpUrl(task.url || ''))}">
                     🔗 Ver tarea en ClickUp
                 </button>

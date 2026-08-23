@@ -681,6 +681,38 @@
     font-weight: 700;
 }
 
+.cu-attachment-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+}
+
+.cu-attachment-toolbar .cu-hint { margin: 0; }
+
+.cu-attachment-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+.cu-attachment-toggle {
+    flex: 0 0 auto;
+    padding: 3px 7px;
+    border: 1px solid #c9c5e8;
+    border-radius: 6px;
+    background: #f7f5ff;
+    color: #5546bd;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.cu-attachment-toggle:hover { border-color: #7b68ee; background: #efecff; }
+.cu-attachment-toggle:focus-visible { outline: 2px solid #6c5ce7; outline-offset: 2px; }
+
 .cu-attachment-list { display: grid; gap: 7px; }
 
 .cu-attachment-option {
@@ -698,6 +730,41 @@
 .cu-attachment-option span { overflow: hidden; color: #333541; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .cu-attachment-option small { color: #777b88; font-size: 10px; font-weight: 700; }
 .cu-attachment-option input { width: 16px; height: 16px; accent-color: #6C5CE7; }
+
+.cu-attachment-preview { display: none; }
+
+.cu-attachment-list-thumbnails {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    align-items: start;
+}
+
+.cu-attachment-list-thumbnails .cu-attachment-option:not(.cu-attachment-option-image) { grid-column: 1 / -1; }
+
+.cu-attachment-list-thumbnails .cu-attachment-option-image {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.cu-attachment-list-thumbnails .cu-attachment-preview {
+    display: block;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    width: 100%;
+    height: 112px;
+    border-radius: 5px;
+    background: #f1f1f6;
+    object-fit: contain;
+}
+
+.cu-attachment-list-thumbnails .cu-attachment-option-image input,
+.cu-attachment-list-thumbnails .cu-attachment-option-image span,
+.cu-attachment-list-thumbnails .cu-attachment-option-image small { grid-row: 2; }
+
+@media (max-width: 620px) {
+    .cu-attachment-toolbar { align-items: stretch; flex-direction: column; gap: 6px; }
+    .cu-attachment-actions { align-self: flex-start; }
+    .cu-attachment-list-thumbnails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Footer */
 .cu-modal-footer {
