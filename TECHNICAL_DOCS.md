@@ -1,6 +1,6 @@
-# TaskBridge for ClickUp 2.0
+# TaskBridge for ClickUp 2.0.1
 
-Technical reference for the Chrome Manifest V3 extension.
+Technical reference for the Chrome Manifest V3 extension. The canonical versioned source is this repository; the GitHub wiki mirrors the maintained user, technical, contribution, security, privacy, and release documents from `main`.
 
 ## Runtime Architecture
 
@@ -92,6 +92,14 @@ Generated JavaScript and release directories are intentionally ignored by Git.
 - TypeScript strict mode includes unused local/parameter checks.
 - Jest covers message authorization, privacy, Calendar minimization, Meet mapping, Gmail uploads, timer behavior, release packaging, and UI contracts.
 - Real OAuth/API QA is operator-controlled and is not implied by synthetic test success.
+
+## Community and Release Operations
+
+- Public bug reports and feature proposals use the repository Issue forms.
+- Suspected vulnerabilities use GitHub private vulnerability reporting and must not be disclosed in a public Issue.
+- Pull requests target `main` and must pass the CI typecheck, test, release build, and release validation checks.
+- `.github/workflows/wiki-sync.yml` publishes maintained documentation to the separate GitHub wiki repository after relevant changes reach `main`.
+- Release ZIP files are generated from the exact `scripts/release-allowlist.js` contract; `dist/` is never committed.
 
 ## Known Boundaries
 

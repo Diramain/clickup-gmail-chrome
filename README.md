@@ -1,4 +1,4 @@
-# ClickUp Gmail Chrome Extension
+# TaskBridge for ClickUp
 
 > 🤖 **Built with AI**: This extension was developed by [**Leandro Iramain**](https://leandroiramain.com.ar) with the assistance of AI.
 
@@ -7,30 +7,24 @@ A Chrome extension that connects Gmail, Google Calendar, Google Meet, and ClickU
 ![Chrome](https://img.shields.io/badge/Chrome-MV3-green.svg)
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
-![Tests](https://img.shields.io/badge/Tests-local%20suite-brightgreen.svg)
-![Version](https://img.shields.io/badge/Version-2.0.0--beta.1-blue.svg)
+![CI](https://github.com/Diramain/taskbridge-for-clickup/actions/workflows/ci.yml/badge.svg)
+![Version](https://img.shields.io/badge/Version-2.0.1-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
-## 🆕 What's New in v2.0.0-beta.1
+![TaskBridge dashboard](store-assets/taskbridge-screenshot-01-dashboard-1280x800.png)
 
-- **Full-tab app** - The toolbar popup now opens a responsive application for dashboard, tasks, agenda, tracking, and settings.
-- **Calendar agenda** - Read-only Agenda and Week views cover seven days, overlapping events, declined-event dimming, and explicit task destinations.
-- **Meet mappings** - Calendar occurrences or recurring series can be linked to ClickUp tasks and reused by Meet Priority.
-- **Gmail controls** - The Gmail integration can be shown or hidden, and task creation supports explicit safe image attachments.
-- **Work schedule** - Configure working days and daily hour targets with a calculated weekly objective.
-- **Compact task modal** - A denser responsive form includes ClickUp-compatible Markdown with reversible visual/source editing.
-- **Release hardening** - API requests have bounded timeouts, startup is race-safe, Gmail HTML uses an attribute allowlist, and generated releases include the full application.
+## What's New in v2.0.1
+
+- **Simpler connection** - Use your own validated ClickUp personal token from the quick setup. BYO OAuth remains available as an advanced option.
+- **Full-tab workspace** - Dashboard, tasks, agenda, tracking, Gmail, synchronization, connections, and diagnostics share one responsive application.
+- **Calendar and Meet** - Read-only seven-day Calendar views and reduced recurring-event mappings support optional Meet Priority workflows.
+- **Safer Gmail workflows** - Create or link ClickUp tasks with sanitized email HTML and explicitly selected image attachments.
+- **Updated visual system** - The hidden Spiritfox theme now uses its official lockup, dark navigation, and light working surfaces.
+- **Community support** - Feedback links, structured Issue forms, and private vulnerability reporting are available directly from the extension and GitHub.
 
 Meet Priority remains opt-in and off by default. Calendar access is read-only and limited to events owned by the signed-in Google account. The extension does not request audio, video, microphone, camera, capture, participant, chat, captions, history, or notification permissions.
-
-- ✅ **Link reliability:** Gmail thread links now use a safer V2 state model with validation, retries, and less accidental unlinking.
-- 🔐 **Message and render hardening:** Runtime messages are origin/schema checked; Gmail HTML and high-risk UI sinks are sanitized before use.
-- 💾 **Safer local data tools:** Exports are versioned and limited to link/settings data; clear requires a recent export and explicit confirmation.
-- 🩺 **Safe Diagnostics:** An off-by-default, 200-event browser-session log can be exported or cleared separately; closed allowlists exclude tokens, headers, URLs, account/task identifiers, names, emails, payloads, and Gmail/Meet content.
-- 📦 **Release preflight:** Local release builds use an exact allowlist and blocked-file checks; GitHub prerelease assets are unsigned ZIP files for unpacked installation.
-- ✍️ **Author metadata:** Extension metadata and popup footer now identify Leandro Iramain as author.
 
 
 ---
@@ -107,13 +101,18 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 | [Changelog](CHANGELOG.md) | Version history and changes |
 | [Contributing](CONTRIBUTING.md) | How to contribute |
 | [Security](SECURITY.md) | Security policy |
+| [Privacy Policy](PRIVACY_POLICY.md) | Data use and permission disclosure |
 | [Wiki](https://github.com/Diramain/taskbridge-for-clickup/wiki) | Online documentation |
 
 ---
 
 ## 📦 Installation
 
-### From Release (Recommended)
+### From Chrome Web Store
+
+Use the [TaskBridge for ClickUp listing](https://chromewebstore.google.com/detail/gihebfjgjfnglhadpeemhpdoamklckdg) when the Store version is available for your account.
+
+### From GitHub Release
 
 1. Download the latest release from [Releases](https://github.com/Diramain/taskbridge-for-clickup/releases)
 2. Extract the ZIP file
@@ -181,7 +180,7 @@ taskbridge-for-clickup/
 │   ├── meet/              # Minimal Meet detector, private room identity, and priority state
 │   ├── gmail-native.ts    # Gmail DOM integration
 │   ├── gmail-adapter.ts   # DOM abstraction layer
-│   ├── modal.ts           # Task creation modal (59KB)
+│   ├── modal.ts           # Task creation modal
 │   ├── logger.ts          # Structured logging
 │   └── types/             # TypeScript definitions
 ├── app/                   # Responsive full-tab application
@@ -251,7 +250,7 @@ The local baseline includes typecheck, Jest, normal build, release build, releas
 ## 🙏 Credits
 
 - **Leandro Iramain** ([website](https://leandroiramain.com.ar), [@diramain](https://github.com/Diramain)) - Author / Product Manager
-- **Anthropic Claude / Antigravity** - AI Pair Programming
+- **AI-assisted engineering tools** - Development and review support
 - **ClickUp API** - Task management platform
 
 ---
@@ -269,5 +268,5 @@ The local baseline includes typecheck, Jest, normal build, release build, releas
 ---
 
 <p align="center">
-  Built with ❤️ and AI by a PM who dared to code
+  Built with AI assistance by a Product Manager
 </p>

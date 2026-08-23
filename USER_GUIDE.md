@@ -1,7 +1,7 @@
-# ClickUp Gmail Chrome Extension
+# TaskBridge for ClickUp
 ## User Guide
 
-**Version:** 2.0.0-beta.1
+**Version:** 2.0.1
 **Last Updated:** August 2026
 
 ---
@@ -10,10 +10,9 @@
 
 ## Installation
 
-1. Download and extract the ZIP from GitHub Releases
-2. Open `chrome://extensions` and enable Developer mode
-3. Choose **Load unpacked** and select the extracted folder
-4. Pin the extension to your toolbar for easy access
+1. Install TaskBridge from the [Chrome Web Store](https://chromewebstore.google.com/detail/gihebfjgjfnglhadpeemhpdoamklckdg) when the Store version is available, or download and extract the current ZIP from [GitHub Releases](https://github.com/Diramain/taskbridge-for-clickup/releases).
+2. For a GitHub ZIP, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select the extracted folder.
+3. Pin the extension to your toolbar for easy access.
 
 ## Initial Setup
 
@@ -204,9 +203,9 @@ Safe Diagnostics uses separate controls and is not included in the regular data 
 
 ## "Not authenticated" Error
 
-1. Go to **Config** tab
-2. Click "Test Token Refresh"
-3. If fails, sign out and sign in again
+1. Open **Conexión** in the full application.
+2. Confirm that your personal token is current, or that your advanced OAuth app configuration is still valid.
+3. Reconnect explicitly. TaskBridge does not invent or silently refresh unsupported ClickUp OAuth grants.
 
 ## Tasks Not Appearing in Gmail
 
@@ -288,8 +287,9 @@ A: No, data is stored locally per browser.
 # Support
 
 - **GitHub:** [github.com/Diramain/taskbridge-for-clickup](https://github.com/Diramain/taskbridge-for-clickup)
-- **Issues:** Report bugs on GitHub Issues
-- **Feature Requests:** Create a GitHub Issue with "Feature" label
+- **Issues:** Use the [guided Issue forms](https://github.com/Diramain/taskbridge-for-clickup/issues/new/choose) for bugs and feature requests.
+- **Security:** Use [private vulnerability reporting](https://github.com/Diramain/taskbridge-for-clickup/security/advisories/new), never a public Issue.
+- **Wiki:** Read the [online documentation](https://github.com/Diramain/taskbridge-for-clickup/wiki).
 
 ---
 

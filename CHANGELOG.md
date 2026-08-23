@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.1] - Unreleased
+## [2.0.1] - 2026-08-23
 
 ### Added
 - Visible feedback and repository links in the full application and minimal popup.
@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Spiritfox uses a light content surface, dark navigation, and the official brand lockup in both the full application and popup.
+- GitHub README, contribution guidance, security policy, CI release validation, and wiki synchronization now reflect the current product and release process.
+
+### Security and privacy
+- GitHub private vulnerability reporting is enabled and linked from the extension, Issue forms, README, user guide, security policy, and wiki.
+- Public Issue forms explicitly warn against attaching credentials, private URLs, Gmail or Meet content, account identifiers, or unreviewed diagnostics.
 
 ## [2.0.0-beta.1] - 2026-08-22
 
@@ -239,6 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[2.0.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v2.0.0-beta.1...v2.0.1
 [2.0.0-beta.1]: https://github.com/Diramain/taskbridge-for-clickup/compare/v1.1.4...v2.0.0-beta.1
 [1.2.3]: https://github.com/Diramain/taskbridge-for-clickup/compare/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd...main
 [1.2.0]: https://github.com/Diramain/taskbridge-for-clickup/commit/0c7313326f6bcdc0f6e61364c2b80d8b97af89dd
