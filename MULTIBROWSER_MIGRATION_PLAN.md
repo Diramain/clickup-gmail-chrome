@@ -233,15 +233,21 @@ verde y Firefox instala temporalmente sin errores de manifiesto o startup.
 
 ### Fase B2: Adaptador WebExtensions
 
-- [ ] B2.1. Evaluar y fijar una version revisada de `webextension-polyfill`.
-- [ ] B2.2. Crear una unica frontera para runtime, storage, tabs, windows,
+- [x] B2.1. Evaluar `webextension-polyfill`. Se reviso el candidato Mozilla
+  `0.12.0` y se rechazo incorporarlo: agrega una dependencia sin resolver
+  identity, storage security ni politicas de capacidad; la frontera first-party
+  queda fijada al codigo versionado del repositorio.
+- [x] B2.2. Crear una unica frontera para runtime, storage, tabs, windows,
   alarms, action e identity.
-- [ ] B2.3. Normalizar Promises, callbacks y `runtime.lastError`.
-- [ ] B2.4. Evitar detecciones de navegador dispersas por el producto.
-- [ ] B2.5. Agregar pruebas contractuales para Chrome y Firefox.
+- [x] B2.3. Normalizar Promises y retirar callbacks/`runtime.lastError` del
+  popup; Google Identity conserva su adaptador callback aislado.
+- [x] B2.4. Evitar detecciones de navegador dispersas por el producto.
+- [x] B2.5. Agregar pruebas contractuales para Chrome y Firefox.
 
-**Gate B2:** mensajeria, popup, app, pestañas y alarmas funcionan en ambos
-navegadores; Chrome conserva su comportamiento.
+**Gate B2:** `AMARILLO_POPUP_SMOKE_PENDING`; build, contratos, app y startup
+Firefox estan verdes. Falta completar un smoke real de popup/mensajeria,
+pestanas y alarmas: WebDriver BiDi bloquea navegacion directa a
+`moz-extension:` y la apertura indirecta no produjo un contexto estable.
 
 ### Fase B3: Paridad De Seguridad
 
@@ -342,7 +348,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B1_GREEN_B2_READY`.
+**Estado Plan B:** `B2_IMPLEMENTED_POPUP_SMOKE_PENDING`.
 
 ---
 
@@ -374,6 +380,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | B0 | Contrato y matriz multi-browser cerrados | Inventario estatico del repo y documentacion MDN vigente; rama `feat/firefox-port` creada desde el merge de A30 | No aplica |
 | 2026-08-23 | B1.1-B1.6, B1.8 | Build multi-browser implementado | 34 archivos por target; runtime compartido byte-identico; 540/540 pruebas; Calendar fail-closed en `moz-extension:`; ZIP Chrome `32f630cca218df21987f81401e5de233cc076d15eabc98a8e3de096060cec41c`, Firefox `5f4fc62a96901b2770cbf303baa4f16610b07785c22b5120c19677151607b4e5`; integridad ZIP verde | Rebuild determinista con hashes identicos |
 | 2026-08-23 | B1.7 y Gate B1 | CI y carga temporal Firefox verdes | PR #3: tests, Chrome release y Firefox release con `web-ext lint` verdes; Firefox 154 en perfil descartable instalo y desinstalo el Gecko ID esperado con cero errores de startup | Perfil temporal terminado; sin persistencia ni publicacion |
+| 2026-08-23 | B2.1-B2.5 | Adaptador WebExtensions candidato | 543/543 pruebas; build dual e integridad verdes; ZIP Chrome `17a149547a03c3930c34e75110c07eb32c56455a8ee703f9123b62f0f4ee1cfa`, Firefox `b05a823906b9cfcc1cfda0e714bf03615b137f51b443663a7cc11f5fe518247b`; Firefox 154 cargo background y app sin errores | Gate `AMARILLO`: popup smoke real pendiente por limite BiDi |
 
 ## Registro De Decisiones
 
@@ -395,7 +402,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B1_GREEN_B2_READY`.
+- Plan B: `B2_IMPLEMENTED_POPUP_SMOKE_PENDING`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.

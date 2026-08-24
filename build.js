@@ -11,6 +11,7 @@ const { execSync } = require('child_process');
 const isWatch = process.argv.includes('--watch');
 const skipTypeCheck = process.argv.includes('--skip-typecheck');
 const sidecarOnly = process.argv.includes('--sidecar-only');
+const webExtensionsAdapter = path.join(__dirname, 'src', 'webextensions.ts');
 
 // Ensure dist directory exists
 const distDir = path.join(__dirname, 'dist');
@@ -52,6 +53,7 @@ const commonBuildOptions = {
     target: ['chrome102', 'firefox140'],
     sourcemap: isWatch ? 'inline' : false,
     minify: !isWatch,
+    inject: [webExtensionsAdapter],
 };
 
 async function typeCheck() {
@@ -89,6 +91,7 @@ async function buildTypeScript() {
             { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
             { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
             { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
+            { in: 'src/clickup-tracker.ts', out: 'src/clickup-tracker' },
         ];
 
         // Build bundled files

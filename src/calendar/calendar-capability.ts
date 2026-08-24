@@ -1,3 +1,5 @@
+import { extensionPlatform } from '../webextensions';
+
 export function isGoogleCalendarRuntimeSupported(extensionUrl: string): boolean {
     try {
         return new URL(extensionUrl).protocol === 'chrome-extension:';
@@ -7,6 +9,4 @@ export function isGoogleCalendarRuntimeSupported(extensionUrl: string): boolean 
 }
 
 // Firefox stays fail-closed until its separate Google OAuth adapter exists.
-export const GOOGLE_CALENDAR_RUNTIME_ENABLED = isGoogleCalendarRuntimeSupported(
-    chrome.runtime.getURL('/'),
-);
+export const GOOGLE_CALENDAR_RUNTIME_ENABLED = extensionPlatform === 'chromium';
