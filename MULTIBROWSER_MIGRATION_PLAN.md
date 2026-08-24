@@ -260,8 +260,8 @@ separado verdes.
   persistencia controlada por el background.
 - [~] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
   falta la prueba negativa manual en Firefox real.
-- [ ] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
-- [ ] B3.7. Implementar exportacion diagnostica Firefox sin
+- [x] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
+- [x] B3.7. Implementar exportacion diagnostica Firefox sin
   `showSaveFilePicker()` y sin ampliar datos capturados.
 
 **Gate B3:** revision de seguridad verde y pruebas negativas de acceso a
@@ -350,7 +350,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B2_GREEN_B3_PARTIAL`.
+**Estado Plan B:** `B3_IMPLEMENTED_MANUAL_NEGATIVE_PENDING`.
 
 ---
 
@@ -386,6 +386,8 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | B3.3-B3.5 parcial | Storage privado Firefox | Smoke manual detecto que Firefox 154 no implementa `StorageArea.setAccessLevel`; IndexedDB extension-origin reemplaza local, session conserva trusted-only, content scripts reciben un facade fail-closed y las mutaciones/eventos son transaccionales y secuenciados | Sin migracion legacy: Firefox no fue publicado y el build fallido no persistio datos de aplicacion |
 | 2026-08-23 | B3.1-B3.2 | Origen extension multi-browser | Smoke manual detecto `INVALID_ORIGIN` en app Firefox; validacion y `clearLocalData` ahora comparan protocolo y host exactos derivados de `runtime.getURL('/')`, con sender ID obligatorio | Caso Firefox trusted/UUID hostil cubierto por contrato |
 | 2026-08-23 | Gate B2 | Smoke manual Firefox verde | Owner valido popup y app visibles sin `INIT_ERROR`; `getStatus` sin error, tabs, alarms create/get y cleanup devolvieron `true` en Firefox 154 | Sin credenciales, OAuth, ClickUp writes ni publicacion AMO |
+| 2026-08-23 | B3.6-B3.7 | Paridad de mensajes y exportacion diagnostica | 551/551 pruebas; build dual e integridad verdes; recorder causal usa fallback JSONL fragmentado de 16 MiB en memoria y descarga al detener, sin permiso `downloads` ni campos nuevos; ZIP Chrome `39d7b543de380870479df22fd5ec90bada69f5ca0691b01e33b13cd7933b7bbd`, Firefox `b6fb56f4d6079a34a9e10c1acff8fdae0497c923f4ea9345e922e8fc5bb4662b` | Pendiente smoke Firefox del archivo descargado |
+| 2026-08-23 | B4 hallazgo temprano | Modal standalone Firefox corregido | Smoke owner detecto ruta relativa `app/task-modal.html` en Quirks Mode; ahora ambas aperturas usan `runtime.getURL('task-modal.html')` desde la raiz del artefacto | Pendiente retest manual Firefox |
 
 ## Registro De Decisiones
 
@@ -407,7 +409,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B2_GREEN_B3_PARTIAL`.
+- Plan B: `B3_IMPLEMENTED_MANUAL_NEGATIVE_PENDING`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.

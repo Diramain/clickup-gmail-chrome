@@ -10,10 +10,10 @@
     <main class="shell">
         <section class="card">
             <h1>Recorder causal seguro</h1>
-            <p>El archivo se elige con un gesto tuyo. Stop manual es el cierre confiable; cerrar la página intenta flush agresivo pero puede dejar escritura en vuelo marcada como riesgo.</p>
+            <p>Cuando el navegador permite escritura incremental, el archivo se elige con un gesto tuyo. En Firefox, la captura queda acotada a 16 MiB en memoria y se descarga al detener. Stop manual es el cierre confiable; cerrar la página puede perder una captura todavía no descargada.</p>
             <p class="safe">Guarda timestamps y metadatos de actividad categóricos. No guarda URL, query, fragment, título, contenido, ID de tarea, email, tokens, headers ni credenciales. Revisá el JSONL antes de compartirlo y borralo después.</p>
             <div class="actions">
-                <button id="startRecorder" type="button">Elegir archivo e iniciar</button>
+                <button id="startRecorder" type="button">Iniciar captura</button>
                 <button id="stopRecorder" type="button" disabled>Detener y cerrar lote</button>
             </div>
             <dl class="status">

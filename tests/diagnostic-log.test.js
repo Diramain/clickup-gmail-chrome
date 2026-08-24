@@ -241,6 +241,16 @@ describe('CGC-DIAG-005 safe session diagnostics', () => {
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, gmailSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true, taskId: 'TASK' } }, extensionSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: 'true' } }, extensionSender, runtimeId).ok).toBe(false);
+
+        const firefoxRoot = 'moz-extension://trusted-uuid/';
+        const firefoxSender = { id: runtimeId, url: `${firefoxRoot}popup/popup.html` };
+        const hostileFirefoxSender = { id: runtimeId, url: 'moz-extension://other-uuid/popup/popup.html' };
+        for (const action of ['getDiagnosticStatus', 'exportDiagnostics', 'clearDiagnostics']) {
+            expect(security.validateExtensionMessage({ action }, firefoxSender, runtimeId, firefoxRoot).ok).toBe(true);
+            expect(security.validateExtensionMessage({ action }, hostileFirefoxSender, runtimeId, firefoxRoot).ok).toBe(false);
+        }
+        expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, firefoxSender, runtimeId, firefoxRoot).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, hostileFirefoxSender, runtimeId, firefoxRoot).ok).toBe(false);
     });
 
     test('API instrumentation emits categorical routes without identifiers, headers, or token values', async () => {

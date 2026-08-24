@@ -1,8 +1,11 @@
 import { assertNoRawTraceSecrets, CAUSAL_TRACE_PORT_NAME, normalizeCausalTraceEvent, type SafeCausalTraceEvent } from '../src/causal-trace';
-import { JsonlBatchWriter, TRACE_FILE_LIMIT_BYTES, type TraceWriterStopReason } from '../src/trace-writer';
+import { InMemoryTraceFileHandle, JsonlBatchWriter, TRACE_FILE_LIMIT_BYTES, type TraceWriterStopReason } from '../src/trace-writer';
+import { triggerUserDownload } from '../src/user-download';
 
 type SavePickerWindow = Window & { showSaveFilePicker?: (options?: unknown) => Promise<FileSystemFileHandle> };
 type RecorderRoot = Document | HTMLElement;
+
+export const TRACE_MEMORY_LIMIT_BYTES = 16 * 1024 * 1024;
 
 function required<T extends Element>(root: RecorderRoot, selector: string): T | null {
     return root.querySelector<T>(selector);
@@ -28,6 +31,8 @@ export function initCausalRecorder(root: RecorderRoot = document): void {
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempts = 0;
     let intentionalStop = false;
+    let memoryHandle: InMemoryTraceFileHandle | null = null;
+    let fallbackFilename = '';
 
     const renderMessage = (text: string, isError: boolean): void => {
         message.textContent = text;
@@ -104,6 +109,7 @@ export function initCausalRecorder(root: RecorderRoot = document): void {
     };
 
     stop = async (reason: TraceWriterStopReason): Promise<void> => {
+        if (intentionalStop && !writer) return;
         intentionalStop = true;
         if (scheduleTimer) clearTimeout(scheduleTimer);
         if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -116,6 +122,16 @@ export function initCausalRecorder(root: RecorderRoot = document): void {
             port = null;
         }
         if (currentWriter) await currentWriter.stop(reason);
+        const completedMemoryHandle = memoryHandle;
+        memoryHandle = null;
+        if (completedMemoryHandle && reason !== 'page-close') {
+            if (completedMemoryHandle.size > 0) {
+                triggerUserDownload(completedMemoryHandle.toBlob(), fallbackFilename);
+                renderMessage(`Captura descargada: ${completedMemoryHandle.size} bytes. Revisala antes de compartirla.`, false);
+            } else {
+                renderMessage('Captura detenida sin eventos; no se creó un archivo.', false);
+            }
+        }
         startButton.disabled = false;
         stopButton.disabled = true;
         renderState(`detenido: ${reason}`);
@@ -124,17 +140,17 @@ export function initCausalRecorder(root: RecorderRoot = document): void {
     const start = async (): Promise<void> => {
         if (writer) return;
         const pickerWindow = window as SavePickerWindow;
-        if (!pickerWindow.showSaveFilePicker) {
-            renderMessage('File System Access no está disponible en este navegador.', true);
-            return;
-        }
         startButton.disabled = true;
         try {
-            const handle = await pickerWindow.showSaveFilePicker({
-                suggestedName: `cgc-main-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`,
-                types: [{ description: 'JSON Lines', accept: { 'application/jsonl': ['.jsonl'] } }],
-            });
+            fallbackFilename = `taskbridge-main-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
+            const handle = pickerWindow.showSaveFilePicker
+                ? await pickerWindow.showSaveFilePicker({
+                    suggestedName: fallbackFilename,
+                    types: [{ description: 'JSON Lines', accept: { 'application/jsonl': ['.jsonl'] } }],
+                })
+                : (memoryHandle = new InMemoryTraceFileHandle());
             writer = new JsonlBatchWriter(handle, {
+                limitBytes: memoryHandle ? TRACE_MEMORY_LIMIT_BYTES : TRACE_FILE_LIMIT_BYTES,
                 onStop: (reason, status) => renderMessage(`Captura detenida: ${reason}. No escritos: ${status.unwrittenEvents}.`, reason !== 'manual-stop' && reason !== 'scheduled-stop'),
             });
             await writer.initialize();
@@ -144,9 +160,12 @@ export function initCausalRecorder(root: RecorderRoot = document): void {
             scheduleStopAt1800(stop);
             stopButton.disabled = false;
             renderState('armado');
-            renderMessage('Captura iniciada. Cada flush cierra el archivo.', false);
+            renderMessage(memoryHandle
+                ? 'Captura iniciada en memoria (máximo 16 MiB). Se descargará al detener; mantené esta página abierta.'
+                : 'Captura iniciada. Cada flush cierra el archivo.', false);
         } catch (error) {
             writer = null;
+            memoryHandle = null;
             startButton.disabled = false;
             renderMessage(isPermissionError(error) ? 'Permiso cancelado o revocado.' : 'No se pudo iniciar la captura.', true);
         }

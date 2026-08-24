@@ -30,6 +30,18 @@ describe('CGC-TRACE-010-A sidecar MV3 boundaries', () => {
     expect(recorder).toMatch(/reconnectAttempts >= 5/);
   });
 
+  test('main recorder has a bounded Firefox export fallback without a downloads permission', () => {
+    const recorder = source('diagnostics/recorder.ts');
+    const firefoxManifest = JSON.parse(source('manifest.firefox.json'));
+    const chromeManifest = JSON.parse(source('manifest.json'));
+    expect(recorder).toMatch(/new InMemoryTraceFileHandle/);
+    expect(recorder).toMatch(/TRACE_MEMORY_LIMIT_BYTES = 16 \* 1024 \* 1024/);
+    expect(recorder).toMatch(/triggerUserDownload/);
+    expect(recorder).not.toMatch(/File System Access no está disponible/);
+    expect(firefoxManifest.permissions).not.toContain('downloads');
+    expect(chromeManifest.permissions).not.toContain('downloads');
+  });
+
   test('main background uses per-port sanitizer map and does not emit stop on disconnect', () => {
     const background = source('background.ts');
     expect(background).toMatch(/new Map<chrome\.runtime\.Port, CausalTraceSanitizer>/);
