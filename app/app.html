@@ -93,7 +93,7 @@
                     <article class="operation-card auth-setup-card">
                         <span class="connection-badge">Recomendado</span>
                         <h3>Conexión rápida</h3>
-                        <p>Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil de Chrome.</p>
+                        <p>Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil del navegador.</p>
                         <label for="personalToken">Token personal de ClickUp</label>
                         <input id="personalToken" type="password" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
                         <button id="connectPersonalToken" type="button" class="btn primary" disabled>Conectar con token personal</button>
@@ -433,7 +433,7 @@
                                 <small id="clickUpConnectionDetail">No se realizará ninguna validación por red.</small>
                             </div>
                         </div>
-                        <p class="service-footnote">La sesión se conserva localmente en este perfil de Chrome.</p>
+                        <p class="service-footnote">La sesión se conserva localmente en este perfil del navegador.</p>
                     </article>
 
                     <article class="service-card service-google">
@@ -480,7 +480,7 @@
                         <p id="diagnosticStatus" class="field-help" aria-live="polite">Diagnóstico desactivado</p>
                         <div class="recorder-inline" aria-labelledby="recorderInlineTitle">
                             <h4 id="recorderInlineTitle">Captura causal prolongada</h4>
-                            <p class="field-help">También observa sólo esta extensión, no todo Chrome. Escribe timestamps y metadatos categóricos en un JSONL elegido por vos para investigar secuencias largas. Stop manual es el cierre confiable; revisá el archivo antes de compartirlo y borralo después.</p>
+                            <p class="field-help">También observa sólo esta extensión, no todo el navegador. Escribe timestamps y metadatos categóricos en un JSONL elegido por vos para investigar secuencias largas. Stop manual es el cierre confiable; revisá el archivo antes de compartirlo y borralo después.</p>
                             <div class="inline-actions"><button id="startRecorder" class="btn" type="button">Elegir archivo e iniciar</button><button id="stopRecorder" class="btn danger" type="button" disabled>Detener captura</button></div>
                             <dl class="recorder-status"><div><dt>Estado</dt><dd id="state">inactivo</dd></div><div><dt>Eventos</dt><dd id="eventCount">0</dd></div><div><dt>Bytes</dt><dd id="byteCount">0</dd></div><div><dt>Cola</dt><dd id="queueCount">0</dd></div><div><dt>Parada</dt><dd id="scheduledStop">pendiente</dd></div></dl>
                             <p id="message" class="field-help" role="status" aria-live="polite"></p>

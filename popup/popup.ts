@@ -1,5 +1,5 @@
 /**
- * ClickUp Gmail Chrome - Popup Script
+ * TaskBridge for ClickUp - Popup Script
  * TypeScript version with Tab Modules
  */
 
@@ -225,7 +225,7 @@ async function init(): Promise<void> {
                     return;
                 }
             } catch (_error) {
-                // Fall through to inline setup if Chrome cannot create/focus the durable window.
+                // Fall through to inline setup if the browser cannot create/focus the durable window.
             }
         }
 
@@ -479,7 +479,7 @@ function showLoginRequired(
     }
     if (advancedOAuth && authMethod === 'oauth' && (configured || requiresReauth)) advancedOAuth.open = true;
 
-    // Show the Redirect URL (Chrome identity API format)
+    // Show the redirect URL provided by the browser identity API.
     const redirectUrl = chrome.identity.getRedirectURL();
     redirectUrlInput.value = redirectUrl;
 
