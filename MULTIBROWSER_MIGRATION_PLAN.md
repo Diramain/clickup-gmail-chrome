@@ -250,9 +250,9 @@ popup/mensajeria, pestanas y alarmas con la correccion de storage privado.
 
 ### Fase B3: Paridad De Seguridad
 
-- [ ] B3.1. Derivar origen e identidad confiables con `runtime.getURL()` y
+- [x] B3.1. Derivar origen e identidad confiables con `runtime.getURL()` y
   `runtime.id`.
-- [ ] B3.2. Validar paginas permitidas sin hardcodear `chrome-extension://`.
+- [x] B3.2. Validar paginas permitidas sin hardcodear `chrome-extension://`.
 - [x] B3.3. Sustituir la dependencia de `storage.setAccessLevel()` en Firefox
   con IndexedDB extension-origin para local y session nativo trusted-only;
   Chrome conserva `setAccessLevel()`.
@@ -382,8 +382,9 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | B0 | Contrato y matriz multi-browser cerrados | Inventario estatico del repo y documentacion MDN vigente; rama `feat/firefox-port` creada desde el merge de A30 | No aplica |
 | 2026-08-23 | B1.1-B1.6, B1.8 | Build multi-browser implementado | 34 archivos por target; runtime compartido byte-identico; 540/540 pruebas; Calendar fail-closed en `moz-extension:`; ZIP Chrome `32f630cca218df21987f81401e5de233cc076d15eabc98a8e3de096060cec41c`, Firefox `5f4fc62a96901b2770cbf303baa4f16610b07785c22b5120c19677151607b4e5`; integridad ZIP verde | Rebuild determinista con hashes identicos |
 | 2026-08-23 | B1.7 y Gate B1 | CI y carga temporal Firefox verdes | PR #3: tests, Chrome release y Firefox release con `web-ext lint` verdes; Firefox 154 en perfil descartable instalo y desinstalo el Gecko ID esperado con cero errores de startup | Perfil temporal terminado; sin persistencia ni publicacion |
-| 2026-08-23 | B2.1-B2.5 | Adaptador WebExtensions candidato | 546/546 pruebas; build dual e integridad verdes; ZIP Chrome `d1546d70fc64d740b370df5ca4f3c28ff2df3127a0902dd6f489835bded8dc76`, Firefox `ede77880a6c734d250080b81dacfb4f55c17ace7eb0d41e29ddff76a2ade3b68`; carga temporal automatizada Firefox 154 sin errores de startup | Gate `AMARILLO`: popup smoke manual pendiente |
+| 2026-08-23 | B2.1-B2.5 | Adaptador WebExtensions candidato | 547/547 pruebas; build dual e integridad verdes; ZIP Chrome `6cc79fbdd77df1af3c7a76521f01c7bb2bd09d38d332a99ef1645c7c8b3c829b`, Firefox `4ff3afbe451bac83daf63a39c2fe8edf6c3be7bbde02c7c5c142f937d94343d6`; carga temporal automatizada Firefox 154 sin errores de startup | Gate `AMARILLO`: popup smoke manual pendiente |
 | 2026-08-23 | B3.3-B3.5 parcial | Storage privado Firefox | Smoke manual detecto que Firefox 154 no implementa `StorageArea.setAccessLevel`; IndexedDB extension-origin reemplaza local, session conserva trusted-only, content scripts reciben un facade fail-closed y las mutaciones/eventos son transaccionales y secuenciados | Sin migracion legacy: Firefox no fue publicado y el build fallido no persistio datos de aplicacion |
+| 2026-08-23 | B3.1-B3.2 | Origen extension multi-browser | Smoke manual detecto `INVALID_ORIGIN` en app Firefox; validacion y `clearLocalData` ahora comparan protocolo y host exactos derivados de `runtime.getURL('/')`, con sender ID obligatorio | Caso Firefox trusted/UUID hostil cubierto por contrato |
 
 ## Registro De Decisiones
 
