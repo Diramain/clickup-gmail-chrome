@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are applied to the current `2.0.x` line. Older GitHub releases and unpacked builds should be upgraded before reporting behavior that may already have been corrected.
+Security fixes are applied to the current `2.1.x` line. Older GitHub releases and unpacked builds should be upgraded before reporting behavior that may already have been corrected.
 
 ## Reporting a Vulnerability
 
@@ -16,7 +16,7 @@ The personal token, OAuth access token, and OAuth client secret are encrypted at
 
 ### How it works:
 1. On first auth, a unique AES-256 encryption key is generated
-2. The key is stored in `chrome.storage.local`
+2. The key is stored in trusted local persistence: restricted `chrome.storage.local` on Chrome and extension-origin IndexedDB on Firefox
 3. The selected ClickUp credential is validated before it replaces the current connection and is encrypted before storage
 4. Legacy plain-text tokens are automatically migrated to encrypted format; obsolete refresh-token values are removed
 
@@ -35,7 +35,7 @@ Since browser extensions cannot truly hide secrets in client-side code, we recom
 2. **Create a new OAuth app** if you suspect compromise
 3. **Consider a backend proxy** for production apps with many users
 
-The OAuth client secret is stored locally after the user enters it during setup. In v2.1.0 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before storage in `chrome.storage.local`.
+The OAuth client secret is stored locally after the user enters it during setup. In v2.1.0 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before trusted local persistence.
 
 This is best-effort at-rest protection: the encryption key is stored in the same browser profile, so it does not protect against a compromised host or compromised browser profile. The client secret is decrypted only when needed for OAuth or token exchange with ClickUp.
 
@@ -60,7 +60,7 @@ Transient network/upstream errors and endpoint-specific `401` responses with a v
 
 ## Safe Diagnostics Boundary
 
-Safe Diagnostics is off by default and intended for operator-led troubleshooting. It keeps at most 200 events in `chrome.storage.session`, explicitly restricted to `TRUSTED_CONTEXTS`. The state is in memory for the current browser/extension session and can be disabled, exported, or cleared from the popup.
+Safe Diagnostics is off by default and intended for operator-led troubleshooting. It keeps at most 200 events in browser session storage: Chrome explicitly applies `TRUSTED_CONTEXTS`, while Firefox session storage is trusted-context-only by default. The state is in memory for the current browser/extension session and can be disabled, exported, or cleared from the popup.
 
 - Event names, fields, and string values use closed allowlists. Unknown fields and values are discarded before storage and sanitized again when restoring a session buffer.
 - Permitted data is limited to timestamps, sequence numbers, bounded counts, categorical request routes/methods/auth modes/results, and allowlisted ClickUp workspace-authorization codes.
@@ -79,8 +79,8 @@ Meet Priority is off by default and restricted to `https://meet.google.com/*`. I
 - No raw room code, full URL, title, Calendar data, participant data, chat, captions, audio, video, camera, microphone, screenshots, or transcripts are persisted or sent through the Meet message channel.
 - Meet cannot invoke ClickUp timer or mapping actions directly; those actions are extension-page-only and schema validated.
 - Room mappings store only the room hash, task/workspace IDs, timestamps, and enabled state. The stable hash is pseudonymous and remains sensitive local metadata.
-- `chrome.storage.local` is restricted to `TRUSTED_CONTEXTS`; Gmail, ClickUp, and Meet content scripts use narrow background messages instead of direct reads.
-- Incognito is disabled. Chrome 102 or newer is required for the local-storage access boundary.
+- Chrome restricts `chrome.storage.local` to `TRUSTED_CONTEXTS`. Firefox stores durable application state in extension-origin IndexedDB because Firefox does not implement `StorageArea.setAccessLevel`; the injected storage facade denies all host content-script access.
+- Gmail, ClickUp, and Meet content scripts use narrow background messages instead of direct storage reads. Incognito is disabled.
 - Timer writes are serialized. A destination task is validated before stopping, the same Meet tab/room is rechecked before starting, and a failed session-state write attempts to stop a newly started timer.
 
 Residual risk remains: Google Meet DOM labels can change, a compromised browser profile can access extension state, and a stable room hash can correlate repeat sessions. Real Meet detection and logout/reconnection remain `No verificado` after an explicit owner waiver; a source push does not certify those flows, and Chrome Web Store distribution requires a separate reviewed gate.
