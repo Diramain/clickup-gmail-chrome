@@ -126,6 +126,8 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(validateScript).toMatch(/Release allowlist mismatch/);
         expect(validateScript).toMatch(/Blocked file in release directory/);
         expect(validateScript).toMatch(/Legacy Gmail SDK marker in release file/);
+        expect(validateScript).toMatch(/Classic content script contains module loader/);
+        expect(source('build.js')).toMatch(/inject: \[\],[\s\S]*entryPoints: otherEntryPoints/);
         expect(firefoxManifest.background).toEqual({ scripts: ['background.js'] });
         expect(firefoxManifest.oauth2).toBeUndefined();
         expect(firefoxManifest.browser_specific_settings.gecko).toMatchObject({
@@ -133,6 +135,12 @@ describe('FASE D release metadata, safe data, and preflight', () => {
             strict_min_version: '140.0',
         });
         expect(firefoxManifest.browser_specific_settings.gecko.data_collection_permissions.required).toContain('personallyIdentifyingInfo');
+    });
+
+    test('standalone modal uses explicit document mode and product typography', () => {
+        expect(source('task-modal.html')).toMatch(/^<!DOCTYPE html>/i);
+        expect(source('task-modal.html')).toMatch(/<meta charset="UTF-8">/);
+        expect(source('styles/modal.css')).toMatch(/\.cu-modal-container \{[\s\S]*font-family: system-ui/);
     });
 
     test('deterministic ZIP output is byte-identical for the same files', () => {

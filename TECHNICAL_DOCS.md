@@ -105,6 +105,7 @@ Generated JavaScript and release directories are intentionally ignored by Git.
 
 - TypeScript strict mode includes unused local/parameter checks.
 - Jest covers message authorization, privacy, Calendar minimization, Meet mapping, Gmail uploads, timer behavior, release packaging, and UI contracts.
+- Release preflight rejects CommonJS module loaders in manifest content scripts, which Firefox and Chrome execute as classic scripts.
 - Real OAuth/API QA is operator-controlled and is not implied by synthetic test success.
 
 ## Community and Release Operations

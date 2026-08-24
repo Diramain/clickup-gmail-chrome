@@ -91,6 +91,16 @@ function validateManifestReferences(manifest, actual, target) {
     }
 }
 
+function validateClassicContentScripts(manifest, outDir, target) {
+    const moduleSyntax = /\brequire\s*\(|\bmodule\.exports\b|\bexports\.[A-Za-z_$]/;
+    for (const script of manifest.content_scripts || []) {
+        for (const file of script.js || []) {
+            const content = fs.readFileSync(path.join(outDir, file), 'utf8');
+            if (moduleSyntax.test(content)) fail(`Classic content script contains module loader (${target}): ${file}`);
+        }
+    }
+}
+
 function validateTarget(target) {
     const config = RELEASE_TARGETS[target];
     const outDir = path.join(root, config.directory);
@@ -112,6 +122,7 @@ function validateTarget(target) {
     validateMetadata(manifest, target);
     validateTargetManifest(manifest, target);
     validateManifestReferences(manifest, actual, target);
+    validateClassicContentScripts(manifest, outDir, target);
     const icon128 = fs.readFileSync(path.join(outDir, 'icons', 'icon-128.png'));
     const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     if (!icon128.subarray(0, 8).equals(pngSignature) || icon128.readUInt32BE(16) !== 128 || icon128.readUInt32BE(20) !== 128) {
