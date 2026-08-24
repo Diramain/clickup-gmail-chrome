@@ -44,20 +44,25 @@ const MAX_FROM = 320;
 const MAX_HTML = 500_000;
 const MAX_ATTACHMENTS = 20;
 
-export function validateExtensionMessage(message: ExtensionMessage, sender: chrome.runtime.MessageSender, runtimeId: string): MessageValidationResult {
+export function validateExtensionMessage(
+    message: ExtensionMessage,
+    sender: chrome.runtime.MessageSender,
+    runtimeId: string,
+    extensionRoot: string = `chrome-extension://${runtimeId}/`,
+): MessageValidationResult {
     if (sender.id !== runtimeId) return { ok: false, code: 'INVALID_SENDER' };
     if (!message || typeof message.action !== 'string') return { ok: false, code: 'INVALID_ACTION' };
 
     const origin = sender.url || sender.origin || '';
-    if (!isAllowedOriginForAction(message.action, origin)) return { ok: false, code: 'INVALID_ORIGIN' };
+    if (!isAllowedOriginForAction(message.action, origin, extensionRoot)) return { ok: false, code: 'INVALID_ORIGIN' };
     if (!hasValidSchema(message)) return { ok: false, code: 'INVALID_SCHEMA' };
 
     return { ok: true };
 }
 
-export function isAllowedOriginForAction(action: string, origin: string): boolean {
-    if (origin.startsWith('chrome-extension://')) {
-        if (CREDENTIAL_ACTIONS.has(action)) return isTrustedSetupPage(origin);
+export function isAllowedOriginForAction(action: string, origin: string, extensionRoot?: string): boolean {
+    if (isTrustedExtensionOrigin(origin, extensionRoot)) {
+        if (CREDENTIAL_ACTIONS.has(action)) return isTrustedSetupPage(origin, extensionRoot);
         return action !== 'uploadGmailAttachment'
             && (EXTENSION_ACTIONS.has(action) || GMAIL_ACTIONS.has(action) || CLICKUP_ACTIONS.has(action));
     }
@@ -68,10 +73,22 @@ export function isAllowedOriginForAction(action: string, origin: string): boolea
     return false;
 }
 
-function isTrustedSetupPage(value: string): boolean {
+function isTrustedExtensionOrigin(value: string, extensionRoot?: string): boolean {
     try {
         const url = new URL(value);
-        return url.protocol === 'chrome-extension:'
+        if (url.protocol !== 'chrome-extension:' && url.protocol !== 'moz-extension:') return false;
+        if (!extensionRoot) return url.host.length > 0;
+        const trusted = new URL(extensionRoot);
+        return url.protocol === trusted.protocol && url.host === trusted.host;
+    } catch {
+        return false;
+    }
+}
+
+function isTrustedSetupPage(value: string, extensionRoot?: string): boolean {
+    try {
+        const url = new URL(value);
+        return isTrustedExtensionOrigin(value, extensionRoot)
             && (url.pathname === '/popup/popup.html' || url.pathname === '/app/app.html');
     } catch {
         return false;

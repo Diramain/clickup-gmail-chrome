@@ -548,7 +548,12 @@ async function initializeLinkStorageShadow(): Promise<void> {
 
 // Listen for messages from popup or content script
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
-    const validation = validateExtensionMessage(message, sender, chrome.runtime.id);
+    const validation = validateExtensionMessage(
+        message,
+        sender,
+        chrome.runtime.id,
+        chrome.runtime.getURL('/'),
+    );
     if (!validation.ok) {
         Logger.warn(`MESSAGE_REJECTED_${validation.code || 'UNKNOWN'}`);
         sendResponse({ success: false, error: validation.code || 'INVALID_MESSAGE' });
@@ -2822,7 +2827,16 @@ function resolveSchemaVersion(stored: unknown, extra: unknown = 0): number {
 }
 
 async function clearLocalData(sender: chrome.runtime.MessageSender): Promise<{ success: boolean }> {
-    if (sender.id !== chrome.runtime.id || !(sender.url || '').startsWith(`chrome-extension://${chrome.runtime.id}/`)) {
+    let trustedExtensionPage = false;
+    try {
+        const senderUrl = new URL(sender.url || '');
+        const extensionRoot = new URL(chrome.runtime.getURL('/'));
+        trustedExtensionPage = senderUrl.protocol === extensionRoot.protocol &&
+            senderUrl.host === extensionRoot.host;
+    } catch {
+        trustedExtensionPage = false;
+    }
+    if (sender.id !== chrome.runtime.id || !trustedExtensionPage) {
         throw new Error('clearLocalData is extension-only');
     }
 

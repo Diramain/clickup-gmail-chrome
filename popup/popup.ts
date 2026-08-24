@@ -1,5 +1,5 @@
 /**
- * ClickUp Gmail Chrome - Popup Script
+ * TaskBridge for ClickUp - Popup Script
  * TypeScript version with Tab Modules
  */
 
@@ -201,7 +201,7 @@ async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
     const standaloneSetup = isSetupStandalone() || IS_FULL_APP_SURFACE;
 
-    chrome.storage.local.remove('draftClientSecret');
+    await chrome.storage.local.remove('draftClientSecret');
     initAppTabLauncher();
     initGoogleOAuthConnectionPreview([
         {
@@ -225,7 +225,7 @@ async function init(): Promise<void> {
                     return;
                 }
             } catch (_error) {
-                // Fall through to inline setup if Chrome cannot create/focus the durable window.
+                // Fall through to inline setup if the browser cannot create/focus the durable window.
             }
         }
 
@@ -479,12 +479,12 @@ function showLoginRequired(
     }
     if (advancedOAuth && authMethod === 'oauth' && (configured || requiresReauth)) advancedOAuth.open = true;
 
-    // Show the Redirect URL (Chrome identity API format)
+    // Show the redirect URL provided by the browser identity API.
     const redirectUrl = chrome.identity.getRedirectURL();
     redirectUrlInput.value = redirectUrl;
 
     // Restore previously entered values (auto-save feature)
-    chrome.storage.local.get(['draftClientId'], (data) => {
+    void chrome.storage.local.get(['draftClientId']).then((draftData) => {
         if (!shouldApplyInitialOAuthDraft({
             isDirty,
             clientId: clientIdInput.value,
@@ -497,11 +497,11 @@ function showLoginRequired(
 
         const draftResolution = resolveInitialOAuthDraft({
             hasStoredConfig,
-            draftClientId: data.draftClientId,
+            draftClientId: draftData.draftClientId,
         });
 
         if (draftResolution.shouldClearDraftClientId) {
-            chrome.storage.local.remove('draftClientId');
+            void chrome.storage.local.remove('draftClientId');
         }
 
         if (draftResolution.clientId) {
@@ -510,7 +510,7 @@ function showLoginRequired(
 
         isDirty = draftResolution.isDirty;
         updateOAuthButtons();
-    });
+    }).catch(() => undefined);
 
     // Auto-save Client ID as user types
     clientIdInput.addEventListener('input', () => {
@@ -519,9 +519,15 @@ function showLoginRequired(
     });
 
     // Auto-save Client Secret as user types
-    clientSecretInput.addEventListener('input', () => {
-        chrome.storage.local.remove('draftClientSecret');
-        markDirty();
+    clientSecretInput.addEventListener('input', async () => {
+        try {
+            await chrome.storage.local.remove('draftClientSecret');
+            markDirty();
+        } catch {
+            signInBtn.disabled = true;
+            saveConfigBtn.disabled = true;
+            setConfigStatus('No se pudo borrar el secreto temporal anterior. Recargá la extensión antes de continuar.', '#ff5252');
+        }
     });
 
     // Copy URL to clipboard
@@ -943,14 +949,14 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             };
 
             if (tabs[0]?.id && tabs[0].url?.includes('mail.google.com')) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: 'openTaskModal' }, (response) => {
-                    if (chrome.runtime.lastError || !response) {
-                        console.log('OPEN_MODAL_FALLBACK');
-                        openStandalone();
-                    } else {
-                        setTimeout(() => window.close(), 100);
-                    }
-                });
+                try {
+                    const response = await chrome.tabs.sendMessage(tabs[0].id, { action: 'openTaskModal' });
+                    if (!response) throw new Error('No content-script response');
+                    setTimeout(() => window.close(), 100);
+                } catch {
+                    console.log('OPEN_MODAL_FALLBACK');
+                    openStandalone();
+                }
             } else {
                 openStandalone();
             }
@@ -1089,17 +1095,31 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const autoStopToggle = document.getElementById('autoStopToggle') as HTMLInputElement;
 
     // Load saved settings
-    chrome.storage.local.get(['autoStartTimer', 'autoStopTimer'], (result) => {
-        if (autoStartToggle) autoStartToggle.checked = result.autoStartTimer || false;
-        if (autoStopToggle) autoStopToggle.checked = result.autoStopTimer || false;
+    try {
+        const autoTracking = await chrome.storage.local.get(['autoStartTimer', 'autoStopTimer']);
+        if (autoStartToggle) autoStartToggle.checked = autoTracking.autoStartTimer || false;
+        if (autoStopToggle) autoStopToggle.checked = autoTracking.autoStopTimer || false;
+    } catch {
+        if (autoStartToggle) autoStartToggle.checked = false;
+        if (autoStopToggle) autoStopToggle.checked = false;
+    }
+
+    autoStartToggle?.addEventListener('change', async () => {
+        const requested = autoStartToggle.checked;
+        try {
+            await chrome.storage.local.set({ autoStartTimer: requested });
+        } catch {
+            autoStartToggle.checked = !requested;
+        }
     });
 
-    autoStartToggle?.addEventListener('change', () => {
-        chrome.storage.local.set({ autoStartTimer: autoStartToggle.checked });
-    });
-
-    autoStopToggle?.addEventListener('change', () => {
-        chrome.storage.local.set({ autoStopTimer: autoStopToggle.checked });
+    autoStopToggle?.addEventListener('change', async () => {
+        const requested = autoStopToggle.checked;
+        try {
+            await chrome.storage.local.set({ autoStopTimer: requested });
+        } catch {
+            autoStopToggle.checked = !requested;
+        }
     });
 
     // ========== MANUAL TIME ENTRY ==========
@@ -1457,52 +1477,52 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
     const customFieldToggle = document.getElementById('useCustomFieldToggle') as HTMLInputElement;
 
     // Load saved settings
-    chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId'], (data) => {
-        // 1. Load Field Name
-        if (data.threadIdField) {
-            customFieldNameInput.value = data.threadIdField;
-        } else {
-            customFieldNameInput.value = 'Gmail Thread ID';
-        }
-
-        // 2. Load Toggle State (Default: true)
-        const useField = data.useCustomFieldForThreadId !== false; // Default true if undefined
-        customFieldToggle.checked = useField;
-
-        // Update UI State
-        customFieldNameInput.disabled = !useField;
-        saveCustomFieldBtn.disabled = !useField;
-    });
+    const customFieldData: Record<string, unknown> = await chrome.storage.local
+        .get(['threadIdField', 'useCustomFieldForThreadId'])
+        .catch(() => ({}));
+    customFieldNameInput.value = typeof customFieldData.threadIdField === 'string'
+        ? customFieldData.threadIdField
+        : 'Gmail Thread ID';
+    const useField = customFieldData.useCustomFieldForThreadId !== false;
+    customFieldToggle.checked = useField;
+    customFieldNameInput.disabled = !useField;
+    saveCustomFieldBtn.disabled = !useField;
 
     // Toggle Handler
-    customFieldToggle.addEventListener('change', () => {
+    customFieldToggle.addEventListener('change', async () => {
         const isChecked = customFieldToggle.checked;
-        chrome.storage.local.set({ useCustomFieldForThreadId: isChecked }, () => {
-            // Show saved confirmation
-            const toggleLabel = customFieldToggle.closest('.toggle-row')?.querySelector('.toggle-label');
-            if (toggleLabel) {
-                const originalText = toggleLabel.textContent || '';
-                toggleLabel.innerHTML = `${originalText} <span style="color: #00c853; font-weight: bold;">✓ Guardado</span>`;
-                setTimeout(() => {
-                    toggleLabel.textContent = originalText;
-                }, 2000);
-            }
-        });
+        try {
+            await chrome.storage.local.set({ useCustomFieldForThreadId: isChecked });
+        } catch {
+            customFieldToggle.checked = !isChecked;
+            return;
+        }
+        const toggleLabel = customFieldToggle.closest('.toggle-row')?.querySelector('.toggle-label');
+        if (toggleLabel) {
+            const originalText = toggleLabel.textContent || '';
+            toggleLabel.innerHTML = `${originalText} <span style="color: #00c853; font-weight: bold;">✓ Guardado</span>`;
+            setTimeout(() => {
+                toggleLabel.textContent = originalText;
+            }, 2000);
+        }
 
         // Update UI State
         customFieldNameInput.disabled = !isChecked;
         saveCustomFieldBtn.disabled = !isChecked;
     });
 
-    saveCustomFieldBtn.addEventListener('click', () => {
+    saveCustomFieldBtn.addEventListener('click', async () => {
         const name = customFieldNameInput.value.trim();
         if (name) {
-            chrome.storage.local.set({ threadIdField: name }, () => {
-                saveCustomFieldBtn.textContent = 'Guardado ✓';
-                setTimeout(() => {
-                    saveCustomFieldBtn.textContent = 'Guardar nombre del campo';
-                }, 2000);
-            });
+            try {
+                await chrome.storage.local.set({ threadIdField: name });
+            } catch {
+                return;
+            }
+            saveCustomFieldBtn.textContent = 'Guardado ✓';
+            setTimeout(() => {
+                saveCustomFieldBtn.textContent = 'Guardar nombre del campo';
+            }, 2000);
         }
     });
 
@@ -2300,17 +2320,11 @@ async function initMeetingLinkSection(): Promise<void> {
 // Message Helper
 // ============================================================================
 
-function sendMessage<T = any>(message: { action: string; data?: any }): Promise<T> {
-    return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (response: any) => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-            } else if (response?.error) {
-                if (response.requiresReauth === true) window.location.reload();
-                reject(new Error(response.error));
-            } else {
-                resolve(response as T);
-            }
-        });
-    });
+async function sendMessage<T = any>(message: { action: string; data?: any }): Promise<T> {
+    const response = await chrome.runtime.sendMessage(message) as any;
+    if (response?.error) {
+        if (response.requiresReauth === true) window.location.reload();
+        throw new Error(response.error);
+    }
+    return response as T;
 }

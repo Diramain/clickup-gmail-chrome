@@ -85,6 +85,31 @@ describe('B2 sanitizer and message security', () => {
         expect(messages.validateExtensionMessage({ ...upload, data: { ...upload.data, byteLength: 9 } }, { id: runtimeId, url: 'https://mail.google.com/mail/u/0/' }, runtimeId).ok).toBe(false);
     });
 
+    test('accepts only the exact Firefox extension origin derived from runtime URL', () => {
+        const runtimeId = 'firefox-id';
+        const extensionRoot = 'moz-extension://trusted-uuid/';
+        const message = { action: 'getStatus' };
+
+        expect(messages.validateExtensionMessage(
+            message,
+            { id: runtimeId, url: 'moz-extension://trusted-uuid/app/app.html' },
+            runtimeId,
+            extensionRoot,
+        )).toEqual({ ok: true });
+        expect(messages.validateExtensionMessage(
+            message,
+            { id: runtimeId, url: 'moz-extension://other-uuid/app/app.html' },
+            runtimeId,
+            extensionRoot,
+        )).toEqual({ ok: false, code: 'INVALID_ORIGIN' });
+        expect(messages.validateExtensionMessage(
+            { action: 'saveOAuthConfig', data: { clientId: 'id', clientSecret: 'secret' } },
+            { id: runtimeId, url: 'moz-extension://trusted-uuid/app/app.html' },
+            runtimeId,
+            extensionRoot,
+        )).toEqual({ ok: true });
+    });
+
     test('accepts legitimate popup action schemas without widening Gmail-sensitive actions', () => {
         const runtimeId = 'ext-id';
         const sender = { id: runtimeId, url: 'chrome-extension://ext-id/popup.html' };

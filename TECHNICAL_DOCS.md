@@ -1,12 +1,12 @@
 # TaskBridge for ClickUp 2.1.0
 
-Technical reference for the Chrome Manifest V3 extension. The canonical versioned source is this repository; the GitHub wiki mirrors the maintained user, technical, contribution, security, privacy, and release documents from `main`.
+Technical reference for the Chrome and Firefox Manifest V3 extension. The canonical versioned source is this repository; the GitHub wiki mirrors the maintained user, technical, contribution, security, privacy, and release documents from `main`.
 
 ## Runtime Architecture
 
 The extension has four runtime surfaces:
 
-1. `background.ts`: trusted service worker, ClickUp personal-token/OAuth boundary, ClickUp API client, Calendar runtime, mappings, timers, and message authorization.
+1. `background.ts`: trusted background runtime, ClickUp personal-token/OAuth boundary, ClickUp API client, Calendar runtime, mappings, timers, and message authorization.
 2. `app/`: responsive full-tab application for dashboard, tasks, agenda, tracking, connections, and settings.
 3. `src/gmail-native.ts` and `src/modal.ts`: Gmail content integration and create/link task form.
 4. `src/clickup-tracker.ts` and `src/meet/meet-tracker.ts`: minimal host observers that send reduced events to the background worker.
@@ -15,7 +15,7 @@ The toolbar uses `popup/minimal.html` only as a launcher. `popup/popup.html` rem
 
 ## Trust Boundaries
 
-Host pages are untrusted. Gmail, ClickUp, and Meet content scripts cannot read `chrome.storage.local` directly. They send closed, origin-validated messages through `src/message-security.ts`.
+Host pages are untrusted. Gmail, ClickUp, and Meet content scripts cannot read trusted local persistence directly. Chrome uses `TRUSTED_CONTEXTS`; Firefox routes injected `storage.local` calls to extension-origin IndexedDB and denies storage in host contexts. Content scripts send closed, origin-validated messages through `src/message-security.ts`.
 
 The service worker owns:
 

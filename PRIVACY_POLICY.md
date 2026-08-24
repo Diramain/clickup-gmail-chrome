@@ -75,9 +75,9 @@ The email body is not retained as a local mapping. It may be processed temporari
 
 Mappings persist until you delete them, clear local data, or uninstall the extension. Caches may expire, be replaced, or be cleared by the user. The extension does not claim automatic time-based purging of mappings.
 
-Gmail, ClickUp, and Meet host content scripts are denied direct access to `chrome.storage.local`. Approved reads and all privileged operations go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
+Gmail, ClickUp, and Meet host content scripts are denied direct access to trusted local persistence. Chrome restricts `chrome.storage.local` to trusted extension contexts. Firefox uses extension-origin IndexedDB and a fail-closed facade because Firefox does not implement `StorageArea.setAccessLevel`. Approved reads and all privileged operations go through origin-checked, schema-validated background messages. This reduces exposure but does not protect a compromised browser profile or device.
 
-Safe Diagnostics is off by default. Its state and bounded event buffer use `chrome.storage.session` with access restricted to trusted extension contexts. Chrome keeps that area in memory and clears it when the extension is disabled, reloaded, or updated, and when the browser restarts. You can also disable capture, export the allowlisted JSON, or clear the buffer from the popup at any time.
+Safe Diagnostics is off by default. Its state and bounded event buffer use browser session storage restricted to trusted extension contexts. Chrome applies `TRUSTED_CONTEXTS`; Firefox session storage is trusted-only by default. The browser clears this area when the extension or browser session ends. You can also disable capture, export the allowlisted JSON, or clear the buffer from the popup at any time.
 
 ## 7. Export and Clear Controls
 

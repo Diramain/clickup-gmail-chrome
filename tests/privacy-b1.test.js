@@ -120,12 +120,12 @@ describe('B1 privacy hardening', () => {
         expect(policy).toMatch(/does not access or capture audio, microphone, video, camera, chat, captions/i);
         expect(policy).toMatch(/stable room hash is pseudonymous metadata, not anonymous data/i);
         expect(policy).toMatch(/excludes Meet room keys and Meet task mappings/i);
-        expect(policy).toMatch(/Gmail, ClickUp, and Meet host content scripts are denied direct access to `chrome\.storage\.local`/i);
+        expect(policy).toMatch(/Gmail, ClickUp, and Meet host content scripts are denied direct access to trusted local persistence/i);
         expect(policy).toMatch(/not allowed to run in incognito mode/i);
         expect(policy).toMatch(/clear local data[\s\S]*does not delete or modify data already sent to ClickUp/i);
         expect(policy).toMatch(/Safe Diagnostics is off by default/i);
         expect(policy).toMatch(/up to 200 allowlisted technical events/i);
-        expect(policy).toMatch(/`chrome\.storage\.session` with access restricted to trusted extension contexts/i);
+        expect(policy).toMatch(/browser session storage restricted to trusted extension contexts/i);
         expect(policy).toMatch(/do not include tokens, authorization headers, URLs, workspace or task IDs, names, email addresses, API payloads, or Gmail\/Meet content/i);
         expect(policy).toMatch(/separate export control/i);
         expect(policy).toContain('https://leandroiramain.com.ar');
@@ -145,7 +145,7 @@ describe('B1 privacy hardening', () => {
         expect(security).toMatch(/must not be shared as an organization-wide credential/i);
         expect(security).toMatch(/Google Meet Priority Boundary/);
         expect(security).toMatch(/Safe Diagnostics Boundary/);
-        expect(security).toMatch(/at most 200 events in `chrome\.storage\.session`/i);
+        expect(security).toMatch(/at most 200 events in browser session storage/i);
         expect(security).toMatch(/Diagnostic runtime actions are extension-page-only/i);
         expect(security).toMatch(/writes are never replayed automatically/i);
         expect(security).toMatch(/`TRUSTED_CONTEXTS`/);

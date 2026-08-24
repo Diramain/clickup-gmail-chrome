@@ -233,25 +233,33 @@ verde y Firefox instala temporalmente sin errores de manifiesto o startup.
 
 ### Fase B2: Adaptador WebExtensions
 
-- [ ] B2.1. Evaluar y fijar una version revisada de `webextension-polyfill`.
-- [ ] B2.2. Crear una unica frontera para runtime, storage, tabs, windows,
+- [x] B2.1. Evaluar `webextension-polyfill`. Se reviso el candidato Mozilla
+  `0.12.0` y se rechazo incorporarlo: agrega una dependencia sin resolver
+  identity, storage security ni politicas de capacidad; la frontera first-party
+  queda fijada al codigo versionado del repositorio.
+- [x] B2.2. Crear una unica frontera para runtime, storage, tabs, windows,
   alarms, action e identity.
-- [ ] B2.3. Normalizar Promises, callbacks y `runtime.lastError`.
-- [ ] B2.4. Evitar detecciones de navegador dispersas por el producto.
-- [ ] B2.5. Agregar pruebas contractuales para Chrome y Firefox.
+- [x] B2.3. Normalizar Promises y retirar callbacks/`runtime.lastError` del
+  popup; Google Identity conserva su adaptador callback aislado.
+- [x] B2.4. Evitar detecciones de navegador dispersas por el producto.
+- [x] B2.5. Agregar pruebas contractuales para Chrome y Firefox.
 
-**Gate B2:** mensajeria, popup, app, pestañas y alarmas funcionan en ambos
-navegadores; Chrome conserva su comportamiento.
+**Gate B2:** `VERDE`; build, contratos, startup, popup, app, mensajeria,
+pestanas y alarmas validados en Firefox 154. Chrome conserva CI y artefacto
+separado verdes.
 
 ### Fase B3: Paridad De Seguridad
 
-- [ ] B3.1. Derivar origen e identidad confiables con `runtime.getURL()` y
+- [x] B3.1. Derivar origen e identidad confiables con `runtime.getURL()` y
   `runtime.id`.
-- [ ] B3.2. Validar paginas permitidas sin hardcodear `chrome-extension://`.
-- [ ] B3.3. Sustituir la dependencia de `storage.setAccessLevel()`.
-- [ ] B3.4. Mantener credenciales, tokens y material de cifrado detras de una
+- [x] B3.2. Validar paginas permitidas sin hardcodear `chrome-extension://`.
+- [x] B3.3. Sustituir la dependencia de `storage.setAccessLevel()` en Firefox
+  con IndexedDB extension-origin para local y session nativo trusted-only;
+  Chrome conserva `setAccessLevel()`.
+- [x] B3.4. Mantener credenciales, tokens y material de cifrado detras de una
   persistencia controlada por el background.
-- [ ] B3.5. Demostrar que content scripts no pueden leer credenciales.
+- [~] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
+  falta la prueba negativa manual en Firefox real.
 - [ ] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
 - [ ] B3.7. Implementar exportacion diagnostica Firefox sin
   `showSaveFilePicker()` y sin ampliar datos capturados.
@@ -342,7 +350,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B1_GREEN_B2_READY`.
+**Estado Plan B:** `B2_GREEN_B3_PARTIAL`.
 
 ---
 
@@ -374,6 +382,10 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | B0 | Contrato y matriz multi-browser cerrados | Inventario estatico del repo y documentacion MDN vigente; rama `feat/firefox-port` creada desde el merge de A30 | No aplica |
 | 2026-08-23 | B1.1-B1.6, B1.8 | Build multi-browser implementado | 34 archivos por target; runtime compartido byte-identico; 540/540 pruebas; Calendar fail-closed en `moz-extension:`; ZIP Chrome `32f630cca218df21987f81401e5de233cc076d15eabc98a8e3de096060cec41c`, Firefox `5f4fc62a96901b2770cbf303baa4f16610b07785c22b5120c19677151607b4e5`; integridad ZIP verde | Rebuild determinista con hashes identicos |
 | 2026-08-23 | B1.7 y Gate B1 | CI y carga temporal Firefox verdes | PR #3: tests, Chrome release y Firefox release con `web-ext lint` verdes; Firefox 154 en perfil descartable instalo y desinstalo el Gecko ID esperado con cero errores de startup | Perfil temporal terminado; sin persistencia ni publicacion |
+| 2026-08-23 | B2.1-B2.5 | Adaptador WebExtensions validado | 547/547 pruebas; build dual e integridad verdes; ZIP Chrome `2eb0b97da626a6c09d1c83303d6f79102a4aefbebf29c1aec9cf7cfd2529388f`, Firefox `17baf46a63620715e7014a1a3e4b140fe2b7e8db12ec8283818d00df8726ff13`; carga temporal automatizada Firefox 154 sin errores de startup | Gate `VERDE` tras smoke manual |
+| 2026-08-23 | B3.3-B3.5 parcial | Storage privado Firefox | Smoke manual detecto que Firefox 154 no implementa `StorageArea.setAccessLevel`; IndexedDB extension-origin reemplaza local, session conserva trusted-only, content scripts reciben un facade fail-closed y las mutaciones/eventos son transaccionales y secuenciados | Sin migracion legacy: Firefox no fue publicado y el build fallido no persistio datos de aplicacion |
+| 2026-08-23 | B3.1-B3.2 | Origen extension multi-browser | Smoke manual detecto `INVALID_ORIGIN` en app Firefox; validacion y `clearLocalData` ahora comparan protocolo y host exactos derivados de `runtime.getURL('/')`, con sender ID obligatorio | Caso Firefox trusted/UUID hostil cubierto por contrato |
+| 2026-08-23 | Gate B2 | Smoke manual Firefox verde | Owner valido popup y app visibles sin `INIT_ERROR`; `getStatus` sin error, tabs, alarms create/get y cleanup devolvieron `true` en Firefox 154 | Sin credenciales, OAuth, ClickUp writes ni publicacion AMO |
 
 ## Registro De Decisiones
 
@@ -395,7 +407,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B1_GREEN_B2_READY`.
+- Plan B: `B2_GREEN_B3_PARTIAL`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
