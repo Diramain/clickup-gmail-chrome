@@ -26,6 +26,7 @@ import {
     mergeThreadIdValue,
     migrateMappingsV1ToV2,
     nextHierarchyPreloadStatus,
+    prepareThreadLinkedTaskPayload,
     readMappingsWithFallback,
     runWithConcurrencyLimit,
     shouldAttemptHierarchyPreload,
@@ -3086,15 +3087,9 @@ async function appendThreadIdToCustomFieldSerialized(
     const next = previous.then(async () => {
         const freshTask = await clickupAPI!.getTask(taskId);
         const field = selectThreadIdCustomField(freshTask.custom_fields as any[], fieldId, configuredFieldName);
-        if (!field?.id) {
-            Logger.warn('LINK_FIELD_NOT_FOUND');
-            confirmed = false;
-            return;
-        }
-
-        const existingValue = field.value || field.text_value || '';
+        const existingValue = field?.value || field?.text_value || '';
         const newValue = mergeThreadIdValue(existingValue, threadId);
-        await clickupAPI!.setCustomFieldValue(taskId, field.id, newValue);
+        await clickupAPI!.setCustomFieldValue(taskId, field?.id || fieldId, newValue);
         confirmed = true;
     });
 
@@ -3392,16 +3387,18 @@ async function uploadGmailAttachment(data: GmailAttachmentUploadPayload): Promis
 async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask> {
     await ensureAPI();
     const { listId, taskData, emailData } = data;
+    const hasEmailThread = !!emailData && isConfirmedThreadId(emailData.threadId);
+    const warnings: string[] = [];
 
     // Get configured Custom Field Name
     const settings = await chrome.storage.local.get(['threadIdField', 'useCustomFieldForThreadId']);
-    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim().toLowerCase();
+    const customFieldName = (settings.threadIdField || 'Gmail Thread ID').trim();
     const useMethod = settings.useCustomFieldForThreadId !== false; // Default: true
     Logger.info(`LINK_METHOD_${useMethod ? 'CUSTOM_FIELD' : 'DESCRIPTION'}`);
 
     // 1. Get Custom Field definition from List
     let threadIdFieldId: string | null = null;
-    if (useMethod && emailData && emailData.threadId) { // Only try to get field if emailData is present
+    if (useMethod && hasEmailThread) {
         try {
             const customFields = await clickupAPI!.getAccessibleCustomFields(listId);
             const threadIdField = selectThreadIdCustomField(customFields.fields as any[], undefined, customFieldName);
@@ -3410,78 +3407,58 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
                 threadIdFieldId = threadIdField.id;
             } else {
                 Logger.warn('LINK_FIELD_NOT_FOUND');
+                warnings.push(`no se encontró el campo personalizado ${customFieldName}`);
             }
         } catch (e) {
             Logger.warn('LINK_FIELD_LOOKUP_FAILED');
+            warnings.push(`no se pudo consultar el campo personalizado ${customFieldName}`);
         }
-    } else if (!useMethod && emailData && emailData.threadId) {
+    }
+
+    const createPayload = prepareThreadLinkedTaskPayload(
+        taskData,
+        useMethod ? threadIdFieldId : null,
+        hasEmailThread ? emailData.threadId : null,
+    );
+
+    if (!useMethod && hasEmailThread) {
         // Toggle OFF: Append to Description (use markdown_description as that's what modal sends)
         const threadIdLine = `\n\n---\n**Thread ID:** ${emailData.threadId}`;
-        if (taskData.markdown_description) {
-            taskData.markdown_description += threadIdLine;
-        } else if (taskData.description) {
-            taskData.description += threadIdLine;
+        if (createPayload.markdown_description) {
+            createPayload.markdown_description += threadIdLine;
+        } else if (createPayload.description) {
+            createPayload.description += threadIdLine;
         } else {
-            taskData.markdown_description = threadIdLine;
+            createPayload.markdown_description = threadIdLine;
         }
         Logger.info('LINK_DESCRIPTION_INCLUDED');
     }
 
     // 2. Create Task
-    const task = await clickupAPI!.createTask(listId, taskData);
-    let responseTask: ClickUpTask = task;
+    const task = await clickupAPI!.createTask(listId, createPayload);
+    const linkConfirmed = hasEmailThread && (!useMethod || !!threadIdFieldId);
+    const linkSource: LinkSource = linkConfirmed ? (useMethod ? 'custom_field' : 'description') : 'unknown';
+    const linkStatus: LinkValidationStatus = linkConfirmed ? 'linked' : 'unverified';
+    let responseTask: ClickUpTask = hasEmailThread
+        ? { ...task, linkStatus, linkSource, customFieldId: threadIdFieldId || undefined } as ClickUpTask
+        : task;
 
     // 3. Link Email (Thread ID)
-    if (emailData && emailData.threadId) {
-        await saveEmailTaskMapping(emailData.threadId, task, {
-            linkStatus: useMethod ? 'pending' : 'linked',
-            linkSource: useMethod ? 'unknown' : 'description',
-            customFieldId: threadIdFieldId || undefined,
-        });
-
-        if (threadIdFieldId) {
-            let linkConfirmed = false;
-            try {
-                linkConfirmed = await appendThreadIdToCustomFieldSerialized(task.id, threadIdFieldId, emailData.threadId, customFieldName);
-                Logger.info(`LINK_CUSTOM_FIELD_${linkConfirmed ? 'CONFIRMED' : 'UNCONFIRMED'}`);
-            } catch (e: unknown) {
-                Logger.warn('LINK_CUSTOM_FIELD_FAILED');
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                if (errorMessage.includes('usages exceeded')) {
-                    // PLAN LIMIT HIT
-                    Logger.warn('LINK_PLAN_LIMIT');
-                    try {
-                        await clickupAPI!.addComment(task.id, `⚠️ **Alerta del sistema:** No se pudo vincular el Thread ID del email mediante campo personalizado por límites del plan de ClickUp.\n\nThread ID: ${emailData.threadId}`);
-                    } catch (commentError) {
-                        Logger.warn('LINK_PLAN_LIMIT_COMMENT_FAILED');
-                    }
-                }
-            }
+    if (hasEmailThread) {
+        try {
             await saveEmailTaskMapping(emailData.threadId, task, {
-                linkStatus: transitionLinkStatus('pending', linkConfirmed),
-                linkSource: linkConfirmed ? 'custom_field' : 'unknown',
-                customFieldId: threadIdFieldId,
+                linkStatus,
+                linkSource,
+                customFieldId: threadIdFieldId || undefined,
             });
-        } else if (useMethod) {
-            await saveEmailTaskMapping(emailData.threadId, task, {
-                linkStatus: 'unverified',
-                linkSource: 'unknown',
-            });
+        } catch {
+            Logger.warn('LINK_LOCAL_MAPPING_FAILED');
+            warnings.push('no se pudo guardar el vínculo local');
         }
     }
 
     // 4. Attachments & Comments
     if (emailData) {
-        const warnings: string[] = [];
-        const markPartial = async (): Promise<void> => {
-            if (!emailData.threadId) return;
-            await saveEmailTaskMapping(emailData.threadId, task, {
-                linkStatus: 'partial_failed',
-                linkSource: useMethod ? (threadIdFieldId ? 'custom_field' : 'unknown') : 'description',
-                customFieldId: threadIdFieldId || undefined,
-            });
-        };
-
         const gmailUrl = `https://mail.google.com/mail/u/0/#inbox/${emailData.threadId}`;
         const commentText = `📧 **Email vinculado:**\n🔗 [Ver email original en Gmail](${gmailUrl})`;
         try {
@@ -3500,10 +3477,6 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
             }
         }
 
-        if (warnings.length > 0) {
-            await markPartial();
-            responseTask = { ...task, warning: `Tarea creada, pero ${warnings.join(' y ')}.`, warnings, partial: true } as ClickUpTask & { warning: string; warnings: string[]; partial: true };
-        }
     }
 
     // 5. BUG FIX: Track Time (if specified from modal)
@@ -3516,14 +3489,22 @@ async function createTaskFull(data: CreateTaskFullMessage): Promise<ClickUpTask>
         }
     }
 
+    if (warnings.length > 0) {
+        responseTask = { ...responseTask, warning: `Tarea creada, pero ${warnings.join(' y ')}.`, warnings, partial: true } as ClickUpTask & { warning: string; warnings: string[]; partial: true };
+    }
+
     // 6. Notify Tabs
     if (chrome.tabs && emailData) {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs[0]?.id) {
-            chrome.tabs.sendMessage(tabs[0].id, {
-                action: 'taskCreated',
-                data: { threadId: emailData.threadId, task: responseTask }
-            });
+        try {
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tabs[0]?.id) {
+                await chrome.tabs.sendMessage(tabs[0].id, {
+                    action: 'taskCreated',
+                    data: { threadId: emailData.threadId, task: responseTask }
+                });
+            }
+        } catch {
+            Logger.warn('CREATE_TASK_TAB_NOTIFICATION_FAILED');
         }
     }
 

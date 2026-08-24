@@ -942,7 +942,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
                 chrome.windows.create({
                     url: chrome.runtime.getURL('task-modal.html'),
                     type: 'popup',
-                    width: 600,
+                    width: 700,
                     height: 700
                 });
             };
@@ -965,7 +965,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             chrome.windows.create({
                 url: chrome.runtime.getURL('task-modal.html'),
                 type: 'popup',
-                width: 600,
+                width: 700,
                 height: 700
             });
         }

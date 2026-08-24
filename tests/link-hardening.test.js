@@ -91,6 +91,29 @@ describe('link hardening helpers', () => {
         expect(hardening.selectThreadIdCustomField(fields, null, 'missing')).toBeNull();
     });
 
+    test('task creation payload atomically includes only the background-selected Gmail field', () => {
+        const payload = hardening.prepareThreadLinkedTaskPayload({
+            name: 'Task',
+            custom_fields: [{ id: 'untrusted-field', value: 'untrusted' }],
+        }, 'gmail-field', 'thread-confirmed');
+
+        expect(payload).toEqual({
+            name: 'Task',
+            custom_fields: [{ id: 'gmail-field', value: 'thread-confirmed' }],
+        });
+        expect(hardening.prepareThreadLinkedTaskPayload({ name: 'Task', custom_fields: [{ id: 'x', value: 'y' }] }, null, 'thread-confirmed'))
+            .toEqual({ name: 'Task' });
+    });
+
+    test('full creation sends the Thread ID in the initial task transaction', () => {
+        const background = fs.readFileSync(path.join(__dirname, '..', 'background.ts'), 'utf8');
+        const transaction = background.slice(background.indexOf('async function createTaskFull'));
+        expect(transaction).toMatch(/prepareThreadLinkedTaskPayload\([\s\S]*clickupAPI!\.createTask\(listId, createPayload\)/);
+        expect(transaction).not.toMatch(/appendThreadIdToCustomFieldSerialized/);
+        expect(transaction).toMatch(/LINK_LOCAL_MAPPING_FAILED/);
+        expect(background).toMatch(/setCustomFieldValue\(taskId, field\?\.id \|\| fieldId, newValue\)/);
+    });
+
     test('thread ID values are merged without duplicate comma-separated entries', () => {
         expect(hardening.mergeThreadIdValue('thread-a, thread-b', 'thread-b')).toBe('thread-a,thread-b');
         expect(hardening.mergeThreadIdValue('thread-a', 'thread-c')).toBe('thread-a,thread-c');

@@ -207,6 +207,7 @@ describe('B2 sanitizer and message security', () => {
     test('standalone modal always resolves from the extension root', () => {
         const popup = source('popup/popup.ts');
         expect(popup.match(/url: chrome\.runtime\.getURL\('task-modal\.html'\)/g)).toHaveLength(2);
+        expect(popup.match(/width: 700/g)).toHaveLength(2);
         expect(popup).not.toMatch(/url: 'task-modal\.html'/);
     });
 });

@@ -1,4 +1,4 @@
-import type { EmailTaskMapping } from './types/clickup';
+import type { CreateTaskPayload, EmailTaskMapping } from './types/clickup';
 
 export type LinkValidationStatus =
     | 'pending'
@@ -101,6 +101,19 @@ export function selectThreadIdCustomField(fields: CustomFieldLike[] | undefined 
 
     const normalizedName = normalizeCustomFieldName(configuredName || 'Gmail Thread ID');
     return fields.find(field => normalizeCustomFieldName(field.name) === normalizedName) || null;
+}
+
+export function prepareThreadLinkedTaskPayload(
+    taskData: CreateTaskPayload,
+    fieldId: string | null | undefined,
+    threadId: unknown,
+): CreateTaskPayload {
+    const payload = { ...taskData };
+    delete payload.custom_fields;
+    if (fieldId && isConfirmedThreadId(threadId)) {
+        payload.custom_fields = [{ id: fieldId, value: threadId.trim() }];
+    }
+    return payload;
 }
 
 export function mergeThreadIdValue(existingValue: unknown, threadId: string): string {
