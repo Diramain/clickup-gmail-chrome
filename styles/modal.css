@@ -873,6 +873,11 @@
     font-weight: 500;
     z-index: 99999999;
     animation: cu-slide-up 0.3s ease;
+    box-sizing: border-box;
+    width: min(620px, calc(100vw - 32px));
+    line-height: 1.45;
+    text-align: center;
+    white-space: normal;
 }
 
 .cu-toast-success {

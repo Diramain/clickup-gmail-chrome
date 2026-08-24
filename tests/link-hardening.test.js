@@ -91,6 +91,19 @@ describe('link hardening helpers', () => {
         expect(hardening.selectThreadIdCustomField(fields, null, 'missing')).toBeNull();
     });
 
+    test('custom field selection excludes fields scoped to a different custom task type', () => {
+        const fields = [
+            { id: 'default-field', name: 'Gmail Thread ID' },
+            { id: 'bug-field', name: 'Gmail Thread ID', applied_objects: [{ object_type: 19, object_id: 101 }] },
+            { id: 'request-field', name: 'Gmail Thread ID', applied_objects: [{ object_type: 19, object_id: 202 }] },
+        ];
+
+        expect(hardening.selectThreadIdCustomField(fields, null, 'Gmail Thread ID', 202).id).toBe('default-field');
+        expect(hardening.selectThreadIdCustomField(fields.slice(1), null, 'Gmail Thread ID', 202).id).toBe('request-field');
+        expect(hardening.selectThreadIdCustomField(fields.slice(1), 'bug-field', 'Gmail Thread ID', 202).id).toBe('request-field');
+        expect(hardening.selectThreadIdCustomField(fields.slice(1), null, 'Gmail Thread ID', null)).toBeNull();
+    });
+
     test('task creation payload atomically includes only the background-selected Gmail field', () => {
         const payload = hardening.prepareThreadLinkedTaskPayload({
             name: 'Task',
@@ -111,7 +124,16 @@ describe('link hardening helpers', () => {
         expect(transaction).toMatch(/prepareThreadLinkedTaskPayload\([\s\S]*clickupAPI!\.createTask\(listId, createPayload\)/);
         expect(transaction).not.toMatch(/appendThreadIdToCustomFieldSerialized/);
         expect(transaction).toMatch(/LINK_LOCAL_MAPPING_FAILED/);
+        expect(background).toMatch(/selectThreadIdCustomField\(task\.custom_fields as any\[\], undefined, customFieldName\)/);
+        expect(background).toMatch(/if \(!threadIdField\)[\s\S]{0,180}getAccessibleCustomFieldsWithAppliedObjects\(task\.list\.id\)/);
+        expect(background).toMatch(/selectThreadIdCustomField\(customFields\.fields as any\[\], undefined, customFieldName, task\.custom_item_id \?\? null\)/);
         expect(background).toMatch(/setCustomFieldValue\(taskId, field\?\.id \|\| fieldId, newValue\)/);
+        expect(background).toMatch(/isClickUpCustomFieldUsageLimitError\(e\)[\s\S]{0,420}plan actual de ClickUp alcanzó el límite/);
+        expect(background).toMatch(/linkStatus: linkConfirmed \? 'partial_failed' : 'unverified'/);
+        expect(background).toMatch(/if \(linkConfirmed\)[\s\S]{0,300}removeEmailTaskMapping\(emailData\.threadId, task\.id\)/);
+        const modal = fs.readFileSync(path.join(__dirname, '..', 'src/modal.ts'), 'utf8');
+        expect(modal).toMatch(/warning \? 12_000 : 3_000/);
+        expect(modal).toMatch(/\.linkStatus !== 'unverified'/);
     });
 
     test('thread ID values are merged without duplicate comma-separated entries', () => {

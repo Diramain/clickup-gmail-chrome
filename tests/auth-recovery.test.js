@@ -146,6 +146,7 @@ describe('ClickUp authentication recovery', () => {
         });
         expect(sanitizeClickUpErrorCode('OAUTH_023')).toBe('OAUTH_023');
         expect(sanitizeClickUpErrorCode('OAUTH_045')).toBe('OAUTH_045');
+        expect(sanitizeClickUpErrorCode('FIELD_033')).toBe('FIELD_033');
         expect(sanitizeClickUpErrorCode('OAUTH_999')).toBeUndefined();
         expect(sanitizeClickUpErrorCode('sensitive text')).toBeUndefined();
     });

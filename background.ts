@@ -8,7 +8,7 @@ import {
     TimeEntry,
     ClickUpCustomTaskType
 } from './src/types/clickup';
-import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
+import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpCustomFieldUsageLimitError, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
 import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
@@ -180,7 +180,16 @@ const googleCalendarRuntime = new GoogleCalendarAgendaRuntime({
 
 function recordDiagnostic(event: DiagnosticEventName, details: Record<string, unknown> = {}): void {
     void diagnosticLog.record(event, details).catch(() => undefined);
-    emitCausalTrace({ event: 'diagnostic', action: event, outcome: String(details.outcome || 'none'), reason: String(details.reason || 'unknown') });
+    emitCausalTrace({
+        event: 'diagnostic',
+        action: event,
+        outcome: String(details.outcome || 'none'),
+        reason: String(details.reason || 'unknown'),
+        diagnosticRoute: details.route,
+        requestMethod: details.method,
+        failureClass: details.failureClass,
+        attempt: details.attempt,
+    });
 }
 
 function emitCausalTrace(input: CausalTraceInput): SafeCausalTraceEvent | null {
@@ -3075,6 +3084,14 @@ async function getStoredTaskMapping(threadId: string, taskId: string) {
     return (mappings[threadId] || []).find(task => task.id === taskId) || null;
 }
 
+async function removeEmailTaskMapping(threadId: string, taskId: string): Promise<void> {
+    await updateEmailTaskMappings((mappings) => {
+        const remaining = (mappings[threadId] || []).filter(task => task.id !== taskId);
+        if (remaining.length > 0) mappings[threadId] = remaining;
+        else delete mappings[threadId];
+    });
+}
+
 async function appendThreadIdToCustomFieldSerialized(
     taskId: string,
     fieldId: string,
@@ -3303,6 +3320,7 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     let linkConfirmed = false;
     let linkSource: LinkSource = 'unknown';
     let customFieldId: string | undefined;
+    let partialWarning: string | undefined;
 
     if (emailData.threadId) {
         await saveEmailTaskMapping(emailData.threadId, task, { linkStatus: 'pending', linkSource: 'unknown' });
@@ -3312,8 +3330,11 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     if (useCustomField && emailData.threadId && task.list?.id) {
         // Toggle ON: Save to Custom Field (supports multiple Thread IDs separated by comma)
         try {
-            const customFields = await clickupAPI!.getAccessibleCustomFields(task.list.id);
-            const threadIdField = selectThreadIdCustomField(customFields.fields as any[], undefined, customFieldName);
+            let threadIdField = selectThreadIdCustomField(task.custom_fields as any[], undefined, customFieldName);
+            if (!threadIdField) {
+                const customFields = await clickupAPI!.getAccessibleCustomFieldsWithAppliedObjects(task.list.id);
+                threadIdField = selectThreadIdCustomField(customFields.fields as any[], undefined, customFieldName, task.custom_item_id ?? null);
+            }
 
             if (threadIdField) {
                 customFieldId = threadIdField.id;
@@ -3322,9 +3343,13 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
                 Logger.info(`LINK_CUSTOM_FIELD_${linkConfirmed ? 'CONFIRMED' : 'UNCONFIRMED'}`);
             } else {
                 Logger.warn('LINK_FIELD_NOT_FOUND');
+                partialWarning = `No se encontró un campo ${customFieldName} aplicable a este tipo de tarea.`;
             }
         } catch (e) {
             Logger.warn('LINK_CUSTOM_FIELD_FAILED');
+            partialWarning = isClickUpCustomFieldUsageLimitError(e)
+                ? 'No se pudo vincular el email: el plan actual de ClickUp alcanzó el límite de usos de campos personalizados por API. Para vincular tareas existentes necesitás pasar a un plan superior. Mientras tanto, solo las tareas creadas desde TaskBridge quedarán vinculadas automáticamente.'
+                : `No se pudo guardar el vínculo en el campo ${customFieldName}.`;
         }
     } else if (!useCustomField && emailData.threadId) {
         // Toggle OFF: Save to Description via Comment (can't edit task description directly via API easily)
@@ -3350,7 +3375,6 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
 
     // Add comment with email link
     const commentText = `📧 **Email adjunto:** ${emailData.subject}\nDe: ${emailData.from}\n\n🔗 [Ver email original en Gmail](${gmailUrl})`;
-    let partialWarning: string | undefined;
     try {
         await clickupAPI!.addComment(taskId, commentText);
     } catch (e) {
@@ -3369,8 +3393,12 @@ async function attachEmailToTask(data: AttachEmailMessage): Promise<ClickUpTask>
     }
 
     if (partialWarning && emailData.threadId) {
-        await saveEmailTaskMapping(emailData.threadId, task, { linkStatus: 'partial_failed', linkSource, customFieldId });
-        return { ...task, warning: partialWarning, partial: true } as ClickUpTask & { warning: string; partial: true };
+        if (linkConfirmed) {
+            await saveEmailTaskMapping(emailData.threadId, task, { linkStatus: 'partial_failed', linkSource, customFieldId });
+        } else {
+            await removeEmailTaskMapping(emailData.threadId, task.id);
+        }
+        return { ...task, warning: partialWarning, partial: true, linkStatus: linkConfirmed ? 'partial_failed' : 'unverified' } as ClickUpTask & { warning: string; partial: true; linkStatus: LinkValidationStatus };
     }
 
     return task;

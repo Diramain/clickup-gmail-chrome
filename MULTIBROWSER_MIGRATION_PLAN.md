@@ -269,10 +269,12 @@ credenciales en ambos navegadores.
 
 ### Fase B4: Firefox Funcional Sin Calendar
 
-- [ ] B4.1. Cargar TaskBridge temporalmente en un perfil Firefox limpio.
-- [ ] B4.2. Validar token personal de ClickUp.
-- [ ] B4.3. Validar Gmail: inyeccion, navegacion, lectura y modal.
-- [ ] B4.4. Validar crear y vincular tareas en un destino de prueba.
+- [x] B4.1. Cargar TaskBridge temporalmente en un perfil Firefox limpio.
+- [x] B4.2. Validar token personal de ClickUp.
+- [x] B4.3. Validar Gmail: inyeccion, navegacion, lectura y modal.
+- [~] B4.4. Crear tareas queda verde y persiste `Gmail Thread ID`; vincular una
+  tarea existente queda correctamente bloqueado con aviso accionable cuando
+  ClickUp devuelve `FIELD_033` por limite del plan.
 - [ ] B4.5. Validar adjuntos seleccionados.
 - [ ] B4.6. Validar seguimiento de tiempo y navegacion ClickUp.
 - [ ] B4.7. Validar Meet Priority opt-in.
@@ -389,7 +391,8 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-24 | B3.6-B3.7 | Paridad de mensajes y exportacion diagnostica | 552/552 pruebas; build dual e integridad verdes; smoke Firefox descargo 63 eventos JSONL normalizados sin campos sensibles crudos; ZIP Chrome `25740d1ee493de8a424767f500f04b48c84e079adb47c507873895e60349aadc`, Firefox `44fe85acda39ce696fc134013fee6c5b446d25875943fa935181719a6e2b4f99` | Sin permiso `downloads`; fallback acotado a 16 MiB |
 | 2026-08-24 | B4 hallazgo temprano | Modal standalone Firefox carga | Ruta relativa `app/task-modal.html` corregida con `runtime.getURL('task-modal.html')`; documento en modo estandar y tipografia system sans explicita | Pendiente retest visual de tipografia |
 | 2026-08-24 | B4 hallazgo temprano | Barra Gmail ausente por artefacto clasico invalido | `logger.js` y `gmail-adapter.js` contenian `require()` por inyeccion sobre build no bundled; build y watch ahora excluyen el adapter en esos entrypoints y preflight rechaza loaders CommonJS en content scripts | Pendiente retest Gmail Firefox |
-| 2026-08-24 | B4 hallazgo temprano | Creacion Gmail no persistia vinculo | ClickUp omitia el campo aun vacio en el read-back y el setter posterior nunca se ejecutaba; ahora `Gmail Thread ID` viaja en el payload inicial, caller fields se descartan, vincular existente usa el field ID descubierto y fallos posteriores no inducen un segundo create; modal standalone ampliado a 700 px; 554/554 pruebas, ZIP Chrome `9b793ea8e835ebb29d25e0258ebcdc4ffa500d2d57e7ae247f898acf11e7e568`, Firefox `e89cf49b25e3ddcbd21772da96481bc7f5d7fc487bbed4901ff2815fd85a29a8` | Pendiente una creacion de prueba Firefox con campo y barra verificados |
+| 2026-08-24 | B4 hallazgo temprano | Creacion Gmail no persistia vinculo | ClickUp omitia el campo aun vacio en el read-back y el setter posterior nunca se ejecutaba; ahora `Gmail Thread ID` viaja en el payload inicial, caller fields se descartan y fallos posteriores no inducen un segundo create; modal standalone ampliado a 700 px | Owner verifico creacion con campo, barra Gmail y modal en Firefox |
+| 2026-08-24 | B4.1-B4.4 parcial | QA Gmail Firefox y limite de plan ClickUp | Owner valido carga temporal, autenticacion, Gmail, creacion vinculada y el aviso de plan para `FIELD_033`; vincular existente no crea un falso vinculo local cuando ClickUp rechaza el custom field; 559/559 pruebas, typecheck, build dual e integridad verdes; ZIP Chrome `f625b7758ff730d9e2fdf5e38cc5ddd08e8f17b1810c14278b75634bc0c93645`, Firefox `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` | Limite externo del plan; sin fallback ni publicacion AMO |
 
 ## Registro De Decisiones
 

@@ -1483,14 +1483,23 @@ export class TaskModal {
             if (response && (response.id || response.success)) {
                 const uploads = await this.uploadSelectedAttachments(response.id || taskId);
                 const failed = uploads.failed;
-                this.showToast((response as any).warning || failed > 0
-                    ? `Email vinculado; ${failed > 0 ? `${failed} archivo${failed === 1 ? '' : 's'} no se pudieron subir${uploads.failureReason ? `: ${uploads.failureReason}` : ''}` : 'se completó con advertencias'}.`
-                    : `Email vinculado${uploads.uploaded > 0 ? ` con ${uploads.uploaded} archivo${uploads.uploaded === 1 ? '' : 's'}` : ''}.`,
-                (response as any).warning || failed > 0 ? 'error' : 'success');
+                const warning = typeof (response as any).warning === 'string' ? (response as any).warning : '';
+                const attachmentWarning = failed > 0
+                    ? `${failed} archivo${failed === 1 ? '' : 's'} no se pudieron subir${uploads.failureReason ? `: ${uploads.failureReason}` : ''}.`
+                    : '';
+                this.showToast(
+                    warning
+                        ? `${warning}${attachmentWarning ? ` Además, ${attachmentWarning}` : ''}`
+                        : attachmentWarning || `Email vinculado${uploads.uploaded > 0 ? ` con ${uploads.uploaded} archivo${uploads.uploaded === 1 ? '' : 's'}` : ''}.`,
+                    warning || attachmentWarning ? 'error' : 'success',
+                    warning ? 12_000 : 3_000,
+                );
 
-                window.dispatchEvent(new CustomEvent('cu-task-created', {
-                    detail: { task: response, threadId: this.emailData!.threadId }
-                }));
+                if ((response as any).linkStatus !== 'unverified') {
+                    window.dispatchEvent(new CustomEvent('cu-task-created', {
+                        detail: { task: response, threadId: this.emailData!.threadId }
+                    }));
+                }
 
                 this.close();
             } else {
@@ -1645,7 +1654,7 @@ export class TaskModal {
         }, 1000);
     }
 
-    showToast(msg: string, type: 'success' | 'error'): void {
+    showToast(msg: string, type: 'success' | 'error', durationMs = 3_000): void {
         const existing = document.querySelector('.cu-toast');
         if (existing) existing.remove();
 
@@ -1653,7 +1662,7 @@ export class TaskModal {
         toast.className = `cu-toast cu-toast-${type}`;
         toast.textContent = msg;
         document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        setTimeout(() => toast.remove(), durationMs);
     }
 
     close(): void {

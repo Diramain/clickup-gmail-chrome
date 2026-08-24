@@ -35,6 +35,10 @@ export interface SafeCausalTraceEvent {
     reason?: string;
     errorCategory?: string;
     guard?: string;
+    diagnosticRoute?: string;
+    requestMethod?: string;
+    failureClass?: string;
+    attempt?: number;
 }
 
 export interface CausalTraceInput {
@@ -48,6 +52,10 @@ export interface CausalTraceInput {
     reason?: unknown;
     error?: unknown;
     guard?: unknown;
+    diagnosticRoute?: unknown;
+    requestMethod?: unknown;
+    failureClass?: unknown;
+    attempt?: unknown;
 }
 
 const TRACE_EVENTS = new Set<CausalTraceEventType>(['listener', 'navigation', 'index', 'guard', 'decision', 'attempt', 'result', 'diagnostic', 'capture']);
@@ -59,7 +67,10 @@ const OUTCOMES = new Set(['received', 'queued', 'skipped', 'none', 'attempted', 
 const REASONS = new Set(['direct', 'inbox-notification', 'inbox', 'clickup-other', 'outside-clickup', 'disabled', 'auto-stop-disabled', 'auto-start-disabled', 'running-task-unknown', 'closed-task-unknown', 'closed-different-task', 'same-task', 'different-task', 'timer-already-running', 'last-task-tab-closed', 'last-task-view-left', 'meet-priority', 'manual', 'manually-stopped', 'scheduled-1800', 'page-close', 'writer-limit', 'writer-overflow', 'writer-error', 'permission-error', 'service-worker-restart', 'unknown']);
 const GUARDS = new Set(['auth', 'meet-priority', 'settings', 'focused-snapshot', 'team', 'api', 'running-task', 'manual-suppression', 'still-focused', 'last-view', 'writer', 'schema', 'none']);
 const ERRORS = new Set(['unauthorized', 'not-found', 'rate-limited', 'server-error', 'permission-error', 'limit', 'unknown']);
-const OPTIONAL_KEYS = ['tabRef', 'windowRef', 'taskRef', 'urlRef', 'originCategory', 'routeCategory', 'hasQuery', 'hasFragment', 'action', 'outcome', 'reason', 'errorCategory', 'guard'] as const;
+const DIAGNOSTIC_ROUTES = new Set(['user', 'user-probe', 'teams', 'task-direct', 'task-workspace-fallback', 'tasks-query', 'timer-current', 'timer-start', 'timer-stop', 'time-entries', 'hierarchy', 'custom-fields', 'custom-field-write', 'task-create', 'task-comment', 'task-attachment', 'other']);
+const REQUEST_METHODS = new Set(['read', 'write']);
+const FAILURE_CLASSES = new Set(['none', 'bad-request', 'custom-field-limit', 'unauthorized', 'workspace-not-authorized', 'forbidden', 'not-found', 'conflict', 'unprocessable', 'rate-limited', 'server-error', 'network', 'auth-unavailable', 'unknown']);
+const OPTIONAL_KEYS = ['tabRef', 'windowRef', 'taskRef', 'urlRef', 'originCategory', 'routeCategory', 'hasQuery', 'hasFragment', 'action', 'outcome', 'reason', 'errorCategory', 'guard', 'diagnosticRoute', 'requestMethod', 'failureClass', 'attempt'] as const;
 const REQUIRED_KEYS = ['schemaVersion', 'source', 'sequence', 'timestamp', 'captureRef', 'event'] as const;
 const ALL_KEYS = new Set([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
@@ -103,10 +114,17 @@ export class CausalTraceSanitizer {
         const outcome = safeEnum(input.outcome, OUTCOMES);
         const reason = safeEnum(input.reason, REASONS);
         const guard = safeEnum(input.guard, GUARDS);
+        const diagnosticRoute = safeEnum(input.diagnosticRoute, DIAGNOSTIC_ROUTES);
+        const requestMethod = safeEnum(input.requestMethod, REQUEST_METHODS);
+        const failureClass = safeEnum(input.failureClass, FAILURE_CLASSES);
         if (action) event.action = action;
         if (outcome) event.outcome = outcome;
         if (reason) event.reason = reason;
         if (guard) event.guard = guard;
+        if (diagnosticRoute) event.diagnosticRoute = diagnosticRoute;
+        if (requestMethod) event.requestMethod = requestMethod;
+        if (failureClass) event.failureClass = failureClass;
+        if (Number.isSafeInteger(input.attempt) && Number(input.attempt) >= 1 && Number(input.attempt) <= 4) event.attempt = Number(input.attempt);
         const errorCategory = classifyError(input.error);
         if (errorCategory) event.errorCategory = errorCategory;
         return event;
@@ -196,6 +214,10 @@ export function normalizeCausalTraceEvent(value: unknown, expectedSource?: Causa
     if (!assignEnum(event, raw, 'reason', REASONS)) return null;
     if (!assignEnum(event, raw, 'errorCategory', ERRORS)) return null;
     if (!assignEnum(event, raw, 'guard', GUARDS)) return null;
+    if (!assignEnum(event, raw, 'diagnosticRoute', DIAGNOSTIC_ROUTES)) return null;
+    if (!assignEnum(event, raw, 'requestMethod', REQUEST_METHODS)) return null;
+    if (!assignEnum(event, raw, 'failureClass', FAILURE_CLASSES)) return null;
+    if (!assignInteger(event, raw, 'attempt', 1, 4)) return null;
     return event;
 }
 
@@ -217,6 +239,13 @@ function assignPattern(target: SafeCausalTraceEvent, raw: Record<string, unknown
 function assignEnum(target: SafeCausalTraceEvent, raw: Record<string, unknown>, key: keyof SafeCausalTraceEvent, allowed: ReadonlySet<string>): boolean {
     if (!(key in raw)) return true;
     if (typeof raw[key] !== 'string' || !allowed.has(raw[key] as string)) return false;
+    (target as unknown as Record<string, unknown>)[key] = raw[key];
+    return true;
+}
+
+function assignInteger(target: SafeCausalTraceEvent, raw: Record<string, unknown>, key: keyof SafeCausalTraceEvent, min: number, max: number): boolean {
+    if (!(key in raw)) return true;
+    if (!Number.isSafeInteger(raw[key]) || Number(raw[key]) < min || Number(raw[key]) > max) return false;
     (target as unknown as Record<string, unknown>)[key] = raw[key];
     return true;
 }
