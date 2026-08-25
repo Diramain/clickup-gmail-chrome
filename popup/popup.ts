@@ -16,6 +16,7 @@ import { isTaskSearchFailure } from '../src/task-search-view';
 import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../src/meeting-link/meeting-link-popup-ui';
 import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
 import { normalizePersonalToken, type ClickUpAuthMethod } from '../src/clickup-auth';
+import { triggerUserDownload } from '../src/user-download';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -323,12 +324,10 @@ async function initSafeDiagnostics(): Promise<void> {
         try {
             const payload = await sendMessage<Record<string, unknown>>({ action: 'exportDiagnostics' });
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement('a');
-            anchor.href = url;
-            anchor.download = `clickup-gmail-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-            anchor.click();
-            URL.revokeObjectURL(url);
+            triggerUserDownload(
+                blob,
+                `taskbridge-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+            );
             const state = await sendMessage<SafeDiagnosticStatus>({ action: 'getDiagnosticStatus' });
             render(state, `JSON seguro exportado · ${state.eventCount}/${state.maxEvents} eventos`);
         } catch {
@@ -941,9 +940,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             // Function to open standalone modal
             const openStandalone = () => {
                 chrome.windows.create({
-                    url: 'task-modal.html',
+                    url: chrome.runtime.getURL('task-modal.html'),
                     type: 'popup',
-                    width: 600,
+                    width: 700,
                     height: 700
                 });
             };
@@ -964,9 +963,9 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
             console.error('OPEN_MODAL_ERROR');
             // Fallback
             chrome.windows.create({
-                url: 'task-modal.html',
+                url: chrome.runtime.getURL('task-modal.html'),
                 type: 'popup',
-                width: 600,
+                width: 700,
                 height: 700
             });
         }

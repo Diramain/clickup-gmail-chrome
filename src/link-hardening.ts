@@ -1,4 +1,4 @@
-import type { EmailTaskMapping } from './types/clickup';
+import type { CreateTaskPayload, EmailTaskMapping } from './types/clickup';
 
 export type LinkValidationStatus =
     | 'pending'
@@ -41,6 +41,7 @@ export interface CustomFieldLike {
     name?: string;
     value?: unknown;
     text_value?: unknown;
+    applied_objects?: Array<{ object_type?: string | number; object_id?: string | number }>;
 }
 
 export type EmailTaskMappingsV1 = Record<string, EmailTaskMapping[]>;
@@ -91,16 +92,41 @@ export function normalizeCustomFieldName(name: unknown): string {
     return typeof name === 'string' ? name.trim().toLocaleLowerCase() : '';
 }
 
-export function selectThreadIdCustomField(fields: CustomFieldLike[] | undefined | null, preferredFieldId?: string | null, configuredName?: string): CustomFieldLike | null {
+export function selectThreadIdCustomField(
+    fields: CustomFieldLike[] | undefined | null,
+    preferredFieldId?: string | null,
+    configuredName?: string,
+    customItemId?: string | number | null,
+): CustomFieldLike | null {
     if (!Array.isArray(fields)) return null;
+    const applicableFields = customItemId === undefined
+        ? fields
+        : fields.filter(field => {
+            if (!Array.isArray(field.applied_objects) || field.applied_objects.length === 0) return true;
+            if (customItemId === null) return false;
+            return field.applied_objects.some(applied => String(applied.object_type) === '19' && String(applied.object_id) === String(customItemId));
+        });
 
     if (preferredFieldId) {
-        const byId = fields.find(field => field.id === preferredFieldId);
+        const byId = applicableFields.find(field => field.id === preferredFieldId);
         if (byId) return byId;
     }
 
     const normalizedName = normalizeCustomFieldName(configuredName || 'Gmail Thread ID');
-    return fields.find(field => normalizeCustomFieldName(field.name) === normalizedName) || null;
+    return applicableFields.find(field => normalizeCustomFieldName(field.name) === normalizedName) || null;
+}
+
+export function prepareThreadLinkedTaskPayload(
+    taskData: CreateTaskPayload,
+    fieldId: string | null | undefined,
+    threadId: unknown,
+): CreateTaskPayload {
+    const payload = { ...taskData };
+    delete payload.custom_fields;
+    if (fieldId && isConfirmedThreadId(threadId)) {
+        payload.custom_fields = [{ id: fieldId, value: threadId.trim() }];
+    }
+    return payload;
 }
 
 export function mergeThreadIdValue(existingValue: unknown, threadId: string): string {

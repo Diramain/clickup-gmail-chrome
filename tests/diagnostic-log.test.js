@@ -241,6 +241,16 @@ describe('CGC-DIAG-005 safe session diagnostics', () => {
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, gmailSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true, taskId: 'TASK' } }, extensionSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: 'true' } }, extensionSender, runtimeId).ok).toBe(false);
+
+        const firefoxRoot = 'moz-extension://trusted-uuid/';
+        const firefoxSender = { id: runtimeId, url: `${firefoxRoot}popup/popup.html` };
+        const hostileFirefoxSender = { id: runtimeId, url: 'moz-extension://other-uuid/popup/popup.html' };
+        for (const action of ['getDiagnosticStatus', 'exportDiagnostics', 'clearDiagnostics']) {
+            expect(security.validateExtensionMessage({ action }, firefoxSender, runtimeId, firefoxRoot).ok).toBe(true);
+            expect(security.validateExtensionMessage({ action }, hostileFirefoxSender, runtimeId, firefoxRoot).ok).toBe(false);
+        }
+        expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, firefoxSender, runtimeId, firefoxRoot).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'setDiagnosticEnabled', data: { enabled: true } }, hostileFirefoxSender, runtimeId, firefoxRoot).ok).toBe(false);
     });
 
     test('API instrumentation emits categorical routes without identifiers, headers, or token values', async () => {
@@ -265,6 +275,53 @@ describe('CGC-DIAG-005 safe session diagnostics', () => {
             expect.objectContaining({ event: 'api_request', details: expect.objectContaining({ route: 'user-probe', method: 'read' }) }),
         ]));
         expect(JSON.stringify(events)).not.toMatch(/synthetic-secret-token|TASK-REAL-123|private remote text|api\.clickup\.com|Authorization/);
+    });
+
+    test('API instrumentation distinguishes Gmail linking operations without exposing identifiers', async () => {
+        const { ClickUpAPIWrapper, ClickUpRateGovernor } = loadTsModule('src/services/api.service.ts');
+        const api = new ClickUpAPIWrapper('synthetic-secret-token', new ClickUpRateGovernor(async () => undefined, () => Date.now()), 'bearer');
+        const events = [];
+        api.setDiagnosticCallback(event => events.push(event));
+        global.fetch = jest.fn().mockResolvedValue(response(200, {}));
+
+        await api.getAccessibleCustomFields('LIST-PRIVATE');
+        await api.setCustomFieldValue('TASK-PRIVATE', 'FIELD-PRIVATE', 'THREAD-PRIVATE');
+        await api.addComment('TASK-PRIVATE', 'private comment');
+
+        expect(events.filter(event => event.event === 'api_request').map(event => event.details.route)).toEqual([
+            'custom-fields', 'custom-field-write', 'task-comment',
+        ]);
+        expect(JSON.stringify(events)).not.toMatch(/LIST-PRIVATE|TASK-PRIVATE|FIELD-PRIVATE|THREAD-PRIVATE|private comment|synthetic-secret-token/);
+    });
+
+    test('API instrumentation categorizes invalid write responses without retaining response text', async () => {
+        const { ClickUpAPIWrapper, ClickUpRateGovernor } = loadTsModule('src/services/api.service.ts');
+        const api = new ClickUpAPIWrapper('synthetic-secret-token', new ClickUpRateGovernor(async () => undefined, () => Date.now()), 'bearer');
+        const events = [];
+        api.setDiagnosticCallback(event => events.push(event));
+        global.fetch = jest.fn().mockResolvedValue(response(400, { err: 'private validation details' }));
+
+        await expect(api.setCustomFieldValue('TASK-PRIVATE', 'FIELD-PRIVATE', 'THREAD-PRIVATE')).rejects.toMatchObject({ status: 400 });
+        expect(events).toContainEqual(expect.objectContaining({
+            event: 'api_response',
+            details: expect.objectContaining({ route: 'custom-field-write', outcome: 'failure', failureClass: 'bad-request' }),
+        }));
+        expect(JSON.stringify(events)).not.toMatch(/private validation details|TASK-PRIVATE|FIELD-PRIVATE|THREAD-PRIVATE|synthetic-secret-token/);
+    });
+
+    test('API instrumentation safely identifies exhausted custom field plan usage', async () => {
+        const { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpCustomFieldUsageLimitError } = loadTsModule('src/services/api.service.ts');
+        const api = new ClickUpAPIWrapper('synthetic-secret-token', new ClickUpRateGovernor(async () => undefined, () => Date.now()), 'bearer');
+        const events = [];
+        api.setDiagnosticCallback(event => events.push(event));
+        global.fetch = jest.fn().mockResolvedValue(response(400, { err: 'Custom field usages exceeded for your plan', ECODE: 'FIELD_033' }));
+
+        const error = await api.setCustomFieldValue('TASK-PRIVATE', 'FIELD-PRIVATE', 'THREAD-PRIVATE').catch(value => value);
+        expect(isClickUpCustomFieldUsageLimitError(error)).toBe(true);
+        expect(events).toContainEqual(expect.objectContaining({
+            event: 'api_response',
+            details: expect.objectContaining({ route: 'custom-field-write', outcome: 'failure', failureClass: 'custom-field-limit', clickupCode: 'FIELD_033' }),
+        }));
     });
 
     test('background and popup wire session-only storage, controls, export, and clear', () => {

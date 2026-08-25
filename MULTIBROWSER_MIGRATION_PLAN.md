@@ -258,21 +258,24 @@ separado verdes.
   Chrome conserva `setAccessLevel()`.
 - [x] B3.4. Mantener credenciales, tokens y material de cifrado detras de una
   persistencia controlada por el background.
-- [~] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
-  falta la prueba negativa manual en Firefox real.
-- [ ] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
-- [ ] B3.7. Implementar exportacion diagnostica Firefox sin
+- [x] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
+  una prueba negativa en Firefox real confirmo que el content script no puede
+  leer `clickupToken`, `encryptionKey` ni `oauthConfig`.
+- [x] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
+- [x] B3.7. Implementar exportacion diagnostica Firefox sin
   `showSaveFilePicker()` y sin ampliar datos capturados.
 
-**Gate B3:** revision de seguridad verde y pruebas negativas de acceso a
-credenciales en ambos navegadores.
+**Gate B3:** `VERDE`; revision de seguridad y prueba negativa de acceso a
+credenciales validadas en Firefox real, sin ampliar permisos del paquete final.
 
 ### Fase B4: Firefox Funcional Sin Calendar
 
-- [ ] B4.1. Cargar TaskBridge temporalmente en un perfil Firefox limpio.
-- [ ] B4.2. Validar token personal de ClickUp.
-- [ ] B4.3. Validar Gmail: inyeccion, navegacion, lectura y modal.
-- [ ] B4.4. Validar crear y vincular tareas en un destino de prueba.
+- [x] B4.1. Cargar TaskBridge temporalmente en un perfil Firefox limpio.
+- [x] B4.2. Validar token personal de ClickUp.
+- [x] B4.3. Validar Gmail: inyeccion, navegacion, lectura y modal.
+- [~] B4.4. Crear tareas queda verde y persiste `Gmail Thread ID`; vincular una
+  tarea existente queda correctamente bloqueado con aviso accionable cuando
+  ClickUp devuelve `FIELD_033` por limite del plan.
 - [ ] B4.5. Validar adjuntos seleccionados.
 - [ ] B4.6. Validar seguimiento de tiempo y navegacion ClickUp.
 - [ ] B4.7. Validar Meet Priority opt-in.
@@ -350,7 +353,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B2_GREEN_B3_PARTIAL`.
+**Estado Plan B:** `B3_GREEN_B4_IN_PROGRESS`.
 
 ---
 
@@ -386,6 +389,12 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-23 | B3.3-B3.5 parcial | Storage privado Firefox | Smoke manual detecto que Firefox 154 no implementa `StorageArea.setAccessLevel`; IndexedDB extension-origin reemplaza local, session conserva trusted-only, content scripts reciben un facade fail-closed y las mutaciones/eventos son transaccionales y secuenciados | Sin migracion legacy: Firefox no fue publicado y el build fallido no persistio datos de aplicacion |
 | 2026-08-23 | B3.1-B3.2 | Origen extension multi-browser | Smoke manual detecto `INVALID_ORIGIN` en app Firefox; validacion y `clearLocalData` ahora comparan protocolo y host exactos derivados de `runtime.getURL('/')`, con sender ID obligatorio | Caso Firefox trusted/UUID hostil cubierto por contrato |
 | 2026-08-23 | Gate B2 | Smoke manual Firefox verde | Owner valido popup y app visibles sin `INIT_ERROR`; `getStatus` sin error, tabs, alarms create/get y cleanup devolvieron `true` en Firefox 154 | Sin credenciales, OAuth, ClickUp writes ni publicacion AMO |
+| 2026-08-24 | B3.6-B3.7 | Paridad de mensajes y exportacion diagnostica | 552/552 pruebas; build dual e integridad verdes; smoke Firefox descargo 63 eventos JSONL normalizados sin campos sensibles crudos; ZIP Chrome `25740d1ee493de8a424767f500f04b48c84e079adb47c507873895e60349aadc`, Firefox `44fe85acda39ce696fc134013fee6c5b446d25875943fa935181719a6e2b4f99` | Sin permiso `downloads`; fallback acotado a 16 MiB |
+| 2026-08-24 | B4 hallazgo temprano | Modal standalone Firefox carga | Ruta relativa `app/task-modal.html` corregida con `runtime.getURL('task-modal.html')`; documento en modo estandar y tipografia system sans explicita | Pendiente retest visual de tipografia |
+| 2026-08-24 | B4 hallazgo temprano | Barra Gmail ausente por artefacto clasico invalido | `logger.js` y `gmail-adapter.js` contenian `require()` por inyeccion sobre build no bundled; build y watch ahora excluyen el adapter en esos entrypoints y preflight rechaza loaders CommonJS en content scripts | Pendiente retest Gmail Firefox |
+| 2026-08-24 | B4 hallazgo temprano | Creacion Gmail no persistia vinculo | ClickUp omitia el campo aun vacio en el read-back y el setter posterior nunca se ejecutaba; ahora `Gmail Thread ID` viaja en el payload inicial, caller fields se descartan y fallos posteriores no inducen un segundo create; modal standalone ampliado a 700 px | Owner verifico creacion con campo, barra Gmail y modal en Firefox |
+| 2026-08-24 | B4.1-B4.4 parcial | QA Gmail Firefox y limite de plan ClickUp | Owner valido carga temporal, autenticacion, Gmail, creacion vinculada y el aviso de plan para `FIELD_033`; vincular existente no crea un falso vinculo local cuando ClickUp rechaza el custom field; 559/559 pruebas, typecheck, build dual e integridad verdes; ZIP Chrome `f625b7758ff730d9e2fdf5e38cc5ddd08e8f17b1810c14278b75634bc0c93645`, Firefox `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` | Limite externo del plan; sin fallback ni publicacion AMO |
+| 2026-08-24 | B3.5 y Gate B3 | Prueba negativa Firefox verde | Un probe temporal ejecutado en contexto de content script devolvio `PASS`: `clickupToken`, `encryptionKey` y `oauthConfig` no fueron accesibles; el permiso temporal `scripting` existio solo en `dist/firefox`, se retiro mediante rebuild y no entro en fuente, commit ni paquete final | Firefox final conserva permisos originales; ZIP regenerado con SHA-256 `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` |
 
 ## Registro De Decisiones
 
@@ -407,7 +416,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B2_GREEN_B3_PARTIAL`.
+- Plan B: `B3_GREEN_B4_IN_PROGRESS`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.

@@ -77,6 +77,12 @@ Persistent storage contains configuration, encrypted ClickUp credential material
 
 AES-GCM reduces accidental credential exposure in local snapshots. The encryption key resides in the same browser profile and does not protect against a compromised profile or device.
 
+## Diagnostics
+
+Safe Diagnostics remains opt-in, session-only, extension-page-only, and bounded to 200 allowlisted events in both browsers. Its JSON export uses a temporary object URL initiated from the popup.
+
+The separate causal recorder writes incrementally when `showSaveFilePicker()` is available. Firefox uses the same sanitized JSONL schema through a 16 MiB in-memory fallback and downloads it when recording stops. This fallback adds no `downloads` permission; closing the recorder before stopping discards the pending in-memory capture.
+
 ## Build
 
 ```bash
@@ -99,6 +105,7 @@ Generated JavaScript and release directories are intentionally ignored by Git.
 
 - TypeScript strict mode includes unused local/parameter checks.
 - Jest covers message authorization, privacy, Calendar minimization, Meet mapping, Gmail uploads, timer behavior, release packaging, and UI contracts.
+- Release preflight rejects CommonJS module loaders in manifest content scripts, which Firefox and Chrome execute as classic scripts.
 - Real OAuth/API QA is operator-controlled and is not implied by synthetic test success.
 
 ## Community and Release Operations

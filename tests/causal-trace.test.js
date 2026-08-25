@@ -93,6 +93,27 @@ describe('CGC-TRACE-010-A causal trace sanitizer', () => {
     expect(traceModule.assertNoRawTraceSecrets(JSON.stringify({ rawUrl: 'https://app.clickup.com/t/TASK-RAW?secret=value' }))).toBe(false);
   });
 
+  test('preserves only allowlisted API failure metadata needed to attribute concurrent requests', () => {
+    const sanitizer = new traceModule.CausalTraceSanitizer('extension-main', 'cap-test', () => 1);
+    const event = sanitizer.event({
+      event: 'diagnostic',
+      action: 'api_response',
+      outcome: 'failure',
+      diagnosticRoute: 'custom-field-write',
+      requestMethod: 'write',
+      failureClass: 'forbidden',
+      attempt: 1,
+    });
+    expect(event).toMatchObject({
+      diagnosticRoute: 'custom-field-write',
+      requestMethod: 'write',
+      failureClass: 'forbidden',
+      attempt: 1,
+    });
+    expect(traceModule.normalizeCausalTraceEvent(event, 'extension-main')).toEqual(event);
+    expect(sanitizer.event({ event: 'diagnostic', diagnosticRoute: '/task/private', failureClass: 'private-error', attempt: 99 })).not.toHaveProperty('diagnosticRoute');
+  });
+
   test('classifies ClickUp routes without exposing path payloads', () => {
     expect(traceModule.classifyRoute('https://app.clickup.com/123/inbox?tab=primary')).toEqual({
       originCategory: 'clickup', routeCategory: 'inbox-general', hasQuery: true, hasFragment: false,

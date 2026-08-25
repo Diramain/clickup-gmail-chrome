@@ -81,13 +81,15 @@ const STRING_VALUE_ALLOWLISTS: Record<string, ReadonlySet<string>> = {
         'suppressed', 'skipped', 'stopped-after-focus-change',
     ]),
     failureClass: new Set([
-        'none', 'unauthorized', 'workspace-not-authorized', 'forbidden', 'not-found',
+        'none', 'bad-request', 'custom-field-limit', 'unauthorized', 'workspace-not-authorized', 'forbidden', 'not-found',
+        'conflict', 'unprocessable',
         'rate-limited', 'server-error', 'network', 'auth-unavailable', 'unknown',
     ]),
     route: new Set([
         'user', 'user-probe', 'teams', 'task-direct', 'task-workspace-fallback',
         'tasks-query', 'timer-current', 'timer-start', 'timer-stop', 'time-entries',
-        'hierarchy', 'other',
+        'hierarchy', 'custom-fields', 'custom-field-write', 'task-create',
+        'task-comment', 'task-attachment', 'other',
     ]),
     method: new Set(['read', 'write']),
     authorizationMode: new Set(['raw', 'bearer']),
@@ -100,6 +102,7 @@ const STRING_VALUE_ALLOWLISTS: Record<string, ReadonlySet<string>> = {
         'last-task-tab-closed', 'last-task-view-left', 'unknown',
     ]),
     clickupCode: new Set([
+        'FIELD_033',
         'OAUTH_023', 'OAUTH_026', 'OAUTH_027',
         ...Array.from({ length: 17 }, (_, index) => `OAUTH_${String(index + 29).padStart(3, '0')}`),
     ]),

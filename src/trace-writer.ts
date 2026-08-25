@@ -15,6 +15,82 @@ export interface TraceFileHandle {
     createWritable(options?: { keepExistingData?: boolean }): Promise<TraceWritable>;
 }
 
+export class InMemoryTraceFileHandle implements TraceFileHandle {
+    private chunks: Uint8Array[] = [];
+    private byteLength = 0;
+
+    constructor(private readonly encoder: TextEncoder = new TextEncoder()) {}
+
+    get size(): number {
+        return this.byteLength;
+    }
+
+    async createWritable(options: { keepExistingData?: boolean } = {}): Promise<TraceWritable> {
+        if (options.keepExistingData === false) this.reset();
+        let position = 0;
+
+        return {
+            seek: (nextPosition: number) => {
+                if (!Number.isSafeInteger(nextPosition) || nextPosition < 0 || nextPosition > this.byteLength) {
+                    throw new RangeError('Invalid trace position');
+                }
+                position = nextPosition;
+            },
+            truncate: (size: number) => {
+                if (!Number.isSafeInteger(size) || size < 0 || size > this.byteLength) {
+                    throw new RangeError('Invalid trace size');
+                }
+                if (size === 0) this.reset();
+                else if (size < this.byteLength) this.replace(this.flatten().slice(0, size));
+                position = Math.min(position, size);
+            },
+            write: async (data: Blob | string) => {
+                const bytes = typeof data === 'string'
+                    ? this.encoder.encode(data)
+                    : new Uint8Array(await data.arrayBuffer());
+                const requiredSize = position + bytes.byteLength;
+                if (position === this.byteLength) {
+                    this.chunks.push(bytes);
+                    this.byteLength = requiredSize;
+                } else {
+                    const content = this.flatten();
+                    const expanded = new Uint8Array(Math.max(requiredSize, content.byteLength));
+                    expanded.set(content);
+                    expanded.set(bytes, position);
+                    this.replace(expanded);
+                }
+                position = requiredSize;
+            },
+            close: () => undefined,
+        };
+    }
+
+    toBlob(type = 'application/x-ndjson'): Blob {
+        const parts = this.chunks.map(chunk => chunk.slice().buffer as ArrayBuffer);
+        return new Blob(parts, { type });
+    }
+
+    private reset(): void {
+        this.chunks = [];
+        this.byteLength = 0;
+    }
+
+    private replace(content: Uint8Array): void {
+        this.chunks = content.byteLength > 0 ? [content] : [];
+        this.byteLength = content.byteLength;
+    }
+
+    private flatten(): Uint8Array {
+        const content = new Uint8Array(this.byteLength);
+        let offset = 0;
+        for (const chunk of this.chunks) {
+            content.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        return content;
+    }
+}
+
 export interface TraceWriterStatus {
     stopped: boolean;
     reason: TraceWriterStopReason | null;

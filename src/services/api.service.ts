@@ -75,6 +75,10 @@ export function isClickUpWorkspaceAuthorizationError(error: unknown): error is A
         && CLICKUP_TEAM_NOT_AUTHORIZED_CODES.has((error as ApiError).clickupCode!);
 }
 
+export function isClickUpCustomFieldUsageLimitError(error: unknown): error is ApiError {
+    return error instanceof Error && (error as ApiError).clickupCode === 'FIELD_033';
+}
+
 export function formatClickUpAuthorization(token: string, mode: ClickUpAuthorizationMode = 'bearer'): string {
     const normalized = token.trim();
     const withoutBearer = normalized.replace(/^Bearer\s+/i, '');
@@ -276,10 +280,12 @@ export class ClickUpAPIWrapper {
 
             if (authorizationFallbackUsed) await this.persistAuthorizationMode();
 
+            const clickupCode = response.ok ? undefined : await readAllowlistedClickUpErrorCode(response);
             this.emitDiagnostic('api_response', {
                 ...diagnosticBase,
                 outcome: response.ok ? 'success' : 'failure',
-                failureClass: classifyDiagnosticStatus(response.status),
+                failureClass: clickupCode === 'FIELD_033' ? 'custom-field-limit' : classifyDiagnosticStatus(response.status),
+                ...(clickupCode ? { clickupCode } : {}),
             });
 
             // Handle rate limiting and server errors with exponential backoff
@@ -295,7 +301,7 @@ export class ClickUpAPIWrapper {
 
             if (!response.ok) {
                 const error = await response.json().catch(() => ({}));
-                throw this.createApiError(error.err || `API Error: ${response.status}`, response.status);
+                throw this.createApiError(error.err || `API Error: ${response.status}`, response.status, sanitizeClickUpErrorCode(error.ECODE));
             }
 
             return response.json();
@@ -877,9 +883,10 @@ const CLICKUP_TEAM_NOT_AUTHORIZED_CODES = new Set([
     'OAUTH_027',
     ...Array.from({ length: 17 }, (_, index) => `OAUTH_${String(index + 29).padStart(3, '0')}`),
 ]);
+const CLICKUP_ALLOWLISTED_ERROR_CODES = new Set([...CLICKUP_TEAM_NOT_AUTHORIZED_CODES, 'FIELD_033']);
 
 export function sanitizeClickUpErrorCode(value: unknown): string | undefined {
-    return typeof value === 'string' && CLICKUP_TEAM_NOT_AUTHORIZED_CODES.has(value)
+    return typeof value === 'string' && CLICKUP_ALLOWLISTED_ERROR_CODES.has(value)
         ? value
         : undefined;
 }
@@ -912,6 +919,11 @@ function uniqueAuthorizationModes(preferred: ClickUpAuthorizationMode): ClickUpA
 function classifyDiagnosticRoute(endpoint: string): string {
     if (endpoint === '/user') return 'user';
     if (endpoint === '/team') return 'teams';
+    if (/^\/list\/[^/]+\/field(?:\?|$)/.test(endpoint)) return 'custom-fields';
+    if (/^\/task\/[^/]+\/field\/[^/?]+$/.test(endpoint)) return 'custom-field-write';
+    if (/^\/list\/[^/]+\/task$/.test(endpoint)) return 'task-create';
+    if (/^\/task\/[^/]+\/comment$/.test(endpoint)) return 'task-comment';
+    if (/^\/task\/[^/]+\/attachment$/.test(endpoint)) return 'task-attachment';
     if (/^\/task\/[^/?]+$/.test(endpoint)) return 'task-direct';
     if (/^\/team\/[^/]+\/task\?/.test(endpoint)) {
         return endpoint.includes('task_ids%5B%5D=') || endpoint.includes('task_ids[]=')
@@ -930,9 +942,12 @@ function classifyDiagnosticRoute(endpoint: string): string {
 
 function classifyDiagnosticStatus(status: number): string {
     if (status >= 200 && status < 300) return 'none';
+    if (status === 400) return 'bad-request';
     if (status === 401) return 'unauthorized';
     if (status === 403) return 'forbidden';
     if (status === 404) return 'not-found';
+    if (status === 409) return 'conflict';
+    if (status === 422) return 'unprocessable';
     if (status === 429) return 'rate-limited';
     if (status >= 500 && status <= 599) return 'server-error';
     return 'unknown';

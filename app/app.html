@@ -480,8 +480,8 @@
                         <p id="diagnosticStatus" class="field-help" aria-live="polite">Diagnóstico desactivado</p>
                         <div class="recorder-inline" aria-labelledby="recorderInlineTitle">
                             <h4 id="recorderInlineTitle">Captura causal prolongada</h4>
-                            <p class="field-help">También observa sólo esta extensión, no todo el navegador. Escribe timestamps y metadatos categóricos en un JSONL elegido por vos para investigar secuencias largas. Stop manual es el cierre confiable; revisá el archivo antes de compartirlo y borralo después.</p>
-                            <div class="inline-actions"><button id="startRecorder" class="btn" type="button">Elegir archivo e iniciar</button><button id="stopRecorder" class="btn danger" type="button" disabled>Detener captura</button></div>
+                            <p class="field-help">También observa sólo esta extensión, no todo el navegador. Escribe timestamps y metadatos categóricos en JSONL. Firefox conserva hasta 16 MiB en memoria y descarga al detener; mantené esta pestaña abierta. Stop manual es el cierre confiable; revisá el archivo antes de compartirlo y borralo después.</p>
+                            <div class="inline-actions"><button id="startRecorder" class="btn" type="button">Iniciar captura</button><button id="stopRecorder" class="btn danger" type="button" disabled>Detener captura</button></div>
                             <dl class="recorder-status"><div><dt>Estado</dt><dd id="state">inactivo</dd></div><div><dt>Eventos</dt><dd id="eventCount">0</dd></div><div><dt>Bytes</dt><dd id="byteCount">0</dd></div><div><dt>Cola</dt><dd id="queueCount">0</dd></div><div><dt>Parada</dt><dd id="scheduledStop">pendiente</dd></div></dl>
                             <p id="message" class="field-help" role="status" aria-live="polite"></p>
                         </div>

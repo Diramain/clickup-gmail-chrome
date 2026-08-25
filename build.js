@@ -41,6 +41,23 @@ const tsEntryPoints = [
     { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
 ];
 
+const bundledEntryPoints = [
+    { in: 'background.ts', out: 'background' },
+    { in: 'popup/popup.ts', out: 'popup/popup' },
+    { in: 'popup/minimal.ts', out: 'popup/minimal' },
+    { in: 'app/app.ts', out: 'app/app' },
+    { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
+    { in: 'src/modal.ts', out: 'src/modal' },
+    { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
+    { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
+    { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
+    { in: 'src/clickup-tracker.ts', out: 'src/clickup-tracker' },
+];
+
+const otherEntryPoints = tsEntryPoints.filter(entry =>
+    !bundledEntryPoints.some(bundled => bundled.in === entry.in)
+);
+
 /**
  * JavaScript files to bundle (legacy, will be removed after full migration)
  */
@@ -81,19 +98,6 @@ async function buildTypeScript() {
 
     try {
         // Files that need bundling (have module imports)
-        const bundledEntryPoints = [
-            { in: 'background.ts', out: 'background' },
-            { in: 'popup/popup.ts', out: 'popup/popup' },
-            { in: 'popup/minimal.ts', out: 'popup/minimal' },
-            { in: 'app/app.ts', out: 'app/app' },
-            { in: 'diagnostics/recorder.ts', out: 'diagnostics/recorder' },
-            { in: 'src/modal.ts', out: 'src/modal' },
-            { in: 'src/gmail-native.ts', out: 'src/gmail-native' },
-            { in: 'src/task-modal-entry.ts', out: 'task-modal-entry' },
-            { in: 'src/meet/meet-tracker.ts', out: 'src/meet/meet-tracker' },
-            { in: 'src/clickup-tracker.ts', out: 'src/clickup-tracker' },
-        ];
-
         // Build bundled files
         await esbuild.build({
             ...commonBuildOptions,
@@ -107,11 +111,9 @@ async function buildTypeScript() {
         console.log('  ✅ Bundled files: background.ts, popup.ts, recorder.ts, modal.ts');
 
         // Build other files without bundling
-        const otherEntryPoints = tsEntryPoints.filter(e =>
-            !bundledEntryPoints.some(b => b.in === e.in)
-        );
         await esbuild.build({
             ...commonBuildOptions,
+            inject: [],
             entryPoints: otherEntryPoints,
             outdir: '.',
             outExtension: { '.js': '.js' },
@@ -201,15 +203,24 @@ async function build() {
     if (isWatch) {
         console.log('\n👀 Watching for changes...');
         // Watch mode with esbuild
-        const ctx = await esbuild.context({
+        const bundledContext = await esbuild.context({
             ...commonBuildOptions,
-            entryPoints: tsEntryPoints,
+            entryPoints: bundledEntryPoints,
+            outdir: '.',
+            outExtension: { '.js': '.js' },
+            loader: { '.ts': 'ts' },
+            bundle: true,
+        });
+        const otherContext = await esbuild.context({
+            ...commonBuildOptions,
+            inject: [],
+            entryPoints: otherEntryPoints,
             outdir: '.',
             outExtension: { '.js': '.js' },
             loader: { '.ts': 'ts' },
             bundle: false,
         });
-        await ctx.watch();
+        await Promise.all([bundledContext.watch(), otherContext.watch()]);
     }
 }
 

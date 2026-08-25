@@ -31,7 +31,28 @@ class MemoryHandle {
 }
 
 describe('CGC-TRACE-010-A JSONL batch writer', () => {
-  const { JsonlBatchWriter } = loadTsModule('src/trace-writer.ts');
+  const { InMemoryTraceFileHandle, JsonlBatchWriter } = loadTsModule('src/trace-writer.ts');
+
+  test('exports the same UTF-8 JSONL through the bounded Firefox memory handle', async () => {
+    const handle = new InMemoryTraceFileHandle(new TextEncoder());
+    const writer = new JsonlBatchWriter(handle, { limitBytes: 1024, batchSize: 2, encoder: new TextEncoder() });
+    await writer.initialize();
+    expect(writer.enqueue({ event: 'capture', outcome: 'armed' })).toBe(true);
+    expect(writer.enqueue({ event: 'result', outcome: 'success' })).toBe(true);
+    await writer.stop('manual-stop');
+
+    const expected = '{"event":"capture","outcome":"armed"}\n{"event":"result","outcome":"success"}\n';
+    expect(handle.size).toBe(Buffer.byteLength(expected));
+    const blob = handle.toBlob();
+    const exported = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(exported).toBe(expected);
+    expect(blob.type).toBe('application/x-ndjson');
+  });
 
   test('writes JSONL in batches and closes the writable on each flush', async () => {
     const handle = new MemoryHandle();
