@@ -4,7 +4,7 @@
   "description": "Browser extension to create ClickUp tasks from Gmail",
   "private": true,
   "author": "Leandro Iramain",
-  "homepage": "https://leandroiramain.com.ar",
+  "homepage": "https://taskbridge.leandroiramain.com.ar/",
   "scripts": {
     "build": "tsc && node build.js",
     "build:dev-extension": "npm run build && node scripts/build-dev-extension.js",

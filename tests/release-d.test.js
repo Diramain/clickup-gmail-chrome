@@ -74,8 +74,8 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         expect(packageLock.packages[''].version).toBe(manifest.version);
         expect(manifest.author).toBe('Leandro Iramain');
         expect(packageJson.author).toBe('Leandro Iramain');
-        expect(manifest.homepage_url).toBe('https://leandroiramain.com.ar');
-        expect(packageJson.homepage).toBe('https://leandroiramain.com.ar');
+        expect(manifest.homepage_url).toBe('https://taskbridge.leandroiramain.com.ar/');
+        expect(packageJson.homepage).toBe('https://taskbridge.leandroiramain.com.ar/');
         expect(popupHtml).toMatch(/Desarrollado por Leandro Iramain/);
         expect(popupHtml).toMatch(/href="https:\/\/leandroiramain\.com\.ar"/);
         expect(popupHtml).toMatch(/target="_blank"/);

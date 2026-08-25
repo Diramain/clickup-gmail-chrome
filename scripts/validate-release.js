@@ -30,9 +30,9 @@ function validateMetadata(manifest, target) {
     if (manifest.version !== packageJson.version) fail(`${target} manifest/package version mismatch`);
     if (packageLock.version !== manifest.version || packageLock.packages?.['']?.version !== manifest.version) fail('Package lock version mismatch');
     if (manifest.author !== 'Leandro Iramain') fail(`${target} manifest author mismatch`);
-    if (manifest.homepage_url !== 'https://leandroiramain.com.ar') fail(`${target} manifest homepage_url mismatch`);
+    if (manifest.homepage_url !== 'https://taskbridge.leandroiramain.com.ar/') fail(`${target} manifest homepage_url mismatch`);
     if (packageJson.author !== 'Leandro Iramain') fail('Package author mismatch');
-    if (packageJson.homepage !== 'https://leandroiramain.com.ar') fail('Package homepage mismatch');
+    if (packageJson.homepage !== 'https://taskbridge.leandroiramain.com.ar/') fail('Package homepage mismatch');
 }
 
 function validateTargetManifest(manifest, target) {
