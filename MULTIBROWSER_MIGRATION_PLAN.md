@@ -273,19 +273,23 @@ credenciales validadas en Firefox real, sin ampliar permisos del paquete final.
 - [x] B4.1. Cargar TaskBridge temporalmente en un perfil Firefox limpio.
 - [x] B4.2. Validar token personal de ClickUp.
 - [x] B4.3. Validar Gmail: inyeccion, navegacion, lectura y modal.
-- [~] B4.4. Crear tareas queda verde y persiste `Gmail Thread ID`; vincular una
+- [x] B4.4. Crear tareas queda verde y persiste `Gmail Thread ID`; vincular una
   tarea existente queda correctamente bloqueado con aviso accionable cuando
   ClickUp devuelve `FIELD_033` por limite del plan.
 - [x] B4.5. Firefox detecta las tarjetas de adjuntos Gmail sin el atributo
   Chromium `download_url`; un PDF seleccionado fue subido correctamente a una
   tarea de prueba.
-- [ ] B4.6. Validar seguimiento de tiempo y navegacion ClickUp.
-- [ ] B4.7. Validar Meet Priority opt-in.
-- [ ] B4.8. Validar reinicio, actualizacion y restauracion de estado.
-- [ ] B4.9. Mantener Calendar visible como no disponible o desactivado hasta B6.
+- [x] B4.6. Seguimiento de tiempo y navegacion ClickUp validados por el owner.
+- [x] B4.7. Meet Priority opt-in validado por el owner.
+- [x] B4.8. Reinicio, actualizacion y restauracion de estado validados por el
+  owner.
+- [x] B4.9. Calendar permanece visible como no disponible o desactivado hasta
+  B6.
 
-**Gate B4:** Firefox funcional para Gmail, ClickUp, Meet y tiempo; Chrome sigue
-verde; Calendar no presenta una capacidad falsa.
+**Gate B4:** `VERDE`; Firefox funcional para Gmail, ClickUp, Meet y tiempo;
+Chrome sigue verde y Calendar no presenta una capacidad falsa. El bloqueo
+`FIELD_033` al vincular tareas existentes es una limitacion declarada del plan
+ClickUp Free, con comportamiento fail-closed y aviso accionable.
 
 ### Fase B5: OAuth ClickUp En Firefox
 
@@ -355,7 +359,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B3_GREEN_B4_IN_PROGRESS`.
+**Estado Plan B:** `B4_GREEN_B5_PENDING`.
 
 ---
 
@@ -398,6 +402,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-24 | B4.1-B4.4 parcial | QA Gmail Firefox y limite de plan ClickUp | Owner valido carga temporal, autenticacion, Gmail, creacion vinculada y el aviso de plan para `FIELD_033`; vincular existente no crea un falso vinculo local cuando ClickUp rechaza el custom field; 559/559 pruebas, typecheck, build dual e integridad verdes; ZIP Chrome `f625b7758ff730d9e2fdf5e38cc5ddd08e8f17b1810c14278b75634bc0c93645`, Firefox `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` | Limite externo del plan; sin fallback ni publicacion AMO |
 | 2026-08-24 | B3.5 y Gate B3 | Prueba negativa Firefox verde | Un probe temporal ejecutado en contexto de content script devolvio `PASS`: `clickupToken`, `encryptionKey` y `oauthConfig` no fueron accesibles; el permiso temporal `scripting` existio solo en `dist/firefox`, se retiro mediante rebuild y no entro en fuente, commit ni paquete final | Firefox final conserva permisos originales; ZIP regenerado con SHA-256 `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` |
 | 2026-08-24 | B4.5 | Adjunto Gmail Firefox verde | Firefox omite `download_url` y expone tarjetas `a.aQy.e` con `view=att`; se agrego un fallback acotado que conserva validaciones de host, extension, MIME real y tamaño. El owner valido deteccion y subida de un unico PDF sin copia HTML | Prueba focal adapter 16/16; build Firefox verde; ZIP SHA-256 `0328677d333fe37e8029bf591b2a236659a2b6749a9faa8c254f83b2d41bdfc8` |
+| 2026-08-24 | B4.4-B4.9 y Gate B4 | QA funcional Firefox cerrada por el owner | El owner confirmo haber probado el flujo completo y solicito omitir pruebas adicionales; Gmail, adjuntos, ClickUp, tiempo, Meet Priority, reinicio/restauracion y degradacion honesta de Calendar quedan aceptados | `FIELD_033` permanece como limite externo ClickUp Free; no se ejecutaron pruebas adicionales ni publicacion AMO |
 
 ## Registro De Decisiones
 
@@ -419,7 +424,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B3_GREEN_B4_IN_PROGRESS`.
+- Plan B: `B4_GREEN_B5_PENDING`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
