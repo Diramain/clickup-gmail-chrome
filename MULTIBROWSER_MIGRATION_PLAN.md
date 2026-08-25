@@ -258,14 +258,15 @@ separado verdes.
   Chrome conserva `setAccessLevel()`.
 - [x] B3.4. Mantener credenciales, tokens y material de cifrado detras de una
   persistencia controlada por el background.
-- [~] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
-  falta la prueba negativa manual en Firefox real.
+- [x] B3.5. Los contratos deniegan storage a contextos Gmail, Meet y ClickUp;
+  una prueba negativa en Firefox real confirmo que el content script no puede
+  leer `clickupToken`, `encryptionKey` ni `oauthConfig`.
 - [x] B3.6. Mantener esquemas, allowlists y limites de mensajes actuales.
 - [x] B3.7. Implementar exportacion diagnostica Firefox sin
   `showSaveFilePicker()` y sin ampliar datos capturados.
 
-**Gate B3:** revision de seguridad verde y pruebas negativas de acceso a
-credenciales en ambos navegadores.
+**Gate B3:** `VERDE`; revision de seguridad y prueba negativa de acceso a
+credenciales validadas en Firefox real, sin ampliar permisos del paquete final.
 
 ### Fase B4: Firefox Funcional Sin Calendar
 
@@ -352,7 +353,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B3_IMPLEMENTED_MANUAL_NEGATIVE_PENDING`.
+**Estado Plan B:** `B3_GREEN_B4_IN_PROGRESS`.
 
 ---
 
@@ -393,6 +394,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-24 | B4 hallazgo temprano | Barra Gmail ausente por artefacto clasico invalido | `logger.js` y `gmail-adapter.js` contenian `require()` por inyeccion sobre build no bundled; build y watch ahora excluyen el adapter en esos entrypoints y preflight rechaza loaders CommonJS en content scripts | Pendiente retest Gmail Firefox |
 | 2026-08-24 | B4 hallazgo temprano | Creacion Gmail no persistia vinculo | ClickUp omitia el campo aun vacio en el read-back y el setter posterior nunca se ejecutaba; ahora `Gmail Thread ID` viaja en el payload inicial, caller fields se descartan y fallos posteriores no inducen un segundo create; modal standalone ampliado a 700 px | Owner verifico creacion con campo, barra Gmail y modal en Firefox |
 | 2026-08-24 | B4.1-B4.4 parcial | QA Gmail Firefox y limite de plan ClickUp | Owner valido carga temporal, autenticacion, Gmail, creacion vinculada y el aviso de plan para `FIELD_033`; vincular existente no crea un falso vinculo local cuando ClickUp rechaza el custom field; 559/559 pruebas, typecheck, build dual e integridad verdes; ZIP Chrome `f625b7758ff730d9e2fdf5e38cc5ddd08e8f17b1810c14278b75634bc0c93645`, Firefox `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` | Limite externo del plan; sin fallback ni publicacion AMO |
+| 2026-08-24 | B3.5 y Gate B3 | Prueba negativa Firefox verde | Un probe temporal ejecutado en contexto de content script devolvio `PASS`: `clickupToken`, `encryptionKey` y `oauthConfig` no fueron accesibles; el permiso temporal `scripting` existio solo en `dist/firefox`, se retiro mediante rebuild y no entro en fuente, commit ni paquete final | Firefox final conserva permisos originales; ZIP regenerado con SHA-256 `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` |
 
 ## Registro De Decisiones
 
@@ -414,7 +416,7 @@ correos, payloads reales ni trazas sensibles.
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B3_IMPLEMENTED_MANUAL_NEGATIVE_PENDING`.
+- Plan B: `B3_GREEN_B4_IN_PROGRESS`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
