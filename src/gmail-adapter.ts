@@ -212,9 +212,10 @@ const GmailAdapter: IGmailAdapter = {
      */
     getAttachmentUrls(scope?: Element | null, bodyElement?: Element | null): { url: string; filename: string; mimeType: string }[] {
         const attachments: { url: string; filename: string; mimeType: string }[] = [];
-        const scopedElements = Array.from((scope || document).querySelectorAll('[download_url]'));
+        const attachmentSelector = '[download_url], a[href*="view=att"]';
+        const scopedElements = Array.from((scope || document).querySelectorAll(attachmentSelector));
         const bodies = bodyElement ? this.getAllEmailBodies() : [];
-        const assignedElements = bodyElement ? Array.from(document.querySelectorAll('[download_url]')).filter(element => {
+        const assignedElements = bodyElement ? Array.from(document.querySelectorAll(attachmentSelector)).filter(element => {
             const precedingBodies = bodies.filter(body =>
                 Boolean(body.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
             );
@@ -235,9 +236,19 @@ const GmailAdapter: IGmailAdapter = {
                     try { url = new URL(rawUrl, window.location.origin).href; } catch { /* rejected by the caller */ }
                     attachments.push({ url, filename, mimeType });
                 }
+            } else if (el.matches('a[href*="view=att"]') && !el.closest('[download_url]')) {
+                const rawUrl = el.getAttribute('href');
+                const filename = el.closest('.aZo')?.querySelector('.aV3')?.textContent?.trim();
+                if (rawUrl && filename) {
+                    let url = rawUrl;
+                    try { url = new URL(rawUrl, window.location.origin).href; } catch { /* rejected by the caller */ }
+                    attachments.push({ url, filename, mimeType: 'application/octet-stream' });
+                }
             }
         });
-        return attachments;
+        return attachments.filter((attachment, index, all) => all.findIndex(candidate =>
+            candidate.url === attachment.url && candidate.filename === attachment.filename
+        ) === index);
     },
 
     getInlineImageUrls(bodyElement: Element): GmailAttachmentInfo[] {
