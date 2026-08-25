@@ -114,6 +114,26 @@ describe('GmailAdapter production selectors', () => {
         ]);
     });
 
+    test('discovers Firefox Gmail attachment cards without download_url metadata', () => {
+        document.body.innerHTML = `
+            <div class="adn">
+                <div class="gs"><div class="a3s aiL">message</div></div>
+                <span class="aZo">
+                    <a class="aQy e" href="https://mail.google.com/mail/u/0/?view=att&amp;attid=1"></a>
+                    <div class="aV3">report.pdf</div>
+                </span>
+            </div>`;
+        const body = document.querySelector('.a3s');
+
+        expect(GmailAdapter.getAttachmentUrls(document.querySelector('.adn'), body)).toEqual([
+            {
+                mimeType: 'application/octet-stream',
+                filename: 'report.pdf',
+                url: 'https://mail.google.com/mail/u/0/?view=att&attid=1',
+            },
+        ]);
+    });
+
     test('discovers Gmail-hosted body images without accepting remote images or tracking pixels', () => {
         document.body.innerHTML = `
             <div class="a3s aiL" id="body">

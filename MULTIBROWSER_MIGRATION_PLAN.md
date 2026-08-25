@@ -276,7 +276,9 @@ credenciales validadas en Firefox real, sin ampliar permisos del paquete final.
 - [~] B4.4. Crear tareas queda verde y persiste `Gmail Thread ID`; vincular una
   tarea existente queda correctamente bloqueado con aviso accionable cuando
   ClickUp devuelve `FIELD_033` por limite del plan.
-- [ ] B4.5. Validar adjuntos seleccionados.
+- [x] B4.5. Firefox detecta las tarjetas de adjuntos Gmail sin el atributo
+  Chromium `download_url`; un PDF seleccionado fue subido correctamente a una
+  tarea de prueba.
 - [ ] B4.6. Validar seguimiento de tiempo y navegacion ClickUp.
 - [ ] B4.7. Validar Meet Priority opt-in.
 - [ ] B4.8. Validar reinicio, actualizacion y restauracion de estado.
@@ -395,6 +397,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-24 | B4 hallazgo temprano | Creacion Gmail no persistia vinculo | ClickUp omitia el campo aun vacio en el read-back y el setter posterior nunca se ejecutaba; ahora `Gmail Thread ID` viaja en el payload inicial, caller fields se descartan y fallos posteriores no inducen un segundo create; modal standalone ampliado a 700 px | Owner verifico creacion con campo, barra Gmail y modal en Firefox |
 | 2026-08-24 | B4.1-B4.4 parcial | QA Gmail Firefox y limite de plan ClickUp | Owner valido carga temporal, autenticacion, Gmail, creacion vinculada y el aviso de plan para `FIELD_033`; vincular existente no crea un falso vinculo local cuando ClickUp rechaza el custom field; 559/559 pruebas, typecheck, build dual e integridad verdes; ZIP Chrome `f625b7758ff730d9e2fdf5e38cc5ddd08e8f17b1810c14278b75634bc0c93645`, Firefox `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` | Limite externo del plan; sin fallback ni publicacion AMO |
 | 2026-08-24 | B3.5 y Gate B3 | Prueba negativa Firefox verde | Un probe temporal ejecutado en contexto de content script devolvio `PASS`: `clickupToken`, `encryptionKey` y `oauthConfig` no fueron accesibles; el permiso temporal `scripting` existio solo en `dist/firefox`, se retiro mediante rebuild y no entro en fuente, commit ni paquete final | Firefox final conserva permisos originales; ZIP regenerado con SHA-256 `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` |
+| 2026-08-24 | B4.5 | Adjunto Gmail Firefox verde | Firefox omite `download_url` y expone tarjetas `a.aQy.e` con `view=att`; se agrego un fallback acotado que conserva validaciones de host, extension, MIME real y tamaño. El owner valido deteccion y subida de un unico PDF sin copia HTML | Prueba focal adapter 16/16; build Firefox verde; ZIP SHA-256 `0328677d333fe37e8029bf591b2a236659a2b6749a9faa8c254f83b2d41bdfc8` |
 
 ## Registro De Decisiones
 
