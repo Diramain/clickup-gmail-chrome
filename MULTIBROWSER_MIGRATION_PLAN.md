@@ -196,7 +196,7 @@ ClickUp, Meet y tiempo antes de habilitar Google Calendar.
 | `tabs`, `windows`, `alarms`, `action` | Compartida | Mantener comportamiento y cubrir diferencias con pruebas focales |
 | `storage.local`, `storage.session` | Adaptador requerido | Conservar acceso solo para contextos confiables y detectar capacidades |
 | Background MV3 | Especifica por navegador | Chrome usa `service_worker`; Firefox usa `scripts` como event page |
-| ClickUp OAuth | Adaptador requerido | Registrar y usar redirect derivado del Gecko ID |
+| Autenticacion ClickUp | Compartida | Usar token personal por usuario; el OAuth cliente queda legacy y programado para retiro |
 | Google Calendar OAuth | Especifica por navegador | Chrome conserva `getAuthToken`; Firefox queda desactivado hasta implementar `launchWebAuthFlow` y cache propia |
 | Origen interno confiable | Adaptador requerido | Derivar desde `runtime.getURL('/')`; aceptar solo el origen exacto del runtime |
 | Gmail y adjuntos | Compartida | Misma seleccion explicita, allowlists, limites y asociacion por mensaje |
@@ -208,7 +208,7 @@ ClickUp, Meet y tiempo antes de habilitar Google Calendar.
 - Chrome debe conservar Gmail, ClickUp, Meet, tiempo y Calendar sin regresiones.
 - El primer Firefox debe cubrir Gmail, ClickUp, Meet y tiempo con las mismas
   restricciones de seguridad y consentimiento de `2.1.0`.
-- Calendar permanece oculto o desactivado en Firefox hasta completar B4; no se
+- Calendar permanece oculto o desactivado en Firefox hasta completar B6; no se
   simula soporte parcial ni se reutiliza el cliente OAuth de Chrome.
 - B0 no cambia runtime, permisos, manifests ni comportamiento distribuido.
 
@@ -291,15 +291,22 @@ Chrome sigue verde y Calendar no presenta una capacidad falsa. El bloqueo
 `FIELD_033` al vincular tareas existentes es una limitacion declarada del plan
 ClickUp Free, con comportamiento fail-closed y aviso accionable.
 
-### Fase B5: OAuth ClickUp En Firefox
+### Fase B5: Autenticacion ClickUp Solo Con Token
 
-- [ ] B5.1. Obtener el redirect estable derivado del Gecko ID.
-- [ ] B5.2. Registrar el redirect en una aplicacion OAuth de prueba autorizada.
-- [ ] B5.3. Validar `getRedirectURL()` y `launchWebAuthFlow()`.
-- [ ] B5.4. Validar `state`, errores, cancelacion, logout y reconexion.
-- [ ] B5.5. Confirmar que ningun secreto se registra o incluye en el paquete.
+- [x] B5.1. Adoptar token personal por usuario como unico metodo ClickUp
+  soportado dentro del alcance Firefox actual.
+- [x] B5.2. No crear una segunda aplicacion OAuth ni distribuir un
+  `client_secret` dentro del paquete.
+- [x] B5.3. Clasificar OAuth cliente como legacy, no soportado y fuera de los
+  claims Firefox; permanece temporalmente en la fuente y UI compartidas hasta su
+  retiro posterior para no romper Chrome en este cambio documental.
+- [ ] B5.4. Eliminar en un cambio posterior la UI, persistencia, mensajes y flujo
+  OAuth ClickUp ejecutados dentro del navegador, con migracion segura de estado.
+- [ ] B5.5. Si OAuth vuelve a evaluarse, diseñarlo como servicio backend que
+  custodie el secreto; requiere alcance, threat model y autorizacion separados.
 
-**Gate B5:** login, uso, logout y reconexion ClickUp verdes en Firefox.
+**Gate B5:** `VERDE_TOKEN_ONLY`; Firefox usa token personal y OAuth cliente no
+bloquea esta release. B5.4-B5.5 son follow-ups fuera del gate actual.
 
 ### Fase B6: Google Calendar OAuth Firefox
 
@@ -359,7 +366,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B4_GREEN_B5_PENDING`.
+**Estado Plan B:** `B5_GREEN_TOKEN_ONLY_B6_PENDING`.
 
 ---
 
@@ -420,11 +427,12 @@ correos, payloads reales ni trazas sensibles.
 | DEC-10 | 2026-08-23 | Gecko ID `taskbridge-for-clickup@leandroiramain.com.ar` | Firma, redirects y actualizaciones Firefox necesitan identidad estable separada de CWS |
 | DEC-11 | 2026-08-23 | Calendar desactivado en el primer corte Firefox | Firefox no implementa `identity.getAuthToken`; habilitarlo exige adapter y registro OAuth propios |
 | DEC-12 | 2026-08-23 | Dos ZIP versionados desde contenido compartido | Evitar mezcla de manifiestos, OAuth, backgrounds y archivos de distribucion |
+| DEC-13 | 2026-08-24 | ClickUp usa token personal por usuario en Firefox | ClickUp documenta un redirect por app y exige `client_secret`; pedir credenciales OAuth a cada usuario no sirve para distribucion general. El OAuth cliente legacy se retirara despues; un OAuth futuro requeriria backend y decision separada |
 
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B4_GREEN_B5_PENDING`.
+- Plan B: `B5_GREEN_TOKEN_ONLY_B6_PENDING`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.
