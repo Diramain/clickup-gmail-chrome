@@ -4,6 +4,8 @@ Plan de seguimiento para retirar los restos de InboxSDK y portar TaskBridge a
 Firefox desde la base estable de Chrome, manteniendo una sola fuente y dos
 distribuciones independientes.
 
+Vista rapida de seguimiento: [`FIREFOX_RELEASE_STATUS.md`](FIREFOX_RELEASE_STATUS.md).
+
 ## Baseline
 
 - Fecha del plan: 2026-08-23.
