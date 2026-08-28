@@ -301,12 +301,7 @@ export interface EmailTaskMapping {
 export interface StorageData {
     clickupToken?: string | { iv: string; data: string; version: number };
     clickupRefreshToken?: string | null;
-    clickupAuthMethod?: 'personal-token' | 'oauth';
-    oauthConfig?: {
-        clientId: string;
-        clientSecret: string;
-        redirectUrl: string;
-    };
+    clickupAuthMethod?: 'personal-token';
     preferredTeamId?: string; // Replaces defaultList
     emailTaskMappings?: Record<string, EmailTaskMapping[]>;
     emailTaskMappingsV2?: Record<string, EmailTaskMapping[]>;
@@ -319,7 +314,6 @@ export interface StorageData {
 // ============================================================================
 
 export type MessageAction =
-    | 'authenticate'
     | 'authenticatePersonalToken'
     | 'logout'
     | 'checkAuth'
@@ -342,11 +336,12 @@ export type MessageAction =
     | 'uploadGmailAttachment'
     | 'getGmailIntegrationPreference'
     | 'setGmailIntegrationPreference'
+    | 'getUiLanguage'
+    | 'setUiLanguage'
     | 'validateTask'
     | 'validateTaskLink'
     | 'findLinkedTasks'
     | 'searchTasks'
-    | 'saveOAuthConfig'
     | 'savePreferredTeam'
     | 'getPreferredTeam'
     | 'getTaskById'
@@ -390,6 +385,7 @@ export type MessageAction =
     | 'getMeetPriorityStatus'
     | 'getMeetMappings'
     | 'assignMeetTask'
+    | 'createMeetTask'
     | 'ignoreMeetSession'
     | 'endMeetSession'
     | 'resumeMeetSession'
@@ -445,7 +441,7 @@ export interface CachedListItem {
 export interface ExtensionStatus {
     authenticated: boolean;
     configured: boolean;
-    authMethod?: 'personal-token' | 'oauth';
+    authMethod?: 'personal-token';
     requiresReauth?: boolean;
     authUnavailable?: boolean;
     user?: ClickUpUserResponse | ClickUpUser;

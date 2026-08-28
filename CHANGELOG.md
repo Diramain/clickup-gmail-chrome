@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- ClickUp authentication is now personal-token-only in Chrome and Firefox; the setup UI no longer requests OAuth Client IDs or Client Secrets.
+- Upgrades preserve valid personal tokens and retire legacy ClickUp OAuth sessions with an explicit reconnect requirement.
+- Confirmed Meet sessions can create a ClickUp task with an editable sanitized title, configured destination and custom task type, optional parent, current-user assignment, and date-only start/due dates before tracking starts.
+- Spanish and English can be selected from extension surfaces and the preference is retained locally.
+- Google Calendar is marked as in development and fails closed at runtime in both browsers.
+
+### Security and privacy
+- Removed the in-extension ClickUp OAuth code exchange, credential message actions, encrypted OAuth configuration helpers, and Firefox `identity` permission.
+- Release validation now rejects legacy ClickUp OAuth endpoints, secret fields, message actions, and setup copy while preserving Chrome Google Calendar OAuth.
+- Authentication operations no longer hold the serialized auth-state lock during ClickUp or timer requests, preventing 401/logout deadlocks while keeping account changes ordered.
+- Firefox release validation rejects required, optional, content-script, web-accessible-resource, and externally-connectable access to Google API hosts while Calendar remains disabled.
+- Meet messages may carry only a sanitized visible title of at most 160 characters in addition to the hashed room identity; the title is session-only unless the user confirms it as a ClickUp task name.
+
+### Validation
+- The full 53-suite, 545-test run, strict TypeScript check, release preflight, and two reproducible Chrome/Firefox package builds pass locally.
+- Reproducible ZIP SHA-256: Chrome `762eb349571315834354bd51283b42ca5baf7c047bc4fc861bfa4fe1a1709585`; Firefox `c18cc2357f171a76af37aa3317b1f3d28ac5e37a6e2188d688c722db78e9cb02`.
+
 ## [2.1.0] - 2026-08-23
 
 ### Changed

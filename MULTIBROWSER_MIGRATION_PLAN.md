@@ -198,7 +198,7 @@ ClickUp, Meet y tiempo antes de habilitar Google Calendar.
 | `tabs`, `windows`, `alarms`, `action` | Compartida | Mantener comportamiento y cubrir diferencias con pruebas focales |
 | `storage.local`, `storage.session` | Adaptador requerido | Conservar acceso solo para contextos confiables y detectar capacidades |
 | Background MV3 | Especifica por navegador | Chrome usa `service_worker`; Firefox usa `scripts` como event page |
-| Autenticacion ClickUp | Compartida | Usar token personal por usuario; el OAuth cliente queda legacy y programado para retiro |
+| Autenticacion ClickUp | Compartida | Usar exclusivamente un token personal por usuario; el OAuth cliente legacy se elimina durante el upgrade |
 | Google Calendar OAuth | Especifica por navegador | Chrome conserva `getAuthToken`; Firefox queda desactivado hasta implementar `launchWebAuthFlow` y cache propia |
 | Origen interno confiable | Adaptador requerido | Derivar desde `runtime.getURL('/')`; aceptar solo el origen exacto del runtime |
 | Gmail y adjuntos | Compartida | Misma seleccion explicita, allowlists, limites y asociacion por mensaje |
@@ -299,16 +299,16 @@ ClickUp Free, con comportamiento fail-closed y aviso accionable.
   soportado dentro del alcance Firefox actual.
 - [x] B5.2. No crear una segunda aplicacion OAuth ni distribuir un
   `client_secret` dentro del paquete.
-- [x] B5.3. Clasificar OAuth cliente como legacy, no soportado y fuera de los
-  claims Firefox; permanece temporalmente en la fuente y UI compartidas hasta su
-  retiro posterior para no romper Chrome en este cambio documental.
-- [ ] B5.4. Eliminar en un cambio posterior la UI, persistencia, mensajes y flujo
+- [x] B5.3. Clasificar OAuth cliente como legacy y no soportado. Su permanencia
+  temporal en fuente/UI termino con B5.4 y queda solo como evidencia historica.
+- [x] B5.4. Eliminar la UI, persistencia, mensajes y flujo
   OAuth ClickUp ejecutados dentro del navegador, con migracion segura de estado.
 - [ ] B5.5. Si OAuth vuelve a evaluarse, diseñarlo como servicio backend que
   custodie el secreto; requiere alcance, threat model y autorizacion separados.
 
-**Gate B5:** `VERDE_TOKEN_ONLY`; Firefox usa token personal y OAuth cliente no
-bloquea esta release. B5.4-B5.5 son follow-ups fuera del gate actual.
+**Gate B5:** `VERDE_TOKEN_ONLY`; Chrome y Firefox usan token personal. La
+migracion conserva tokens personales validos y retira configuracion, drafts y
+sesiones OAuth legacy. B5.5 permanece como alternativa futura fuera del gate.
 
 ### Fase B6: Google Calendar OAuth Firefox
 
@@ -328,12 +328,15 @@ bloquea esta release. B5.4-B5.5 son follow-ups fuera del gate actual.
 - [ ] B7.2. Ejecutar QA manual completa en Chrome estable.
 - [ ] B7.3. Ejecutar QA manual completa en Firefox estable.
 - [ ] B7.4. Verificar perfiles limpios, actualizacion y reinicio.
-- [ ] B7.5. Comparar permisos, hosts, CSP y archivos de los dos paquetes.
-- [ ] B7.6. Escanear ambos ZIP y verificar hashes.
+- [x] B7.5. Comparar permisos, hosts, CSP y archivos de los dos paquetes.
+- [x] B7.6. Escanear ambos ZIP y verificar hashes reproducibles: Chrome
+  `d6d0cb7b8ddc4d0f1ba02532b25237eede797b6166106fe871c0e4684985408f` y
+  Firefox `612c64756f62b8f6b54411de581962646d1b4ad90d5a2913770351a0e44cf157`.
 - [ ] B7.7. Revisar accesibilidad y comportamiento desktop.
-- [ ] B7.8. Documentar diferencias funcionales reales sin prometer paridad falsa.
+- [x] B7.8. Documentar diferencias funcionales reales sin prometer paridad falsa.
 
-**Gate B7:** QA Chrome y Firefox verde, artefactos exactos y rollback probado.
+**Gate B7:** automatizacion y artefactos `2.2.0` verdes; QA manual Chrome/Firefox
+post-migracion y rollback probado siguen pendientes.
 
 ### Fase B8: Preparacion AMO
 
@@ -368,7 +371,7 @@ aprobacion explicita.
 **Gate B9:** pagina publica y stores describen la misma disponibilidad; sitemap
 valido y sin URLs falsas o retiradas.
 
-**Estado Plan B:** `B5_GREEN_TOKEN_ONLY_B6_PENDING`.
+**Estado Plan B:** `B5_GREEN_TOKEN_ONLY_OAUTH_RETIRED_B6_PENDING`.
 
 ---
 
@@ -412,6 +415,7 @@ correos, payloads reales ni trazas sensibles.
 | 2026-08-24 | B3.5 y Gate B3 | Prueba negativa Firefox verde | Un probe temporal ejecutado en contexto de content script devolvio `PASS`: `clickupToken`, `encryptionKey` y `oauthConfig` no fueron accesibles; el permiso temporal `scripting` existio solo en `dist/firefox`, se retiro mediante rebuild y no entro en fuente, commit ni paquete final | Firefox final conserva permisos originales; ZIP regenerado con SHA-256 `06e77eb0ea2bf17f041617912f041b54daae16687e8a3b733b083c95a17a46e8` |
 | 2026-08-24 | B4.5 | Adjunto Gmail Firefox verde | Firefox omite `download_url` y expone tarjetas `a.aQy.e` con `view=att`; se agrego un fallback acotado que conserva validaciones de host, extension, MIME real y tamaño. El owner valido deteccion y subida de un unico PDF sin copia HTML | Prueba focal adapter 16/16; build Firefox verde; ZIP SHA-256 `0328677d333fe37e8029bf591b2a236659a2b6749a9faa8c254f83b2d41bdfc8` |
 | 2026-08-24 | B4.4-B4.9 y Gate B4 | QA funcional Firefox cerrada por el owner | El owner confirmo haber probado el flujo completo y solicito omitir pruebas adicionales; Gmail, adjuntos, ClickUp, tiempo, Meet Priority, reinicio/restauracion y degradacion honesta de Calendar quedan aceptados | `FIELD_033` permanece como limite externo ClickUp Free; no se ejecutaron pruebas adicionales ni publicacion AMO |
+| 2026-08-27 | B7 automatizado | Meet create, idioma ES/EN y Calendar fail-closed | 545/545 pruebas, TypeScript y diff check verdes; dos builds duales reproducibles de 34 archivos por target; ZIP Chrome `762eb349571315834354bd51283b42ca5baf7c047bc4fc861bfa4fe1a1709585`, Firefox `c18cc2357f171a76af37aa3317b1f3d28ac5e37a6e2188d688c722db78e9cb02` | QA con cuentas reales, firma y publicacion no ejecutadas |
 
 ## Registro De Decisiones
 
@@ -430,11 +434,12 @@ correos, payloads reales ni trazas sensibles.
 | DEC-11 | 2026-08-23 | Calendar desactivado en el primer corte Firefox | Firefox no implementa `identity.getAuthToken`; habilitarlo exige adapter y registro OAuth propios |
 | DEC-12 | 2026-08-23 | Dos ZIP versionados desde contenido compartido | Evitar mezcla de manifiestos, OAuth, backgrounds y archivos de distribucion |
 | DEC-13 | 2026-08-24 | ClickUp usa token personal por usuario en Firefox | ClickUp documenta un redirect por app y exige `client_secret`; pedir credenciales OAuth a cada usuario no sirve para distribucion general. El OAuth cliente legacy se retirara despues; un OAuth futuro requeriria backend y decision separada |
+| DEC-14 | 2026-08-27 | Google Calendar queda en desarrollo y fail-closed en Chrome y Firefox | Una interfaz deshabilitada no debe dejar acciones runtime disponibles; cualquier reactivacion requiere revision y validacion separadas |
 
 ## Estado General
 
 - Plan A: `GATE_A_GREEN`.
-- Plan B: `B5_GREEN_TOKEN_ONLY_B6_PENDING`.
+- Plan B: `B5_GREEN_TOKEN_ONLY_B6_DEFERRED_B7_AUTOMATED_GREEN`.
 - Chrome Web Store: `2.1.0` pendiente de revision; `1.2.0` publica; publicacion
   automatica desactivada.
 - Publicacion AMO: no autorizada.

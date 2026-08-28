@@ -16,19 +16,22 @@ import type { BulkTaskChangeInput, BulkTaskChangeResult } from '../src/bulk-task
 import type { CalendarAgendaItemV1, CalendarAgendaState, CalendarAgendaViewV1 } from '../src/calendar/calendar-agenda';
 import type { CalendarTaskLinkScope, CalendarTaskTypeSelectionV1 } from '../src/calendar/calendar-linking';
 import type { ClickUpCustomTaskType } from '../src/types/clickup';
+import { t, type TranslationKey } from '../src/i18n';
 
 const ROUTES = Object.freeze(['inicio', 'gmail', 'tiempo', 'meet', 'sync', 'conexion', 'datos']);
 type AppRoute = typeof ROUTES[number];
 let refreshDefaultDestination: (() => Promise<void>) | null = null;
+let clickUpConnectionState: ClickUpConnectionView['state'] | null = null;
+let calendarAgendaInitPromise: Promise<void> | null = null;
 
-const ROUTE_TITLES: Record<AppRoute, string> = {
-    inicio: 'Inicio',
-    gmail: 'Integración con Gmail',
-    tiempo: 'Jornada y tiempo',
-    meet: 'Calendar y Meet',
-    sync: 'Sincronización',
-    conexion: 'Conexión',
-    datos: 'Datos y diagnóstico',
+const ROUTE_TITLE_KEYS: Record<AppRoute, TranslationKey> = {
+    inicio: 'route.home',
+    gmail: 'route.gmail',
+    tiempo: 'route.time',
+    meet: 'route.meet',
+    sync: 'route.sync',
+    conexion: 'route.connection',
+    datos: 'route.data',
 };
 
 export function sanitizeAppRoute(hash: string): AppRoute {
@@ -37,6 +40,11 @@ export function sanitizeAppRoute(hash: string): AppRoute {
 }
 
 export function renderAppRoute(route: AppRoute, focusHeading = false): void {
+    if (clickUpConnectionState !== null && clickUpConnectionState !== 'connected-local') {
+        route = 'conexion';
+        if (window.location.hash !== '#conexion') window.history.replaceState(null, '', '#conexion');
+    }
+
     document.querySelectorAll<HTMLElement>('[data-page]').forEach((section) => {
         section.hidden = section.dataset.page !== route;
     });
@@ -47,8 +55,9 @@ export function renderAppRoute(route: AppRoute, focusHeading = false): void {
     });
 
     const pageTitle = document.getElementById('pageTitle');
-    if (pageTitle) pageTitle.textContent = ROUTE_TITLES[route];
-    document.title = `${ROUTE_TITLES[route]} · TaskBridge for ClickUp`;
+    const routeTitle = t(ROUTE_TITLE_KEYS[route]);
+    if (pageTitle) pageTitle.textContent = routeTitle;
+    document.title = `${routeTitle} · TaskBridge for ClickUp`;
     if (route === 'gmail' && refreshDefaultDestination) void refreshDefaultDestination();
 
     if (focusHeading) {
@@ -64,6 +73,9 @@ export function initAppNavigation(): void {
     renderAppRoute(sanitizeAppRoute(window.location.hash));
     window.addEventListener('hashchange', () => {
         renderAppRoute(sanitizeAppRoute(window.location.hash), true);
+    });
+    document.addEventListener('taskbridge-language-changed', () => {
+        renderAppRoute(sanitizeAppRoute(window.location.hash));
     });
 }
 
@@ -1456,6 +1468,16 @@ export function renderClickUpConnection(view: ClickUpConnectionView): void {
     detail.textContent = view.detail;
 }
 
+export function renderClickUpRouteAvailability(view: ClickUpConnectionView): void {
+    clickUpConnectionState = view.state;
+    const connected = view.state === 'connected-local';
+    document.querySelectorAll<HTMLAnchorElement>('[data-route]').forEach((link) => {
+        if (!connected && link.dataset.route !== 'conexion') link.setAttribute('aria-disabled', 'true');
+        else link.removeAttribute('aria-disabled');
+    });
+    renderAppRoute(sanitizeAppRoute(window.location.hash));
+}
+
 export async function initLocalConnections(port: LocalConnectionPort = chromeConnectionPort): Promise<ClickUpConnectionView> {
     try {
         const view = classifyLocalClickUpStatus(await port.getClickUpStatus());
@@ -1468,9 +1490,16 @@ export async function initLocalConnections(port: LocalConnectionPort = chromeCon
     }
 }
 
-async function refreshClickUpViews(): Promise<void> {
-    const view = await initLocalConnections();
-    if (view.state === 'connected-local') await initDashboardSummary();
+export async function refreshClickUpViews(
+    port: LocalConnectionPort = chromeConnectionPort,
+    initializeCalendar: () => Promise<void> = () => initCalendarAgenda(),
+): Promise<void> {
+    const view = await initLocalConnections(port);
+    renderClickUpRouteAvailability(view);
+    if (view.state !== 'connected-local') return;
+
+    calendarAgendaInitPromise ??= initializeCalendar();
+    await Promise.all([initDashboardSummary(), calendarAgendaInitPromise]);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1632,7 +1661,7 @@ function describeCalendarState(view: CalendarAgendaViewV1): { title: string; det
             return view.errorCode === 'PERMISSION_DENIED'
                 ? { title: 'Calendar rechazó la autorización', detail: 'Reconectá para aprobar el permiso de sólo lectura.' }
                 : { title: 'Reconexión requerida', detail: 'Volvé a conectar Google Calendar mediante un clic explícito.' };
-        default: return { title: 'Calendar desactivado', detail: 'OAuth permanece apagado hasta el canario autorizado.' };
+        default: return { title: t('calendar.development'), detail: t('calendar.developmentDetail') };
     }
 }
 
@@ -2825,9 +2854,6 @@ export function initTaskSearch(port: TaskSearchPort = chromeTaskSearchPort, enab
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Calendar inicia primero para que un fallo ajeno en otro módulo visual no
-    // deje su control en el estado estático desactivado.
-    void initCalendarAgenda();
     initThemeSwitcher();
     initOwnerThemeUnlock();
     initAppNavigation();

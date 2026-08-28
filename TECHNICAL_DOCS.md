@@ -1,4 +1,4 @@
-# TaskBridge for ClickUp 2.1.0
+# TaskBridge for ClickUp 2.2.0
 
 Technical reference for the Chrome and Firefox Manifest V3 extension. The canonical versioned source is this repository; the GitHub wiki mirrors the maintained user, technical, contribution, security, privacy, and release documents from `main`.
 
@@ -6,7 +6,7 @@ Technical reference for the Chrome and Firefox Manifest V3 extension. The canoni
 
 The extension has four runtime surfaces:
 
-1. `background.ts`: trusted background runtime, ClickUp personal-token/OAuth boundary, ClickUp API client, Calendar runtime, mappings, timers, and message authorization.
+1. `background.ts`: trusted background runtime, ClickUp personal-token boundary, ClickUp API client, Chrome Calendar runtime, mappings, timers, and message authorization.
 2. `app/`: responsive full-tab application for dashboard, tasks, agenda, tracking, connections, and settings.
 3. `src/gmail-native.ts` and `src/modal.ts`: Gmail content integration and create/link task form.
 4. `src/clickup-tracker.ts` and `src/meet/meet-tracker.ts`: minimal host observers that send reduced events to the background worker.
@@ -20,12 +20,12 @@ Host pages are untrusted. Gmail, ClickUp, and Meet content scripts cannot read t
 The service worker owns:
 
 - ClickUp and Google API calls.
-- personal-token, OAuth-token, and client-secret access.
+- ClickUp personal-token encryption/decryption and a fail-closed Google Calendar capability flag; no client-secret access.
 - persistent task, Calendar, and Meet mappings.
 - timer writes and concurrency controls.
 - attachment upload validation.
 
-No token, OAuth secret, raw Calendar event ID, Meet room code, Gmail HTML, or attachment bytes are written to logs.
+No token, raw Calendar event ID, Meet room code, Gmail HTML, or attachment bytes are written to logs.
 
 ## ClickUp API
 
@@ -38,7 +38,7 @@ No token, OAuth secret, raw Calendar event ID, Meet room code, Gmail HTML, or at
 - confirmed authentication invalidation;
 - task, hierarchy, time-entry, comment, and attachment operations.
 
-The default connection accepts an individual `pk_` personal token only from the trusted setup pages, validates `/user` before encrypted persistence, and sets raw authorization explicitly. Advanced OAuth stores a locally encrypted BYO Client Secret and sets Bearer authorization. Successful method changes remove the previous credential boundary and account-derived caches. No credential is hardcoded or included in release assets.
+The ClickUp connection accepts an individual `pk_` personal token only from the trusted setup pages, validates `/user` before encrypted persistence, and sets raw authorization explicitly. Startup runs an idempotent token-only migration: valid personal tokens survive, while legacy OAuth configuration, OAuth access tokens, draft credential keys, and refresh-token remnants are removed and require reconnection. Google Calendar runtime actions are disabled before Chrome `identity` can be invoked. No credential is hardcoded or included in release assets.
 
 Task descriptions are sent through `markdown_description`. The editor supports ClickUp-documented headings, emphasis, ordered/unordered lists, links, blockquotes, and inline code.
 

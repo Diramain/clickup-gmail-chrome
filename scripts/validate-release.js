@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { RELEASE_TARGETS, RELEASE_FILES_BY_TARGET, BLOCKED_PATTERNS, requestedTargets } = require('./release-allowlist');
+const { calendarManifestPolicyErrors, findBlockedClickUpOAuthMarker } = require('./release-security-policy');
 
 const root = path.resolve(__dirname, '..');
 const blockedContentTerm = new RegExp(['inbox', 'sdk'].join(''), 'i');
@@ -36,18 +37,17 @@ function validateMetadata(manifest, target) {
 }
 
 function validateTargetManifest(manifest, target) {
+    for (const error of calendarManifestPolicyErrors(manifest, target)) fail(error);
     if (target === 'chrome') {
         if (manifest.minimum_chrome_version !== '102') fail('Chrome minimum version mismatch');
         if (manifest.background?.service_worker !== 'background.js') fail('Chrome service worker mismatch');
         if (manifest.background?.scripts) fail('Chrome manifest must not include background scripts');
-        if (!manifest.oauth2) fail('Chrome OAuth manifest block missing');
         if (manifest.browser_specific_settings) fail('Chrome manifest contains Firefox settings');
         return;
     }
 
     const gecko = manifest.browser_specific_settings?.gecko;
     if (manifest.minimum_chrome_version) fail('Firefox manifest contains minimum_chrome_version');
-    if (manifest.oauth2) fail('Firefox manifest contains Chrome OAuth block');
     if (manifest.background?.service_worker) fail('Firefox manifest contains unsupported service worker');
     if (JSON.stringify(manifest.background?.scripts) !== JSON.stringify(['background.js'])) fail('Firefox background scripts mismatch');
     if (gecko?.id !== 'taskbridge-for-clickup@leandroiramain.com.ar') fail('Firefox Gecko ID mismatch');
@@ -62,7 +62,6 @@ function validateTargetManifest(manifest, target) {
     if (JSON.stringify(gecko?.data_collection_permissions?.required) !== JSON.stringify(expectedDataCategories)) {
         fail('Firefox data collection declaration mismatch');
     }
-    if ((manifest.host_permissions || []).includes('https://www.googleapis.com/*')) fail('Firefox must not claim Calendar API access before B4');
 }
 
 function validateManifestReferences(manifest, actual, target) {
@@ -114,6 +113,10 @@ function validateTarget(target) {
         if (textExtensions.has(path.extname(file))) {
             const content = fs.readFileSync(path.join(outDir, file), 'utf8');
             if (blockedContentTerm.test(content)) fail(`Legacy Gmail SDK marker in release file (${target}): ${file}`);
+            const oauthMarker = findBlockedClickUpOAuthMarker(content);
+            if (oauthMarker) {
+                fail(`Legacy ClickUp OAuth marker in release file (${target}, ${oauthMarker}): ${file}`);
+            }
         }
     }
     const manifestPath = path.join(outDir, 'manifest.json');

@@ -1,4 +1,5 @@
 import { isValidClickUpTaskId } from '../clickup-focus';
+import { sanitizeMeetTitle } from './meet-task-prompt';
 
 export type MeetPriorityStatus = 'idle' | 'awaiting-task' | 'tracking' | 'paused' | 'ignored';
 
@@ -24,6 +25,7 @@ export interface MeetPrioritySession {
     joinedAt: number;
     durationConfirmedAt?: number;
     lastSeenAt: number;
+    title?: string;
 }
 
 export interface MeetMappingStoreV1 {
@@ -102,6 +104,8 @@ export function sanitizeMeetPrioritySession(value: unknown): MeetPrioritySession
     if (session.previousTeamId !== undefined && !isBoundedId(session.previousTeamId)) return null;
     if (session.startedAt !== undefined && !isNonNegativeFiniteNumber(session.startedAt)) return null;
     if (session.durationConfirmedAt !== undefined && !isNonNegativeFiniteNumber(session.durationConfirmedAt)) return null;
+    const title = session.title === undefined ? undefined : sanitizeMeetTitle(session.title);
+    if (session.title !== undefined && !title) return null;
     if (session.status === 'tracking' || session.status === 'paused') {
         if (!isValidClickUpTaskId(session.taskId) || !isBoundedId(session.teamId)
             || !isNonNegativeFiniteNumber(session.startedAt)) return null;
@@ -121,6 +125,7 @@ export function sanitizeMeetPrioritySession(value: unknown): MeetPrioritySession
         joinedAt: session.joinedAt!,
         durationConfirmedAt: session.durationConfirmedAt,
         lastSeenAt: session.lastSeenAt!,
+        title,
     };
 }
 

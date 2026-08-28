@@ -36,17 +36,15 @@ describe('CGC-UX-V2-C1 local connections state', () => {
         const background = source('background.ts');
         const action = background.match(/case 'getLocalConnectionStatus':[\s\S]*?\n\s*}\n/)[0];
 
-        expect(action).toContain('hasSecureOAuthConfig');
         expect(action).toContain('hasSecureToken');
-        expect(action).toContain('configured: oauthConfigured || credentialPresent');
+        expect(action).toContain('configured: credentialPresent');
         expect(action).not.toMatch(/fetch\(|getFreshAuthenticatedUser|ensureAPI|token:|user:|oauthConfig:/);
     });
 
     test('V2 exposes an accessible status while Google remains blocked', () => {
         document.documentElement.innerHTML = source('app/app.html');
         const clickUpState = document.getElementById('clickUpConnectionState');
-        const googleButton = [...document.querySelectorAll('button')]
-            .find((button) => button.textContent.includes('Conectar Google Calendar'));
+        const googleButton = document.getElementById('connectGoogleCalendarSetup');
 
         expect(clickUpState.getAttribute('role')).toBe('status');
         expect(clickUpState.getAttribute('aria-live')).toBe('polite');

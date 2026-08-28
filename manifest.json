@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "minimum_chrome_version": "102",
     "name": "TaskBridge for ClickUp",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Integra Gmail, Google Calendar y Meet con tareas y seguimiento de tiempo en ClickUp",
     "author": "Leandro Iramain",
     "homepage_url": "https://taskbridge.leandroiramain.com.ar/",

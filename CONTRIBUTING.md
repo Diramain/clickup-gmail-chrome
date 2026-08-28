@@ -19,11 +19,10 @@ taskbridge-for-clickup/
 │   ├── clickup-tracker.ts  # ClickUp page content script
 │   ├── logger.ts           # Debug logging
 │   ├── services/           # Service layer
-│   │   ├── auth.service.ts     # OAuth, tokens, session
+│   │   ├── crypto.service.ts   # Local token encryption
 │   │   ├── api.service.ts      # ClickUp API wrapper
 │   │   ├── timer.service.ts    # Time tracking + badge
 │   │   ├── storage.service.ts  # Storage abstraction
-│   │   └── crypto.service.ts   # Token encryption (AES-256-GCM)
 │   ├── types/
 │   │   └── clickup.d.ts    # TypeScript definitions
 │   └── utils/
@@ -85,13 +84,14 @@ validating one CI target.
 
 ```typescript
 // Import services
-import { authService } from './src/services/auth.service';
+import { normalizePersonalToken } from './src/clickup-auth';
 import { ClickUpAPIWrapper } from './src/services/api.service';
 import { timerService } from './src/services/timer.service';
 import { storageService } from './src/services/storage.service';
 
 // Example usage
-const token = await authService.getAccessToken();
+const token = normalizePersonalToken(userInput);
+if (!token) throw new Error('Invalid personal token');
 const api = new ClickUpAPIWrapper(token);
 api.setAuthenticationFailureCallback(async () => {
   // Invalidate the rejected local session and ask the user to reconnect.

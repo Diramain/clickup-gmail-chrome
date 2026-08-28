@@ -44,7 +44,7 @@ describe('personal token authentication', () => {
         expect(normalizePersonalToken(`pk_${'a'.repeat(20)} secret`)).toBeNull();
         expect(normalizePersonalToken(`oauth_${'a'.repeat(30)}`)).toBeNull();
         expect(resolveClickUpAuthMethod('personal-token', true)).toBe('personal-token');
-        expect(resolveClickUpAuthMethod(undefined, true)).toBe('oauth');
+        expect(resolveClickUpAuthMethod(undefined, true)).toBe('personal-token');
         expect(resolveClickUpAuthMethod(undefined, false)).toBeUndefined();
     });
 
@@ -62,10 +62,10 @@ describe('personal token authentication', () => {
 
     test('validates before encrypted persistence and clears the previous account boundary', () => {
         const background = source('background.ts');
-        const handler = sectionBetween(background, "case 'authenticatePersonalToken':", "case 'authenticate':");
+        const handler = sectionBetween(background, "case 'authenticatePersonalToken':", "case 'logout':");
 
         expect(handler.indexOf('candidateApi.getUser()')).toBeLessThan(handler.indexOf('runAuthenticationStateMutation'));
-        expect(handler.indexOf('runAuthenticationStateMutation')).toBeLessThan(handler.indexOf('saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token)'));
+        expect(handler.indexOf('candidateApi.getUser()')).toBeLessThan(handler.indexOf('saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token)'));
         expect(handler).not.toMatch(/chrome\.storage\.local\.set\(\{\s*\[STORAGE_KEYS\.AUTH_TOKEN\]/);
         expect(handler).toContain("[STORAGE_KEYS.AUTH_METHOD]: 'personal-token'");
         expect(handler).toContain("[STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw'");
@@ -74,18 +74,19 @@ describe('personal token authentication', () => {
         expect(handler).toContain('STORAGE_KEYS.RATE_GOVERNOR_STATE');
     });
 
-    test('setup UI treats the token as a non-drafted password and keeps OAuth advanced', () => {
+    test('setup UI exposes only a non-drafted personal token', () => {
         for (const relativePath of ['popup/popup.html', 'app/app.html']) {
             const html = source(relativePath);
             expect(html).toMatch(/<input(?=[^>]*id="personalToken")(?=[^>]*type="password")[^>]*>/);
             expect(html).toMatch(/<input(?=[^>]*id="personalToken")(?=[^>]*autocomplete="new-password")[^>]*>/);
             expect(html).toContain('id="connectPersonalToken"');
-            expect(html).toMatch(/<details[^>]*class="[^"]*auth-advanced-card[^"]*"/);
+            expect(html).not.toMatch(/clientSecret|clientId|auth-advanced-card/);
         }
 
         const popup = source('popup/popup.ts');
         expect(popup).not.toMatch(/storage\.local\.set\([^)]*personalToken/s);
         expect(popup).toContain("action: 'authenticatePersonalToken'");
         expect(popup).toContain("personalTokenInput.value = ''");
+        expect(popup).not.toMatch(/saveOAuthConfig|action:\s*['"]authenticate['"]/);
     });
 });

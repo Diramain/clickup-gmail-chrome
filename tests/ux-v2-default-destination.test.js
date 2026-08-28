@@ -23,6 +23,8 @@ function loadTsModule(relativePath) {
         if (request === './bulk-task-update') return loadTsModule('src/bulk-task-update.ts');
         if (request === './gmail-attachment-security') return loadTsModule('src/gmail-attachment-security.ts');
         if (request === './clickup-auth') return loadTsModule('src/clickup-auth.ts');
+        if (request === './meet/meet-task-prompt') return loadTsModule('src/meet/meet-task-prompt.ts');
+        if (request === '../src/i18n') return { t: (key) => key, getActiveLanguage: () => 'es' };
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);

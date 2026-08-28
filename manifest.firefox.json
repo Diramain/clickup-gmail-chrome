@@ -1,14 +1,13 @@
 {
     "manifest_version": 3,
     "name": "TaskBridge for ClickUp",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Integra Gmail y Meet con tareas y seguimiento de tiempo en ClickUp",
     "author": "Leandro Iramain",
     "homepage_url": "https://taskbridge.leandroiramain.com.ar/",
     "incognito": "not_allowed",
     "permissions": [
         "storage",
-        "identity",
         "tabs",
         "alarms"
     ],

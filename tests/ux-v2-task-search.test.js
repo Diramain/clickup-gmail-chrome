@@ -19,6 +19,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
         if (request === '../diagnostics/recorder') return { initCausalRecorder: () => undefined };
         if (request === '../popup/popup') return {};
+        if (request === '../src/i18n') return { t: (key) => key, getActiveLanguage: () => 'es' };
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);

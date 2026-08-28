@@ -41,11 +41,11 @@ describe('CGC-C12-OAUTH-B2 visible connections with OAuth off', () => {
     test('runtime capability is hard off and direct connection cannot call identity', async () => {
         const identity = createIdentitySpy();
 
-        expect(ui.GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED).toBe(true);
+        expect(ui.GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED).toBe(false);
         await expect(ui.beginGoogleCalendarConnection(identity)).resolves.toEqual({
             ok: false,
             code: 'FEATURE_DISABLED',
-            runtimeCapabilityEnabled: true,
+            runtimeCapabilityEnabled: false,
         });
         expect(identity.calls).toEqual({ get: 0, remove: 0 });
     });

@@ -19,6 +19,7 @@ function loadTsModule(relativePath) {
         if (request === '../src/destination-config') return loadTsModule('src/destination-config.ts');
         if (request === '../diagnostics/recorder') return { initCausalRecorder: () => undefined };
         if (request === '../popup/popup') return {};
+        if (request === '../src/i18n') return { t: (key) => key, getActiveLanguage: () => 'es' };
         return require(request);
     };
     new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
@@ -72,7 +73,7 @@ describe('CGC-UX-V2-A full-tab shell', () => {
         for (const id of ['dashboardNowTitle', 'dashboardTimerValue', 'dashboardMeetingTitle', 'executionBoardTitle', 'toggleExecutionSelection', 'refreshExecutionBoard', 'executionOverdueTasks', 'executionTodayTasks', 'executionNextTasks', 'executionUndatedTasks', 'dashboardKpiTitle', 'kpiTasksToday', 'kpiTasksOverdue', 'kpiCompletedWeek', 'kpiTrackedToday', 'kpiGmailTasks', 'taskTimeSort', 'bulkActionRailButton', 'bulkEditDrawer', 'bulkStatus', 'bulkAssignee', 'applyBulkChanges']) {
             expect(document.getElementById(id)).not.toBeNull();
         }
-        const googleButton = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Conectar Google Calendar'));
+        const googleButton = document.getElementById('connectGoogleCalendarSetup');
         expect(googleButton).toBeDefined();
         expect(googleButton.disabled).toBe(true);
         expect(googleButton.getAttribute('aria-disabled')).toBe('true');
@@ -99,6 +100,25 @@ describe('CGC-UX-V2-A full-tab shell', () => {
 
         expect(app.sanitizeAppRoute('#conexion')).toBe('conexion');
         expect(app.sanitizeAppRoute('#unknown')).toBe('inicio');
+    });
+
+    test('disconnected startup stays on Connection without initializing authenticated Calendar data', async () => {
+        document.documentElement.innerHTML = source('app/app.html');
+        window.history.replaceState(null, '', '#meet');
+        const app = loadTsModule('app/app.ts');
+        const initializeCalendar = jest.fn(async () => undefined);
+
+        app.initAppNavigation();
+        await app.refreshClickUpViews({
+            getClickUpStatus: async () => ({ configured: false, credentialPresent: false, requiresReauth: false }),
+        }, initializeCalendar);
+
+        expect(initializeCalendar).not.toHaveBeenCalled();
+        expect(window.location.hash).toBe('#conexion');
+        expect(document.getElementById('pageTitle').textContent).toBe('route.connection');
+        expect(document.querySelector('[data-route="conexion"]').getAttribute('aria-current')).toBe('page');
+        expect(document.querySelector('[data-route="meet"]').getAttribute('aria-disabled')).toBe('true');
+        expect(document.querySelector('[data-page="meet"]').hidden).toBe(true);
     });
 
     test('stylesheet carries the prototype identity without remote assets', () => {

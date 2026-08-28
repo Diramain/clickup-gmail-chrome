@@ -12,7 +12,7 @@ Public GitHub Issues are reserved for ordinary bug reports and feature proposals
 
 ## Token Encryption
 
-The personal token, OAuth access token, and OAuth client secret are encrypted at rest using **AES-256-GCM** via the Web Crypto API.
+The ClickUp personal token is encrypted at rest using **AES-256-GCM** via the Web Crypto API.
 
 ### How it works:
 1. On first auth, a unique AES-256 encryption key is generated
@@ -20,43 +20,35 @@ The personal token, OAuth access token, and OAuth client secret are encrypted at
 3. The selected ClickUp credential is validated before it replaces the current connection and is encrypted before storage
 4. Legacy plain-text tokens are automatically migrated to encrypted format; obsolete refresh-token values are removed
 
+This is best-effort at-rest protection. The encryption key is stored in the same browser profile, so it does not protect against a compromised host or compromised browser profile.
+
 ### Files:
 - `src/services/crypto.service.ts` - Encryption/decryption functions
 
 ---
 
-## Client Secret Handling
+## ClickUp OAuth Retirement
 
-> ⚠️ **Important**: ClickUp's OAuth API requires a `client_secret` for token exchange.
+TaskBridge no longer requests or stores ClickUp Client IDs or Client Secrets and no longer exchanges ClickUp OAuth authorization codes inside the extension. On upgrade, the startup migration removes legacy ClickUp OAuth configuration, draft credential keys, refresh-token remnants, and OAuth access tokens. Users of the retired flow must reconnect with their own personal token. Existing valid personal tokens are preserved.
 
-Since browser extensions cannot truly hide secrets in client-side code, we recommend:
-
-1. **Keep your OAuth app private** - Don't share the client ID/secret
-2. **Create a new OAuth app** if you suspect compromise
-3. **Consider a backend proxy** for production apps with many users
-
-The OAuth client secret is stored locally after the user enters it during setup. In v2.1.0 it is encrypted locally with **AES-256-GCM** through `saveSecureOAuthConfig` before trusted local persistence.
-
-This is best-effort at-rest protection: the encryption key is stored in the same browser profile, so it does not protect against a compromised host or compromised browser profile. The client secret is decrypted only when needed for OAuth or token exchange with ClickUp.
-
-For broad distribution or higher-risk deployments, a backend OAuth proxy remains recommended so the client secret does not need to live in the browser extension profile.
+Google Calendar remains a separate, disabled Chrome capability under development. Its public client metadata is declared in the Chrome manifest, but runtime actions fail closed before requesting a token or Calendar data. TaskBridge does not persist a Google Client Secret or Google token.
 
 ## Personal Token Handling
 
 ClickUp documents personal tokens for individual and testing use. TaskBridge accepts only a bounded `pk_` token shape from the trusted setup pages, validates it against ClickUp's `/user` endpoint before persistence, and never writes it to a draft, URL, log, diagnostic event, export, or visible status string.
 
-Each user must use their own token. Personal tokens are long-lived and carry the ClickUp access of their owner, so they must not be shared as an organization-wide credential. Switching successfully to a personal token deletes the previous OAuth configuration and account-derived caches; switching successfully to OAuth replaces the token and records the OAuth authorization mode.
+Each user must use their own token. Personal tokens are long-lived and carry the ClickUp access of their owner, so they must not be shared as an organization-wide credential. Connecting successfully deletes legacy OAuth configuration and account-derived caches before establishing the personal-token boundary.
 
 ## Reauthentication on `401`
 
-ClickUp's documented OAuth token endpoint exchanges `client_id`, `client_secret`, and an authorization `code` for an access token; it does not document a refresh-token grant. Runtime requests therefore do not attempt synthetic refresh requests. Because previous extension versions successfully used the raw access token while current ClickUp documentation specifies `Bearer`, safe GET requests can try the alternate header once. Non-idempotent writes are never replayed automatically. When a request returns `401`, the extension:
+Runtime requests do not attempt synthetic refresh requests. For compatibility with existing ClickUp API behavior, safe GET requests can try the alternate raw/Bearer header once. Non-idempotent writes are never replayed automatically. When a request returns `401`, the extension:
 
 1. confirms the current token against `/user` before treating endpoint-specific denial as a lost session;
 2. removes the rejected token and caches only when `/user` rejects both supported header shapes and that exact token is still current;
 3. ignores late failures from replaced tokens/wrappers and serializes auth-state changes;
-4. preserves the selected authentication method, preserves encrypted OAuth app configuration only for OAuth reconnection, pauses automatic tracking authority, and shows the correct token-replacement or OAuth-reconnection path.
+4. preserves no rejected credential, pauses automatic tracking authority, and shows the personal-token replacement path.
 
-Transient network/upstream errors and endpoint-specific `401` responses with a valid `/user` probe do not clear the session or ask the user to replace OAuth configuration. A user validated during the last five minutes may be reused locally when opening the popup.
+Transient network/upstream errors and endpoint-specific `401` responses with a valid `/user` probe do not clear the session. A user validated during the last five minutes may be reused locally when opening the popup.
 
 ## Safe Diagnostics Boundary
 
@@ -74,9 +66,9 @@ Residual risk remains: timestamps and technical state transitions can reveal whe
 
 ## Google Meet Priority Boundary
 
-Meet Priority is off by default and restricted to `https://meet.google.com/*`. It uses a minimal Leave Call DOM signal and sends only an allowlisted event plus `SHA-256("cgc-meet-v1:" + roomCode)` to the background worker.
+Meet Priority is off by default and restricted to `https://meet.google.com/*`. It uses a minimal Leave Call DOM signal and sends only an allowlisted event, `SHA-256("cgc-meet-v1:" + roomCode)`, and an optional sanitized visible page title limited to 160 characters to the background worker.
 
-- No raw room code, full URL, title, Calendar data, participant data, chat, captions, audio, video, camera, microphone, screenshots, or transcripts are persisted or sent through the Meet message channel.
+- No raw room code, full URL, Calendar data, participant data, chat, captions, audio, video, camera, microphone, screenshots, or transcripts are persisted or sent through the Meet message channel. The sanitized title may remain in browser-session storage only for the active session, is excluded from remembered mappings and diagnostics, and reaches ClickUp only when the user confirms task creation.
 - Meet cannot invoke ClickUp timer or mapping actions directly; those actions are extension-page-only and schema validated.
 - Room mappings store only the room hash, task/workspace IDs, timestamps, and enabled state. The stable hash is pseudonymous and remains sensitive local metadata.
 - Chrome restricts `chrome.storage.local` to `TRUSTED_CONTEXTS`. Firefox stores durable application state in extension-origin IndexedDB because Firefox does not implement `StorageArea.setAccessLevel`; the injected storage facade denies all host content-script access.

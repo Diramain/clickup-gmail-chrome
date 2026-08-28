@@ -103,11 +103,17 @@ describe('B2 sanitizer and message security', () => {
             extensionRoot,
         )).toEqual({ ok: false, code: 'INVALID_ORIGIN' });
         expect(messages.validateExtensionMessage(
-            { action: 'saveOAuthConfig', data: { clientId: 'id', clientSecret: 'secret' } },
+            { action: 'authenticatePersonalToken', data: { token: `pk_${'a'.repeat(24)}` } },
             { id: runtimeId, url: 'moz-extension://trusted-uuid/app/app.html' },
             runtimeId,
             extensionRoot,
         )).toEqual({ ok: true });
+        expect(messages.validateExtensionMessage(
+            { action: 'saveOAuthConfig', data: { clientId: 'id', clientSecret: 'secret' } },
+            { id: runtimeId, url: 'moz-extension://trusted-uuid/app/app.html' },
+            runtimeId,
+            extensionRoot,
+        )).toEqual({ ok: false, code: 'INVALID_ORIGIN' });
     });
 
     test('accepts legitimate popup action schemas without widening Gmail-sensitive actions', () => {

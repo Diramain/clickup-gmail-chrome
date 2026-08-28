@@ -1,8 +1,9 @@
 import type { GoogleIdentityPort } from './google-identity.service';
 import { GOOGLE_CALENDAR_RUNTIME_ENABLED } from '../calendar/calendar-capability';
+import { t } from '../i18n';
 
 export const GOOGLE_OAUTH_RUNTIME_CAPABILITY_ENABLED = GOOGLE_CALENDAR_RUNTIME_ENABLED;
-export const GOOGLE_OAUTH_DISABLED_COPY = 'Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.';
+export const GOOGLE_OAUTH_DISABLED_COPY = 'Google Calendar está en desarrollo y todavía no está disponible.';
 
 export interface GoogleOAuthUiState {
     visible: true;
@@ -60,11 +61,11 @@ export function initGoogleOAuthConnectionPreview(
         surface.button.disabled = !state.canConnect;
         surface.button.setAttribute('aria-disabled', String(!state.canConnect));
         surface.button.setAttribute('data-oauth-state', state.status);
-        surface.status.textContent = GOOGLE_OAUTH_DISABLED_COPY;
+        surface.status.textContent = t('calendar.developmentDetail');
         surface.button.addEventListener('click', () => {
             void beginGoogleCalendarConnection(identity).then((result) => {
                 if (!result.ok && result.code === 'FEATURE_DISABLED') {
-                    surface.status!.textContent = GOOGLE_OAUTH_DISABLED_COPY;
+                    surface.status!.textContent = t('calendar.developmentDetail');
                 }
             });
         });

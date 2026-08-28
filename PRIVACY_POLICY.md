@@ -30,19 +30,21 @@ For this closure check, while Auto-Stop is enabled, a bounded in-memory browser-
 
 Google Meet Priority is optional and off by default. A minimal content script is loaded only on `https://meet.google.com/*`, but while the feature is off it remains dormant except for reading the local opt-in state through a narrow background message. When you enable the feature, it validates a canonical room code from the current path and looks for a limited local DOM signal representing an enabled Leave Call control. Home and prejoin pages do not start ClickUp timers.
 
-Before any room identity leaves the Meet content script, the extension computes `SHA-256("cgc-meet-v1:" + roomCode)`. Runtime messages contain only a closed event type and the resulting 64-character room key. The raw room code, full URL, URL parameters, fragment, meeting title, Calendar event, invitees, and participants are not sent to the background worker, persisted, or logged by this feature.
+Before any room identity leaves the Meet content script, the extension computes `SHA-256("cgc-meet-v1:" + roomCode)`. Runtime messages contain a closed event type, the resulting 64-character room key, and optionally a sanitized version of the visible Meet page title limited to 160 characters. The raw room code, full URL, URL parameters, fragment, Calendar event, invitees, and participants are not sent to the background worker, persisted, or logged by this feature.
+
+The sanitized title is retained only in browser-session storage while the active Meet session is coordinated and is used to prefill the task-creation form. It is not added to remembered room mappings or safe diagnostics. You can edit it before creating a task; only after that explicit action is the confirmed text sent to ClickUp as the new task name.
 
 The feature does not access or capture audio, microphone, video, camera, chat, captions, transcripts, screen content, screenshots, or participant lists. It does not request audio/video/tab/desktop capture, history, or notifications. Google Calendar uses the separate optional read-only scope described below.
 
 If you choose to remember a room association, local storage contains only the pseudonymous room key, ClickUp task ID, workspace ID, creation/last-use timestamps, and enabled state. A stable room hash is pseudonymous metadata, not anonymous data. You can disable or delete each association in the popup, remove all local mappings with the clear-data control, or uninstall the extension.
 
-When a confirmed Meet session is assigned to a task, the extension may stop the current ClickUp timer and start/stop a ClickUp time entry through the existing authenticated ClickUp API connection. Meet Priority does not send meeting content to ClickUp.
+When a confirmed Meet session is assigned to a task, the extension may stop the current ClickUp timer and start/stop a ClickUp time entry through the existing authenticated ClickUp API connection. Meet Priority does not send meeting content to ClickUp except for the sanitized, user-confirmed task name when you explicitly create a task from Meet.
 
 The extension is not allowed to run in incognito mode.
 
 ## 4. Google Calendar Data
 
-Google Calendar is optional and connects only after you press the explicit connect control and approve Google's consent screen. The extension requests only `calendar.events.owned.readonly` and reads at most 20 events from the primary calendar within the next seven days.
+Google Calendar is currently in development and unavailable at runtime. The disabled interface does not request a token or Calendar data. The Chrome package retains public OAuth client metadata and the planned `calendar.events.owned.readonly` scope for future reviewed development; Firefox does not request Google identity or API permissions.
 
 The extension reduces each response to the event title, start/end time, confirmed/tentative state, and whether a canonical Google Meet link exists. It does not retain or expose invitees, descriptions, locations, organizer data, attachments, full Meet URLs, or Calendar event IDs. Calendar event details remain in bounded memory for up to one minute and are cleared on disconnect, extension reload, or browser restart. Google OAuth tokens remain managed by `chrome.identity` and are not written to extension storage or diagnostics.
 
@@ -52,17 +54,17 @@ Calendar-to-ClickUp task linking is an explicit user action. It persists reduced
 
 The extension sends requested task, comment, attachment, time-entry, and metadata operations directly to ClickUp through ClickUp APIs. Data sent to ClickUp is controlled by ClickUp after transfer and is subject to ClickUp's own policies and your workspace settings.
 
-You can connect with your own ClickUp personal token or, as an advanced owner/admin option, with a ClickUp OAuth app that you manage. A personal token is validated against ClickUp before it replaces the current connection. It is not saved while you type and is not persisted if its shape is invalid, ClickUp rejects it, or validation is unavailable.
+You can connect with your own ClickUp personal token. It is validated against ClickUp before it replaces the current connection. It is not saved while you type and is not persisted if its shape is invalid, ClickUp rejects it, or validation is unavailable.
 
-The selected personal or OAuth access token and any OAuth client configuration are stored locally in the browser profile. The extension encrypts these values using local best-effort AES-256-GCM encryption before persistence. The encryption key also lives in the same browser profile, so this protects primarily against casual at-rest inspection and does not protect a compromised device or browser profile. No ClickUp token, Client ID, or Client Secret is hardcoded into the extension package.
+The selected personal token is stored locally in the browser profile after best-effort AES-256-GCM encryption. The encryption key also lives in the same browser profile, so this protects primarily against casual at-rest inspection and does not protect a compromised device or browser profile. No ClickUp token, Client ID, or Client Secret is hardcoded into the extension package. Upgrades remove legacy ClickUp OAuth configuration and OAuth access tokens; a legacy OAuth user must reconnect with a personal token.
 
-The extension does not rely on an undocumented refresh-token grant. A `401` from a specific API operation does not automatically disconnect you: safe reads may try the alternate raw/Bearer header once, and the extension confirms the current token against ClickUp's user endpoint. Only a confirmed rejection of the token that is still current removes that token and cached identity data, pauses automatic tracking, and asks you to replace a personal token or reconnect OAuth explicitly. OAuth configuration is retained only for an OAuth reconnection.
+The extension does not rely on an undocumented refresh-token grant. A `401` from a specific API operation does not automatically disconnect you: safe reads may try the alternate raw/Bearer header once, and the extension confirms the current token against ClickUp's user endpoint. Only a confirmed rejection of the token that is still current removes that token and cached identity data, pauses automatic tracking, and asks you to replace the personal token.
 
 ## 6. Local Storage
 
 The extension may store locally:
 
-- the encrypted best-effort personal or OAuth access token and, when selected, OAuth configuration;
+- the encrypted best-effort ClickUp personal token;
 - Gmail-thread-to-ClickUp-task mappings and task metadata;
 - user settings, including the versioned enable/disable preference for native Gmail controls;
 - hierarchy/team/user caches used to reduce repeated API calls;
@@ -91,7 +93,7 @@ The clear local data action removes local links and non-auth caches from the ext
 
 The extension does not send your data to servers operated by the extension author. It does not include extension-operated analytics, tracking pixels, or telemetry services.
 
-Network communication is limited to browser, Gmail, ClickUp, and the read-only Google Calendar behavior needed for the actions you initiate and the extension permissions you grant. Meet detection and room hashing occur locally in the browser; time-entry changes are sent directly to ClickUp.
+Network communication is limited to browser, Gmail, and ClickUp for the actions you initiate and the extension permissions you grant. Google Calendar runtime access is disabled. Meet detection and room hashing occur locally in the browser; task creation and time-entry changes are sent directly to ClickUp.
 
 ## 9. Your Controls
 

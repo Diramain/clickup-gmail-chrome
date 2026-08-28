@@ -75,49 +75,40 @@
                     <h1 id="pageTitle">Inicio</h1>
                 </div>
                 <div class="topbar-actions">
+                    <label class="language-switcher"><span data-i18n="language.label">Idioma</span><select data-language-selector aria-label="Idioma"><option value="es" data-i18n="language.spanish">Español</option><option value="en" data-i18n="language.english">English</option></select></label>
                     <div class="theme-switcher" role="group" aria-label="Seleccionar tema visual">
                         <button type="button" class="theme-btn" data-theme-choice="paper" aria-pressed="true"><span class="theme-swatch theme-swatch-paper" aria-hidden="true"></span>ClickUp claro</button>
                         <button type="button" class="theme-btn" data-theme-choice="clickup" aria-pressed="false"><span class="theme-swatch theme-swatch-clickup" aria-hidden="true"></span>ClickUp oscuro</button>
                         <button type="button" class="theme-btn owner-theme-option" data-theme-choice="spiritfox" aria-pressed="false" hidden><span class="theme-swatch theme-swatch-spiritfox" aria-hidden="true"></span>Spiritfox</button>
                     </div>
                     <div class="phase-badge"><span aria-hidden="true"></span>Gmail · Calendar · Meet</div>
-                    <button id="pluginVersionUnlock" class="version-unlock" type="button" aria-label="Versión de la extensión">v2.1.0</button>
+                    <button id="pluginVersionUnlock" class="version-unlock" type="button" aria-label="Versión de la extensión">v2.2.0</button>
                 </div>
             </header>
 
             <div id="loading" class="runtime-loading"><span class="status-dot" aria-hidden="true"></span> Cargando estado local…</div>
 
             <section id="login-required" class="page-section hidden" aria-labelledby="clickupSetupTitle">
-                <div class="section-heading"><div><p class="section-label">Conexión requerida</p><h2 id="clickupSetupTitle">Conectá ClickUp desde esta pestaña.</h2><p>La configuración completa ya no vive en el popup.</p></div></div>
+                <div class="section-heading"><div><p class="section-label" data-i18n="auth.required">Conexión requerida</p><h2 id="clickupSetupTitle" data-i18n="auth.setupTitle">Conectá ClickUp desde esta pestaña.</h2><p data-i18n="auth.setupDetail">La configuración completa ya no vive en el popup.</p></div></div>
                 <div class="operation-grid two-columns">
                     <article class="operation-card auth-setup-card">
                         <span class="connection-badge">Recomendado</span>
-                        <h3>Conexión rápida</h3>
-                        <p>Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil del navegador.</p>
-                        <label for="personalToken">Token personal de ClickUp</label>
+                        <h3 data-i18n="auth.quick">Conexión rápida</h3>
+                        <p data-i18n="auth.tokenDetail">Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil del navegador.</p>
+                        <label for="personalToken" data-i18n="auth.tokenLabel">Token personal de ClickUp</label>
                         <input id="personalToken" type="password" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
-                        <button id="connectPersonalToken" type="button" class="btn primary" disabled>Conectar con token personal</button>
+                        <button id="connectPersonalToken" type="button" class="btn primary" disabled data-i18n="auth.connect">Conectar con token personal</button>
                         <p id="personalTokenStatus" class="field-help" role="status" aria-live="polite"></p>
-                        <p class="credential-note">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
-                        <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer">Abrir Tokens de API en ClickUp</a>
-                        <details class="auth-advanced-card">
-                            <summary>Configuración avanzada con OAuth</summary>
-                            <p class="field-help">Para owners o admins que administran su propia app OAuth. El secreto se cifra localmente, pero un navegador comprometido puede acceder al perfil.</p>
-                            <label for="redirectUrl">URL de redirección</label>
-                            <div class="inline-control"><input id="redirectUrl" type="text" readonly><button id="copyUrl" type="button" class="btn">Copiar</button></div>
-                            <label for="clientId">ID de cliente</label><input id="clientId" type="text" autocomplete="off">
-                            <label for="clientSecret">Secreto de cliente</label><input id="clientSecret" type="password" autocomplete="new-password">
-                            <div class="inline-actions"><button id="saveConfig" type="button" class="btn">Guardar configuración</button><button id="discardOAuthChanges" type="button" class="btn">Descartar cambios</button></div>
-                            <p id="oauthConfigStatus" class="field-help" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
-                            <button id="signIn" type="button" class="btn primary" disabled>Iniciar sesión con ClickUp</button>
-                        </details>
+                        <p class="credential-note" data-i18n="auth.credentialNote">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
+                        <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer" data-i18n="auth.openTokens">Abrir Tokens de API en ClickUp</a>
                         <button id="openWindow" type="button" class="hidden">Abrir ventana</button>
                     </article>
                     <article class="operation-card">
-                        <h3>Google Calendar</h3>
-                        <p>Integración opcional para próximos eventos del calendario principal.</p>
-                        <button id="connectGoogleCalendarSetup" type="button" disabled aria-disabled="true">Conectar Google Calendar</button>
-                        <p id="googleOAuthSetupStatus" class="field-help">OAuth permanece desactivado.</p>
+                        <span class="connection-badge" data-i18n="calendar.development">En desarrollo</span>
+                        <h3 data-i18n="calendar.title">Google Calendar</h3>
+                        <p data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
+                        <button id="connectGoogleCalendarSetup" type="button" disabled aria-disabled="true" data-i18n="calendar.button">Próximamente</button>
+                        <p id="googleOAuthSetupStatus" class="field-help" data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                     </article>
                 </div>
             </section>
@@ -158,7 +149,7 @@
                                 <span id="dashboardMeetingState" class="chip blocked"><span class="chip-dot" aria-hidden="true"></span><span id="dashboardMeetingStateText">Sin datos</span></span>
                             </div>
                             <p class="now-eyebrow">Próxima reunión</p>
-                            <strong id="dashboardMeetingTitle">Calendar no está conectado</strong>
+                            <strong id="dashboardMeetingTitle" data-i18n="calendar.development">En desarrollo</strong>
                             <span id="dashboardMeetingTime" class="now-value now-value-text">Horario no disponible</span>
                             <a href="#meet" class="now-link">Abrir Calendar y Meet</a>
                         </article>
@@ -382,7 +373,7 @@
                         </div>
                         <div id="calendarAgendaState" class="service-state service-state-neutral" data-state="disabled" role="status" aria-live="polite">
                             <span aria-hidden="true"></span>
-                            <div><strong id="calendarAgendaStateTitle">Calendar desactivado</strong><small id="calendarAgendaStateDetail">OAuth permanece apagado hasta el canario autorizado.</small></div>
+                            <div><strong id="calendarAgendaStateTitle" data-i18n="calendar.development">En desarrollo</strong><small id="calendarAgendaStateDetail" data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</small></div>
                         </div>
                         <div class="inline-actions calendar-agenda-actions">
                             <a id="calendarConnectionLink" href="#conexion" class="now-link" hidden>Conectar Calendar</a>
@@ -439,20 +430,20 @@
                     <article class="service-card service-google">
                         <div class="service-head">
                             <div class="service-icon service-icon-google" aria-hidden="true"><img src="assets/google-calendar.svg" alt=""></div>
-                            <div><span class="service-type">Integración opcional</span><h3>Google Calendar</h3></div>
-                            <span class="service-badge service-badge-blue">Opcional</span>
+                            <div><span class="service-type" data-i18n="calendar.optional">Integración futura</span><h3 data-i18n="calendar.title">Google Calendar</h3></div>
+                            <span class="service-badge service-badge-blue" data-i18n="calendar.development">En desarrollo</span>
                         </div>
-                        <p>Preparado para leer próximos eventos del calendario principal, sin acceso general a tu cuenta.</p>
+                        <p data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                         <ul class="permission-list" aria-label="Permisos previstos">
                             <li>Eventos del calendario principal en modo lectura</li>
                             <li>Ventana limitada a los próximos siete días</li>
                             <li>Sin invitados, descripciones ni ubicaciones</li>
                         </ul>
                         <div class="inline-actions google-calendar-connection-actions">
-                            <button id="connectGoogleCalendarConnectionPreview" type="button" class="btn primary" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled>Conectar Google Calendar</button>
+                            <button id="connectGoogleCalendarConnectionPreview" type="button" class="btn primary" aria-describedby="googleDisabledStatus" aria-disabled="true" disabled data-i18n="calendar.button">Próximamente</button>
                             <button id="disconnectGoogleCalendar" class="btn" type="button" disabled aria-describedby="googleDisabledStatus">Desconectar</button>
                         </div>
-                        <p id="googleDisabledStatus" class="service-footnote" role="status">Comprobando el estado de Calendar…</p>
+                        <p id="googleDisabledStatus" class="service-footnote" role="status" data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                     </article>
                 </div>
 
@@ -462,7 +453,7 @@
                 </aside>
 
                 <div class="operation-grid two-columns connection-settings">
-                    <article class="operation-card"><h3>Calendar y creación</h3><label class="toggle-line">Mostrar eventos de todo el día <input id="calendarShowAllDayToggle" type="checkbox"></label><label for="calendarTaskTypeSearch">Tipo de tarea para reuniones</label><input id="calendarTaskTypeSearch" type="search" autocomplete="off" placeholder="Filtrar tipos retornados por ClickUp…"><select id="calendarTaskTypeSelect" aria-describedby="calendarTaskTypeStatus" disabled><option value="">Sin tipos disponibles</option></select><p id="calendarTaskTypeStatus" class="field-help" role="status" aria-live="polite">Consultando tipos de tarea…</p></article>
+                    <article class="operation-card"><h3>Meet y creación de tareas</h3><p>Este tipo se usa al crear tareas desde una Meet activa.</p><label for="calendarTaskTypeSearch">Tipo de tarea para reuniones</label><input id="calendarTaskTypeSearch" type="search" autocomplete="off" placeholder="Filtrar tipos retornados por ClickUp…"><select id="calendarTaskTypeSelect" aria-describedby="calendarTaskTypeStatus" disabled><option value="">Sin tipos disponibles</option></select><p id="calendarTaskTypeStatus" class="field-help" role="status" aria-live="polite">Consultando tipos de tarea…</p><input id="calendarShowAllDayToggle" type="checkbox" hidden></article>
                     <article class="operation-card"><h3>Sesión de ClickUp</h3><p id="clickUpConnectionMethod">Método de conexión local</p><p>La desconexión elimina la sesión local y requiere volver a autorizar.</p><button id="signOut" class="btn danger" type="button">Cerrar sesión</button></article>
                 </div>
             </section>

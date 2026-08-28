@@ -210,7 +210,7 @@ describe('ClickUp authentication recovery', () => {
         expect(invalidate).not.toHaveBeenCalled();
     });
 
-    test('background clears rejected session state but keeps encrypted OAuth configuration', () => {
+    test('background clears rejected personal-token session state', () => {
         const background = source('background.ts');
         const invalidation = sectionBetween(
             background,
@@ -272,13 +272,15 @@ describe('ClickUp authentication recovery', () => {
         expect(invalidation).toContain('currentToken !== rejectedToken');
         expect(invalidation).toContain("Logger.warn('STALE_AUTH_FAILURE_IGNORED')");
         expect(invalidation).toMatch(/currentToken !== rejectedToken[\s\S]{0,160}return false;/);
-        expect(background).toContain('authenticationStateQueue.then(operation, operation)');
-        expect(background).toMatch(/case 'authenticate':[\s\S]*runAuthenticationStateMutation/);
-        expect(background).toMatch(/case 'logout':[\s\S]*runAuthenticationStateMutation/);
-        const authenticate = sectionBetween(background, "case 'authenticate':", "case 'saveOAuthConfig':");
-        expect(authenticate.indexOf('await runAuthenticationStateMutation'))
-            .toBeLessThan(authenticate.indexOf('const user = await getFreshAuthenticatedUser()'));
-        const authMutation = authenticate.match(/await runAuthenticationStateMutation\(async \(\) => \{([\s\S]*?)\n                \}\);/)[1];
+        expect(background).toContain('authenticationCoordinator.runStateMutation(operation)');
+        expect(background).toMatch(/case 'authenticatePersonalToken':[\s\S]*runAuthenticationOperation/);
+        expect(background).toMatch(/case 'logout':[\s\S]*runAuthenticationOperation/);
+        const authenticate = sectionBetween(background, "case 'authenticatePersonalToken':", "case 'logout':");
+        expect(authenticate.indexOf('return runAuthenticationOperation'))
+            .toBeLessThan(authenticate.indexOf('candidateApi.getUser()'));
+        expect(authenticate.indexOf('candidateApi.getUser()'))
+            .toBeLessThan(authenticate.indexOf('runAuthenticationStateMutation'));
+        const authMutation = authenticate.match(/await runAuthenticationStateMutation\(async \(\) => \{([\s\S]*?)\n                    \}\);/)[1];
         expect(authMutation).not.toContain('getFreshAuthenticatedUser');
         expect(authMutation).toContain('STORAGE_KEYS.CACHED_TEAMS');
         expect(authMutation).toContain('STORAGE_KEYS.CACHED_HIERARCHY');
@@ -339,23 +341,21 @@ describe('ClickUp authentication recovery', () => {
         expect(invalidate).not.toHaveBeenCalled();
     });
 
-    test('runtime contains no undocumented refresh grant and popup exposes reconnection', () => {
+    test('runtime contains no ClickUp OAuth flow and popup exposes token reconnection', () => {
         const runtime = [
             source('background.ts'),
             source('src/services/api.service.ts'),
-            source('src/services/auth.service.ts'),
         ].join('\n');
         const popup = source('popup/popup.ts');
         const background = source('background.ts');
 
         expect(runtime).not.toMatch(/refresh_token|grant_type:\s*['"]refresh_token|AUTH_RETRY|setTokenRefreshCallback/);
+        expect(runtime).not.toMatch(/api\/v2\/oauth\/token|client_secret|saveOAuthConfig/);
         expect(runtime).toContain("ClickUpAuthorizationMode = 'raw' | 'bearer'");
         expect(background).toMatch(/async function evaluateFocusedTimer[\s\S]{0,300}REAUTH_REQUIRED/);
-        expect(popup).toContain('Reconectar con ClickUp');
-        expect(popup).toContain('La sesión de ClickUp dejó de ser válida. Reconectá para reanudar el seguimiento automático.');
+        expect(source('src/i18n.ts')).toContain('El token dejó de ser válido. Pegá un token personal nuevo para reconectar.');
         expect(popup).toContain('response.requiresReauth === true');
         expect(source('popup/popup.html')).not.toContain('testTokenRefresh');
-        expect(source('src/services/auth.service.ts')).toContain('authenticated: hasToken && !requiresReauth');
     });
 
     test('logout cannot be blocked by a failed remote Meet stop', () => {

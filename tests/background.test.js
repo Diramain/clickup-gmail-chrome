@@ -11,6 +11,12 @@ function source(relativePath) {
     return fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
 }
 
+test('message failures identify only the validated action in production logs', () => {
+    const background = source('background.ts');
+    expect(background).toContain('MESSAGE_HANDLER_ERROR_${message.action}');
+    expect(background).toContain('error: Logger.sanitizeError(error)');
+});
+
 // ============================================================================
 // Helper functions to test (extracted logic)
 // ============================================================================

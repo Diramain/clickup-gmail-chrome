@@ -34,7 +34,6 @@ export const STORAGE_KEYS = {
     // Auth
     TOKEN: 'clickupToken',
     REFRESH_TOKEN: 'clickupRefreshToken',
-    OAUTH_CONFIG: 'oauthConfig',
     ENCRYPTION_KEY: 'encryptionKey',
 
     // Cache
@@ -52,9 +51,6 @@ export const STORAGE_KEYS = {
     EMAIL_TASKS_V2: EMAIL_TASK_MAPPINGS_V2_KEY,
     EMAIL_TASKS_SYNC: 'emailTasksSync',
 
-    // Draft (temporary)
-    DRAFT_CLIENT_ID: 'draftClientId',
-    DRAFT_CLIENT_SECRET: 'draftClientSecret',
 } as const;
 
 // ============================================================================
@@ -75,12 +71,6 @@ export const DATA_LIMITS = {
 // ============================================================================
 // Types
 // ============================================================================
-
-interface OAuthConfig {
-    clientId: string;
-    clientSecret: string;
-    redirectUrl: string;
-}
 
 interface HierarchyCache {
     teamId: string;
@@ -180,18 +170,6 @@ class StorageService {
      */
     async setMultiple(data: Record<string, any>): Promise<void> {
         await this.storage.set(data);
-    }
-
-    // ------------------------------------------------------------------------
-    // Auth Methods
-    // ------------------------------------------------------------------------
-
-    async getOAuthConfig(): Promise<OAuthConfig | null> {
-        return await this.get<OAuthConfig>(STORAGE_KEYS.OAUTH_CONFIG);
-    }
-
-    async setOAuthConfig(config: OAuthConfig): Promise<void> {
-        await this.set(STORAGE_KEYS.OAUTH_CONFIG, config);
     }
 
     // ------------------------------------------------------------------------

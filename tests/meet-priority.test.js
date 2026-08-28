@@ -204,7 +204,7 @@ describe('Meet mappings and single-session authority', () => {
             title: 'Private Daily',
         });
         expect(session).not.toHaveProperty('url');
-        expect(session).not.toHaveProperty('title');
+        expect(session.title).toBe('Private Daily');
         expect(priority.sanitizeMeetPrioritySession({ ...session, roomKey: 'bad' })).toBeNull();
         expect(priority.sanitizeMeetPrioritySession({ ...session, status: 'tracking', taskId: undefined })).toBeNull();
     });
@@ -323,7 +323,8 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         expect(security.validateExtensionMessage({ action: 'assignMeetPromptTask', data: { roomKey: ROOM_KEY, taskId: 'task-1', remember: false, teamId: 'forged' } }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'getEmailTaskMappings' }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'getDefaultListConfig' }, meetSender, runtimeId).ok).toBe(false);
-        expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY, title: 'Daily' } }, meetSender, runtimeId).ok).toBe(false);
+        expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY, title: 'Daily' } }, meetSender, runtimeId).ok).toBe(true);
+        expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY, title: `X${'a'.repeat(160)}` } }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomKey: ROOM_KEY }, url: 'https://meet.google.com/private' }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'meetSessionEvent', data: { event: 'joined', roomCode: 'abc-defg-hij' } }, meetSender, runtimeId).ok).toBe(false);
         expect(security.validateExtensionMessage({ action: 'assignMeetTask', data: { taskId: 'task-1', teamId: 'team-1', remember: false } }, meetSender, runtimeId).ok).toBe(false);
@@ -333,6 +334,10 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         const valid = (message) => security.validateExtensionMessage(message, popupSender, runtimeId).ok;
         expect(valid({ action: 'setMeetPriorityEnabled', data: { enabled: true } })).toBe(true);
         expect(valid({ action: 'assignMeetTask', data: { taskId: 'task-1', teamId: 'team-1', remember: true } })).toBe(true);
+        expect(valid({ action: 'createMeetTask', data: { title: 'Daily de producto', remember: true } })).toBe(true);
+        expect(valid({ action: 'createMeetTask', data: { title: 'Daily de producto', parentTaskId: 'parent-1', remember: false } })).toBe(true);
+        expect(valid({ action: 'createMeetTask', data: { title: ' Daily ', remember: false } })).toBe(false);
+        expect(security.validateExtensionMessage({ action: 'createMeetTask', data: { title: 'Daily', remember: false } }, meetSender, runtimeId).ok).toBe(false);
         expect(valid({ action: 'deleteMeetMapping', data: { roomKey: ROOM_KEY } })).toBe(true);
         expect(valid({ action: 'setMeetMappingEnabled', data: { roomKey: ROOM_KEY, enabled: false } })).toBe(true);
         expect(valid({ action: 'ignoreMeetSession' })).toBe(true);
@@ -342,7 +347,7 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
 
     test('manifest adds only exact Meet access and explicitly blocks incognito/capture permissions', () => {
         const manifest = JSON.parse(source('manifest.json'));
-        expect(manifest.version).toBe('2.1.0');
+        expect(manifest.version).toBe('2.2.0');
         expect(manifest.minimum_chrome_version).toBe('102');
         expect(manifest.incognito).toBe('not_allowed');
         expect(manifest.host_permissions).toContain('https://meet.google.com/*');
@@ -366,7 +371,8 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
         expect(tracker).not.toMatch(/innerHTML|caption|participant|MediaStream|getUserMedia|audio|video|chat/i);
         expect(promptSource).not.toMatch(/innerHTML|caption|participant|MediaStream|getUserMedia|audio|video|chat|chrome\.storage/i);
         expect(promptSource).toMatch(/sanitizeMeetSearchSeed\(this\.documentRoot\.title\)/);
-        expect(tracker).toMatch(/data: \{ event, roomKey \}/);
+        expect(tracker).toMatch(/data: \{ event, roomKey, \.\.\.\(title \? \{ title \} : \{\}\) \}/);
+        expect(tracker).toMatch(/sanitizeMeetTitle\(document\.title\)/);
         expect(popup).not.toMatch(/`[^`]*\$\{mapping\.roomKey\}/);
         expect(exportSource).not.toMatch(/meetTaskMappings|roomKey/);
     });
@@ -385,6 +391,8 @@ describe('Meet privacy, message, manifest, and release guardrails', () => {
     test('background serializes Meet writes and verifies the live session after stop before start', () => {
         const background = source('background.ts');
         expect(background).toMatch(/case 'meetSessionEvent':\s*return await runTimerWrite/);
+        expect(background).toMatch(/case 'createMeetTask':[\s\S]{0,120}createTaskForMeet/);
+        expect(background).toMatch(/createTaskForMeet[\s\S]*assignees: \[currentUserId\][\s\S]*start_date: dueDate[\s\S]*due_date: dueDate[\s\S]*parent: parentTaskId[\s\S]*custom_item_id: selection\.customItemId/);
         expect(background).toMatch(/if \(runningTaskId && runningTaskId !== taskId\) await clickupAPI!\.stopTimer\(teamId\);\s*if \(!await isSameMeetSessionAlive\(expectedSession\)\)/);
         expect(background).toMatch(/await isMeetSessionTabAlive\(meetPrioritySession\)\s*&& await hasConfirmedMeetSignal\(expected\)/);
         expect(background).toMatch(/requestMeetAuthorityRefresh\(activeInfo\.tabId\)/);

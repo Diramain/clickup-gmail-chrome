@@ -166,6 +166,24 @@ body.full-app-surface {
     border-color: rgba(73, 169, 215, 0.24);
 }
 
+.language-setting {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 12px;
+    font-weight: 700;
+}
+
+.language-setting select {
+    min-width: 96px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, .18);
+    border-radius: 8px;
+    color: #fff;
+    background: #1f2946;
+}
+
 .connection-heading,
 .connection-row {
     display: flex;

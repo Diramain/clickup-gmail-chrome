@@ -4,15 +4,20 @@ export interface MeetTaskSuggestion {
 }
 
 const MAX_MEET_SEARCH_LENGTH = 100;
+const MAX_MEET_TITLE_LENGTH = 160;
 
-export function sanitizeMeetSearchSeed(value: unknown): string {
+export function sanitizeMeetTitle(value: unknown): string {
     if (typeof value !== 'string') return '';
     return value
         .replace(/[\u0000-\u001f\u007f]/g, ' ')
         .replace(/\s+/g, ' ')
         .replace(/\s*[-–—|]\s*Google Meet\s*$/i, '')
         .trim()
-        .slice(0, MAX_MEET_SEARCH_LENGTH);
+        .slice(0, MAX_MEET_TITLE_LENGTH);
+}
+
+export function sanitizeMeetSearchSeed(value: unknown): string {
+    return sanitizeMeetTitle(value).slice(0, MAX_MEET_SEARCH_LENGTH);
 }
 
 export function extractMeetTaskIdCandidates(value: unknown): string[] {

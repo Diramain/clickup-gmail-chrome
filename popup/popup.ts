@@ -7,7 +7,6 @@ import { escapeHTML, safeAvatarUrl, safeClickUpUrl } from '../src/utils/sanitize
 import { LAST_SAFE_BACKUP_KEY, canClearLocalData, createSafeExportPayload } from '../src/data-management';
 import { flattenHierarchySpaces, getTeamHierarchyCache } from '../src/hierarchy-utils';
 import { filterDestinationLists } from '../src/destination-config';
-import { evaluateOAuthConfigState, resolveInitialOAuthDraft, shouldApplyInitialOAuthDraft, type OAuthConfigState } from '../src/oauth-config-state';
 import { isSetupStandalone, openOrFocusSetupWindow, shouldLaunchDurableSetup } from '../src/setup-window';
 import { openOrFocusAppTab } from '../src/app-tab';
 import { formatSyncProgress, isSyncProgressMessage, type SyncProgressMessage } from '../src/sync-progress';
@@ -17,6 +16,7 @@ import { initMeetingLinkSectionFailClosed, type MeetingLinkUiState } from '../sr
 import { initGoogleOAuthConnectionPreview } from '../src/google/google-oauth-popup-ui';
 import { normalizePersonalToken, type ClickUpAuthMethod } from '../src/clickup-auth';
 import { triggerUserDownload } from '../src/user-download';
+import { bindLanguageSelectors, initLocalization, t } from '../src/i18n';
 import {
     getTimeEntryDurationMs,
     getTimeEntryTaskUrl,
@@ -202,6 +202,8 @@ async function init(): Promise<void> {
     const loading = document.getElementById('loading') as HTMLElement;
     const standaloneSetup = isSetupStandalone() || IS_FULL_APP_SURFACE;
 
+    await initLocalization();
+    bindLanguageSelectors();
     await chrome.storage.local.remove('draftClientSecret');
     initAppTabLauncher();
     initGoogleOAuthConnectionPreview([
@@ -236,11 +238,9 @@ async function init(): Promise<void> {
             showLoggedIn(status);
         } else {
             showLoginRequired(
-                status.configured,
                 standaloneSetup,
                 status.requiresReauth === true,
                 status.authUnavailable === true,
-                status.authMethod,
             );
         }
     } catch (error: any) {
@@ -358,42 +358,15 @@ async function initSafeDiagnostics(): Promise<void> {
 // ============================================================================
 
 function showLoginRequired(
-    configured: boolean,
     standaloneSetup = isSetupStandalone(),
     requiresReauth = false,
     authUnavailable = false,
-    authMethod?: ClickUpAuthMethod,
 ): void {
     const loginRequired = document.getElementById('login-required') as HTMLElement;
     const personalTokenInput = document.getElementById('personalToken') as HTMLInputElement;
     const connectPersonalTokenBtn = document.getElementById('connectPersonalToken') as HTMLButtonElement;
     const personalTokenStatus = document.getElementById('personalTokenStatus') as HTMLElement;
-    const signInBtn = document.getElementById('signIn') as HTMLButtonElement;
-    const saveConfigBtn = document.getElementById('saveConfig') as HTMLButtonElement;
-    const clientIdInput = document.getElementById('clientId') as HTMLInputElement;
-    const clientSecretInput = document.getElementById('clientSecret') as HTMLInputElement;
-    const redirectUrlInput = document.getElementById('redirectUrl') as HTMLInputElement;
-    const copyUrlBtn = document.getElementById('copyUrl') as HTMLButtonElement;
     const openWindowBtn = document.getElementById('openWindow') as HTMLButtonElement;
-    const discardChangesBtn = document.getElementById('discardOAuthChanges') as HTMLButtonElement;
-    const configStatus = document.getElementById('oauthConfigStatus') as HTMLElement | null;
-    const advancedOAuth = document.querySelector('.auth-advanced-card') as HTMLDetailsElement | null;
-
-    let hasStoredConfig = configured;
-    let isDirty = false;
-
-    const currentState = (): OAuthConfigState => evaluateOAuthConfigState({
-        hasStoredConfig,
-        isDirty,
-        clientId: clientIdInput.value,
-        clientSecret: clientSecretInput.value,
-    });
-
-    const setConfigStatus = (message: string, color = ''): void => {
-        if (!configStatus) return;
-        configStatus.textContent = message;
-        configStatus.style.color = color;
-    };
 
     const setPersonalTokenStatus = (message: string, color = ''): void => {
         personalTokenStatus.textContent = message;
@@ -404,147 +377,16 @@ function showLoginRequired(
         connectPersonalTokenBtn.disabled = authUnavailable || normalizePersonalToken(personalTokenInput.value) === null;
     };
 
-    const updateOAuthButtons = (): OAuthConfigState => {
-        const state = currentState();
-        signInBtn.disabled = authUnavailable || !state.canSignIn;
-        saveConfigBtn.disabled = !state.canSave;
-        return state;
-    };
-
-    const markDirty = (): void => {
-        isDirty = true;
-        setConfigStatus('Hay cambios OAuth pendientes. Completá ambos campos para guardarlos de forma segura.', '#ff9800');
-        updateOAuthButtons();
-    };
-
-    const saveCurrentOAuthConfig = async (): Promise<void> => {
-        const state = currentState();
-        if (!state.canSave) {
-            throw new Error('OAUTH_CONFIG_INCOMPLETE');
-        }
-
-        const originalSaveLabel = saveConfigBtn.textContent || 'Guardar configuración';
-        saveConfigBtn.disabled = true;
-        saveConfigBtn.textContent = 'Guardando…';
-
-        try {
-            const result = await sendMessage<{ success?: boolean }>({
-                action: 'saveOAuthConfig',
-                data: {
-                    clientId: clientIdInput.value.trim(),
-                    clientSecret: clientSecretInput.value.trim(),
-                }
-            });
-
-            if (result?.success !== true) {
-                throw new Error('OAUTH_CONFIG_SAVE_FAILED');
-            }
-
-            hasStoredConfig = true;
-            isDirty = false;
-            clientSecretInput.value = '';
-            await chrome.storage.local.remove(['draftClientId', 'draftClientSecret']);
-            saveConfigBtn.textContent = 'Configuración guardada ✓';
-            saveConfigBtn.style.background = 'rgba(0, 200, 83, 0.2)';
-            saveConfigBtn.style.borderColor = '#00c853';
-            setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
-            updateOAuthButtons();
-        } catch (error) {
-            saveConfigBtn.textContent = originalSaveLabel;
-            setConfigStatus('No se pudo guardar la configuración. Revisá ambos campos e intentá de nuevo.', '#ff5252');
-            updateOAuthButtons();
-            throw error;
-        }
-    };
-
     loginRequired.classList.remove('hidden');
     if (standaloneSetup) {
         openWindowBtn.classList.add('hidden');
     }
 
-    if (configured && requiresReauth) {
-        signInBtn.textContent = 'Reconectar con ClickUp';
-        setConfigStatus('La sesión de ClickUp dejó de ser válida. Reconectá para reanudar el seguimiento automático.', '#ff9800');
+    if (requiresReauth) {
+        setPersonalTokenStatus(t('auth.reconnect'), '#ff9800');
     } else if (authUnavailable) {
-        setConfigStatus('No se pudo validar la sesión ahora. No cambies la configuración; reintentá cuando ClickUp esté disponible.', '#ff9800');
-    } else if (configured) {
-        setConfigStatus('Configuración guardada de forma segura. El secreto se borró del campo intencionalmente.', '#00c853');
+        setPersonalTokenStatus(t('auth.connectionUnavailable'), '#ff9800');
     }
-
-    if (authMethod === 'personal-token' && requiresReauth) {
-        setPersonalTokenStatus('El token dejó de ser válido. Pegá un token personal nuevo para reconectar.', '#ff9800');
-    } else if (authUnavailable) {
-        setPersonalTokenStatus('ClickUp no está disponible para validar el token. Reintentá más tarde.', '#ff9800');
-    }
-    if (advancedOAuth && authMethod === 'oauth' && (configured || requiresReauth)) advancedOAuth.open = true;
-
-    // Show the redirect URL provided by the browser identity API.
-    const redirectUrl = chrome.identity.getRedirectURL();
-    redirectUrlInput.value = redirectUrl;
-
-    // Restore previously entered values (auto-save feature)
-    void chrome.storage.local.get(['draftClientId']).then((draftData) => {
-        if (!shouldApplyInitialOAuthDraft({
-            isDirty,
-            clientId: clientIdInput.value,
-            clientSecret: clientSecretInput.value,
-        })) {
-            isDirty = true;
-            updateOAuthButtons();
-            return;
-        }
-
-        const draftResolution = resolveInitialOAuthDraft({
-            hasStoredConfig,
-            draftClientId: draftData.draftClientId,
-        });
-
-        if (draftResolution.shouldClearDraftClientId) {
-            void chrome.storage.local.remove('draftClientId');
-        }
-
-        if (draftResolution.clientId) {
-            clientIdInput.value = draftResolution.clientId;
-        }
-
-        isDirty = draftResolution.isDirty;
-        updateOAuthButtons();
-    }).catch(() => undefined);
-
-    // Auto-save Client ID as user types
-    clientIdInput.addEventListener('input', () => {
-        chrome.storage.local.set({ draftClientId: clientIdInput.value });
-        markDirty();
-    });
-
-    // Auto-save Client Secret as user types
-    clientSecretInput.addEventListener('input', async () => {
-        try {
-            await chrome.storage.local.remove('draftClientSecret');
-            markDirty();
-        } catch {
-            signInBtn.disabled = true;
-            saveConfigBtn.disabled = true;
-            setConfigStatus('No se pudo borrar el secreto temporal anterior. Recargá la extensión antes de continuar.', '#ff5252');
-        }
-    });
-
-    // Copy URL to clipboard
-    copyUrlBtn.addEventListener('click', async () => {
-        try {
-            await navigator.clipboard.writeText(redirectUrl);
-            copyUrlBtn.textContent = '✅';
-            copyUrlBtn.style.background = 'rgba(0, 200, 83, 0.3)';
-            setTimeout(() => {
-                copyUrlBtn.textContent = '📋';
-                copyUrlBtn.style.background = '';
-            }, 2000);
-        } catch (err) {
-            redirectUrlInput.select();
-            document.execCommand('copy');
-            copyUrlBtn.textContent = '✅';
-        }
-    });
 
     // Open in separate window
     openWindowBtn.addEventListener('click', async () => {
@@ -554,15 +396,14 @@ function showLoginRequired(
                 window.close();
                 return;
             }
-            setConfigStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
+            setPersonalTokenStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
         } catch (_error) {
-            setConfigStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
+            setPersonalTokenStatus('No se pudo abrir la ventana de configuración. Continuá el setup acá.', '#ff9800');
         } finally {
             openWindowBtn.disabled = false;
         }
     });
 
-    updateOAuthButtons();
     updatePersonalTokenButton();
 
     personalTokenInput.addEventListener('input', () => {
@@ -573,15 +414,15 @@ function showLoginRequired(
     connectPersonalTokenBtn.addEventListener('click', async () => {
         const token = normalizePersonalToken(personalTokenInput.value);
         if (!token) {
-            setPersonalTokenStatus('Pegá un token personal válido que empiece con pk_.', '#ff9800');
+            setPersonalTokenStatus(t('auth.invalidToken'), '#ff9800');
             updatePersonalTokenButton();
             return;
         }
 
-        const originalLabel = connectPersonalTokenBtn.textContent || 'Conectar con token personal';
+        const originalLabel = connectPersonalTokenBtn.textContent || t('auth.connect');
         connectPersonalTokenBtn.disabled = true;
-        connectPersonalTokenBtn.textContent = 'Validando…';
-        setPersonalTokenStatus('Validando el token con ClickUp…');
+        connectPersonalTokenBtn.textContent = t('auth.validating');
+        setPersonalTokenStatus(t('auth.validatingDetail'));
         try {
             const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({
                 action: 'authenticatePersonalToken',
@@ -609,62 +450,6 @@ function showLoginRequired(
             updatePersonalTokenButton();
         }
     });
-
-    discardChangesBtn?.addEventListener('click', async () => {
-        clientIdInput.value = '';
-        clientSecretInput.value = '';
-        isDirty = false;
-        await chrome.storage.local.remove(['draftClientId', 'draftClientSecret']);
-        setConfigStatus(hasStoredConfig
-            ? 'Cambios descartados. Podés usar la configuración guardada.'
-            : 'Cambios descartados. Ingresá ambos campos para guardar una configuración nueva.', '#00c853');
-        updateOAuthButtons();
-    });
-
-    // Save config handler
-    saveConfigBtn.addEventListener('click', async () => {
-        try {
-            await saveCurrentOAuthConfig();
-        } catch (error) {
-            setConfigStatus('Ingresá el ID de cliente (Client ID) y el Secreto de cliente (Client Secret).', '#ff9800');
-        }
-    });
-
-    // Sign in handler
-    signInBtn.addEventListener('click', async () => {
-        const state = currentState();
-        if (state.isBlockedByIncompleteChanges) {
-            setConfigStatus('Completá ambos campos OAuth o descartá los cambios antes de iniciar sesión.', '#ff9800');
-            updateOAuthButtons();
-            return;
-        }
-
-        const originalSignInLabel = signInBtn.textContent || 'Iniciar sesión con ClickUp';
-        signInBtn.disabled = true;
-        signInBtn.textContent = 'Iniciando sesión…';
-
-        try {
-            if (state.shouldSaveBeforeSignIn) {
-                await saveCurrentOAuthConfig();
-                signInBtn.disabled = true;
-                signInBtn.textContent = 'Iniciando sesión…';
-            }
-
-            const result = await sendMessage<{ success: boolean; user?: ClickUpUser; authMethod?: ClickUpAuthMethod }>({ action: 'authenticate' });
-
-            if (result.success) {
-                loginRequired.classList.add('hidden');
-                showLoggedIn({ authenticated: true, configured: true, authMethod: result.authMethod || 'oauth', user: result.user });
-                document.dispatchEvent(new CustomEvent('clickup-auth-changed'));
-            } else {
-                throw new Error('AUTHENTICATION_FAILED');
-            }
-        } catch (error: any) {
-            signInBtn.textContent = originalSignInLabel;
-            updateOAuthButtons();
-            setConfigStatus('No se pudo iniciar sesión. Intentá de nuevo.', '#ff5252');
-        }
-    });
 }
 
 // ============================================================================
@@ -680,11 +465,7 @@ async function showLoggedIn(status: ExtensionStatus): Promise<void> {
 
     loggedIn.classList.remove('hidden');
     if (connectionMethod) {
-        connectionMethod.textContent = status.authMethod === 'personal-token'
-            ? 'Conectado con token personal cifrado localmente'
-            : status.authMethod === 'oauth'
-                ? 'Conectado mediante OAuth administrado'
-                : 'Conectado con una credencial local existente';
+        connectionMethod.textContent = 'Conectado con token personal cifrado localmente';
     }
 
     // Set user info

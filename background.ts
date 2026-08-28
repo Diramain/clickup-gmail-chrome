@@ -9,7 +9,7 @@ import {
     ClickUpCustomTaskType
 } from './src/types/clickup';
 import { ClickUpAPIWrapper, ClickUpRateGovernor, isClickUpCustomFieldUsageLimitError, isClickUpWorkspaceAuthorizationError, isReauthenticationRequired, type RateGovernorState } from './src/services/api.service';
-import { getSecureOAuthConfig, saveSecureOAuthConfig, hasSecureOAuthConfig, hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
+import { hasSecureToken, getSecureToken, saveSecureToken, removeSecureToken } from './src/services/crypto.service';
 import { Logger } from './src/logger';
 import { validateExtensionMessage } from './src/message-security';
 import { resolveAuthorizedDestination } from './src/destination-config';
@@ -105,7 +105,11 @@ import {
 } from './src/google/google-identity.service';
 import { decodeAndValidateGmailAttachment, type GmailAttachmentUploadPayload } from './src/gmail-attachment-security';
 import { GMAIL_INTEGRATION_PREFERENCE_KEY, normalizeGmailIntegrationPreference } from './src/gmail-preferences';
-import { normalizePersonalToken, resolveClickUpAuthMethod, type ClickUpAuthMethod } from './src/clickup-auth';
+import { normalizePersonalToken, planClickUpTokenOnlyMigration, resolveClickUpAuthMethod, type ClickUpAuthMethod } from './src/clickup-auth';
+import { applyClickUpTokenOnlyMigration } from './src/clickup-auth-migration';
+import { AuthenticationOperationCoordinator } from './src/auth-operation-coordinator';
+import { sanitizeMeetTitle } from './src/meet/meet-task-prompt';
+import { normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from './src/i18n';
 
 interface CreateTaskFullMessage {
     listId: string;
@@ -123,7 +127,7 @@ interface AttachEmailMessage {
 const STORAGE_KEYS = {
     AUTH_TOKEN: 'clickupToken',
     REFRESH_TOKEN: 'clickupRefreshToken', // Legacy cleanup key; ClickUp does not document refresh grants
-    OAUTH_CONFIG: 'oauthConfig', // New key for storing OAuth credentials
+    OAUTH_CONFIG: 'oauthConfig', // Legacy cleanup key
     PREFERRED_TEAM: 'preferredTeamId', // Replaces defaultList
     EMAIL_TASK_MAPPINGS: 'emailTaskMappings',
     EMAIL_TASK_MAPPINGS_V2: EMAIL_TASK_MAPPINGS_V2_KEY,
@@ -290,7 +294,8 @@ async function loadNextTaskSearchPage(teamId: string, cache: TaskSearchCache): P
 
 let clickupAPI: ClickUpAPIWrapper | null = null;
 let apiInitializationPromise: Promise<void> | null = null;
-let authenticationStateQueue: Promise<void> = Promise.resolve();
+let clickUpAuthMigrationPromise: Promise<void> | null = null;
+const authenticationCoordinator = new AuthenticationOperationCoordinator();
 let currentUserValidatedAt = 0;
 const hierarchyPreloadSingleFlight = new SingleFlight<string, number>();
 let mappingWriteQueue: Promise<void> = Promise.resolve();
@@ -301,6 +306,7 @@ let clickUpTaskTabIndexQueue: Promise<void> = Promise.resolve();
 let focusedTimerDebounce: ReturnType<typeof setTimeout> | null = null;
 let focusedTimerRevision = 0;
 let meetPrioritySession: MeetPrioritySession | null = null;
+const meetTaskCreateInFlight = new Set<string>();
 let logoutInProgress = false;
 const customFieldUpdateQueues = new Map<string, Promise<void>>();
 const HIERARCHY_FOLDER_CONCURRENCY = 3;
@@ -455,6 +461,7 @@ async function initializeAPI(): Promise<void> {
 }
 
 async function initializeAPIOnce(): Promise<void> {
+    await ensureClickUpTokenOnlyMigration();
     recordDiagnostic('auth_state', { stage: 'initialize', outcome: 'started' });
     const authState = await chrome.storage.local.get(STORAGE_KEYS.REAUTH_REQUIRED);
     if (authState[STORAGE_KEYS.REAUTH_REQUIRED] === true) {
@@ -504,6 +511,95 @@ async function initializeAPIOnce(): Promise<void> {
         .catch((error) => Logger.error('CLICKUP_TASK_TAB_INDEX_HYDRATION_FAILED', error));
 }
 
+async function ensureClickUpTokenOnlyMigration(): Promise<void> {
+    if (!clickUpAuthMigrationPromise) {
+        const attempt = runAuthenticationStateMutation(migrateClickUpTokenOnlyState);
+        clickUpAuthMigrationPromise = attempt.catch((error) => {
+            clickUpAuthMigrationPromise = null;
+            throw error;
+        });
+    }
+    return clickUpAuthMigrationPromise;
+}
+
+async function migrateClickUpTokenOnlyState(): Promise<void> {
+    const [token, state] = await Promise.all([
+        getSecureToken(STORAGE_KEYS.AUTH_TOKEN),
+        chrome.storage.local.get([
+            STORAGE_KEYS.AUTH_METHOD,
+            STORAGE_KEYS.AUTHORIZATION_MODE,
+            STORAGE_KEYS.AUTH_TOKEN,
+            STORAGE_KEYS.OAUTH_CONFIG,
+            STORAGE_KEYS.REAUTH_REQUIRED,
+        ]),
+    ]);
+    const migration = planClickUpTokenOnlyMigration(
+        token,
+        state[STORAGE_KEYS.AUTH_METHOD],
+        state[STORAGE_KEYS.OAUTH_CONFIG] !== undefined,
+        state[STORAGE_KEYS.REAUTH_REQUIRED] === true,
+        state[STORAGE_KEYS.AUTH_TOKEN] !== undefined,
+        state[STORAGE_KEYS.AUTHORIZATION_MODE],
+    );
+
+    await applyClickUpTokenOnlyMigration(migration, {
+        markReauthRequired: async () => {
+            await chrome.storage.local.set({ [STORAGE_KEYS.REAUTH_REQUIRED]: true });
+        },
+        removeLegacyAuthState: async () => {
+            await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+            await chrome.storage.local.remove([
+                STORAGE_KEYS.OAUTH_CONFIG,
+                STORAGE_KEYS.DRAFT_CLIENT_ID,
+                STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+            ]);
+        },
+        preservePersonalToken: async (personalToken) => {
+            if (personalToken !== token) {
+                await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, personalToken);
+            }
+            await chrome.storage.local.set({
+                [STORAGE_KEYS.AUTH_METHOD]: 'personal-token' satisfies ClickUpAuthMethod,
+                [STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw',
+            });
+            await chrome.storage.local.remove(STORAGE_KEYS.REAUTH_REQUIRED);
+        },
+        retireCredential: async () => {
+            await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
+            await chrome.storage.local.remove([
+                STORAGE_KEYS.AUTH_METHOD,
+                STORAGE_KEYS.AUTHORIZATION_MODE,
+            ]);
+        },
+        clearAccountBoundary: async () => {
+            clickupAPI = null;
+            currentUserValidatedAt = 0;
+            taskSearchCaches.clear();
+            dashboardSnapshotCache.clear();
+            meetPrioritySession = null;
+            await chrome.storage.local.remove([
+                STORAGE_KEYS.CACHED_USER,
+                STORAGE_KEYS.CACHED_TEAMS,
+                STORAGE_KEYS.CACHED_HIERARCHY,
+                STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+                STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
+                STORAGE_KEYS.RATE_GOVERNOR_STATE,
+            ]);
+            await chrome.storage.session.remove([
+                MEET_SESSION_KEY,
+                MEET_CONFLICT_KEY,
+                FOCUSED_TIMER_SESSION_KEY,
+                AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
+                CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
+            ]);
+            await clearTrackedClickUpTaskTabIndex();
+        },
+    });
+    if (migration.requiresReauth) {
+        Logger.warn('CLICKUP_TOKEN_ONLY_REAUTH_REQUIRED');
+    }
+}
+
 async function invalidateAuthenticationSession(rejectedToken: string): Promise<boolean> {
     return runAuthenticationStateMutation(async () => {
         const currentToken = await getSecureToken(STORAGE_KEYS.AUTH_TOKEN);
@@ -542,9 +638,11 @@ async function invalidateAuthenticationSession(rejectedToken: string): Promise<b
 }
 
 function runAuthenticationStateMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const result = authenticationStateQueue.then(operation, operation);
-    authenticationStateQueue = result.then(() => undefined, () => undefined);
-    return result;
+    return authenticationCoordinator.runStateMutation(operation);
+}
+
+function runAuthenticationOperation<T>(operation: () => Promise<T>): Promise<T> {
+    return authenticationCoordinator.runOperation(operation);
 }
 
 void initializeAPI().catch((error) => Logger.error('API_INITIALIZATION_FAILED', error));
@@ -586,7 +684,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
             }
         })
         .catch(error => {
-            Logger.error('MESSAGE_HANDLER_ERROR', error);
+            Logger.error(`MESSAGE_HANDLER_ERROR_${message.action}`, error);
             sendResponse({
                 success: false,
                 error: Logger.sanitizeError(error),
@@ -603,115 +701,98 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
     switch (action) {
         case 'authenticatePersonalToken': {
-            recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'started' });
-            const token = normalizePersonalToken(data?.token);
-            if (!token) return { success: false, error: 'invalid_token_format' };
+            await ensureClickUpTokenOnlyMigration();
+            return runAuthenticationOperation(async () => {
+                recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'started' });
+                const token = normalizePersonalToken(data?.token);
+                if (!token) return { success: false, error: 'invalid_token_format' };
 
-            try {
-                const candidateApi = new ClickUpAPIWrapper(token, new ClickUpRateGovernor(), 'raw');
-                const user = await candidateApi.getUser();
-                const validatedAt = Date.now();
+                try {
+                    const candidateApi = new ClickUpAPIWrapper(token, new ClickUpRateGovernor(), 'raw');
+                    const user = await candidateApi.getUser();
+                    const validatedAt = Date.now();
 
-                await runAuthenticationStateMutation(async () => {
-                    clickupAPI = null;
-                    await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token);
-                    await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-                    await chrome.storage.local.set({
-                        [STORAGE_KEYS.AUTH_METHOD]: 'personal-token' satisfies ClickUpAuthMethod,
-                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw',
-                        [STORAGE_KEYS.CACHED_USER]: user,
-                        [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: validatedAt,
+                    await runAuthenticationStateMutation(async () => {
+                        clickupAPI = null;
+                        await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, token);
+                        await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
+                        await chrome.storage.local.set({
+                            [STORAGE_KEYS.AUTH_METHOD]: 'personal-token' satisfies ClickUpAuthMethod,
+                            [STORAGE_KEYS.AUTHORIZATION_MODE]: 'raw',
+                            [STORAGE_KEYS.CACHED_USER]: user,
+                            [STORAGE_KEYS.CURRENT_USER_VALIDATED_AT]: validatedAt,
+                        });
+                        await chrome.storage.local.remove([
+                            STORAGE_KEYS.OAUTH_CONFIG,
+                            STORAGE_KEYS.DRAFT_CLIENT_ID,
+                            STORAGE_KEYS.DRAFT_CLIENT_SECRET,
+                            STORAGE_KEYS.CACHED_TEAMS,
+                            STORAGE_KEYS.CACHED_HIERARCHY,
+                            STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
+                            STORAGE_KEYS.RATE_GOVERNOR_STATE,
+                            STORAGE_KEYS.REAUTH_REQUIRED,
+                        ]);
+                        currentUserValidatedAt = validatedAt;
+                        taskSearchCaches.clear();
+                        dashboardSnapshotCache.clear();
                     });
-                    await chrome.storage.local.remove([
-                        STORAGE_KEYS.OAUTH_CONFIG,
-                        STORAGE_KEYS.DRAFT_CLIENT_ID,
-                        STORAGE_KEYS.DRAFT_CLIENT_SECRET,
-                        STORAGE_KEYS.CACHED_TEAMS,
-                        STORAGE_KEYS.CACHED_HIERARCHY,
-                        STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
-                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
-                        STORAGE_KEYS.REAUTH_REQUIRED,
-                    ]);
-                    currentUserValidatedAt = validatedAt;
-                    taskSearchCaches.clear();
-                    dashboardSnapshotCache.clear();
                     await initializeAPI();
-                });
 
-                await getTeams(true);
-                logoutInProgress = false;
-                if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
-                    await refreshMeetPriorityBadge().catch(() => undefined);
-                } else {
-                    await restoreNormalTimerBadge().catch(() => undefined);
+                    await getTeams(true);
+                    logoutInProgress = false;
+                    if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
+                        await refreshMeetPriorityBadge().catch(() => undefined);
+                    } else {
+                        await restoreNormalTimerBadge().catch(() => undefined);
+                    }
+                    scheduleFocusedTimerEvaluation('authenticated');
+                    recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'success' });
+                    return { success: true, user, authMethod: 'personal-token' as ClickUpAuthMethod };
+                } catch (error) {
+                    recordDiagnostic('auth_state', {
+                        stage: 'personal-token',
+                        outcome: 'failure',
+                        failureClass: classifyDiagnosticFailure(error),
+                    });
+                    Logger.error('AUTH_FAILED', error);
+                    return { success: false, error: Logger.sanitizeError(error) };
                 }
-                scheduleFocusedTimerEvaluation('authenticated');
-                recordDiagnostic('auth_state', { stage: 'personal-token', outcome: 'success' });
-                return { success: true, user, authMethod: 'personal-token' as ClickUpAuthMethod };
-            } catch (error) {
-                recordDiagnostic('auth_state', {
-                    stage: 'personal-token',
-                    outcome: 'failure',
-                    failureClass: classifyDiagnosticFailure(error),
-                });
-                Logger.error('AUTH_FAILED', error);
-                return { success: false, error: Logger.sanitizeError(error) };
-            }
+            });
         }
 
-        case 'authenticate':
-            recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'started' });
-            try {
-                // SEC-C1: Use encrypted OAuth config retrieval
-                const config = await getSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
-
-                if (!config || !config.clientId || !config.clientSecret) {
-                    throw new Error('Missing OAuth configuration');
-                }
-
-                const redirectUri = chrome.identity.getRedirectURL();
-                const authUrl = `https://app.clickup.com/api?client_id=${config.clientId}&redirect_uri=${redirectUri}&response_type=code`;
-
-                const responseUrl = await chrome.identity.launchWebAuthFlow({
-                    url: authUrl,
-                    interactive: true
+        case 'logout': {
+            await ensureClickUpTokenOnlyMigration();
+            return runAuthenticationOperation(async () => {
+                logoutInProgress = true;
+                await runTimerWrite(async () => {
+                    try {
+                        await endMeetSession('logout');
+                    } catch {
+                        Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
+                    }
+                    try {
+                        await stopRunningTimerBeforeLogout();
+                    } catch {
+                        Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
+                    }
                 });
-
-                if (!responseUrl) throw new Error('Auth flow failed');
-
-                const urlParams = new URL(responseUrl).searchParams;
-                const code = urlParams.get('code');
-
-                if (!code) throw new Error('No code returned');
-
-                const tokenResponse = await fetch('https://api.clickup.com/api/v2/oauth/token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        client_id: config.clientId,
-                        client_secret: config.clientSecret,
-                        code: code
-                    })
-                });
-
-                if (!tokenResponse.ok) {
-                    throw new Error(`Token exchange failed: ${tokenResponse.status}`);
-                }
-
-                const result = await tokenResponse.json();
-
-                if (typeof result.access_token !== 'string' || result.access_token.length === 0) {
-                    throw new Error('Access token missing from OAuth response');
-                }
                 await runAuthenticationStateMutation(async () => {
-                    clickupAPI = null;
-                    await saveSecureToken(STORAGE_KEYS.AUTH_TOKEN, result.access_token);
+                    meetPrioritySession = null;
+                    await chrome.storage.session.remove([
+                        MEET_SESSION_KEY,
+                        MEET_CONFLICT_KEY,
+                        FOCUSED_TIMER_SESSION_KEY,
+                        AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
+                        CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
+                    ]);
+                    await clearTrackedClickUpTaskTabIndex();
+                    await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
                     await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-                    await chrome.storage.local.set({
-                        [STORAGE_KEYS.AUTH_METHOD]: 'oauth' satisfies ClickUpAuthMethod,
-                        [STORAGE_KEYS.AUTHORIZATION_MODE]: 'bearer',
-                    });
                     await chrome.storage.local.remove([
+                        STORAGE_KEYS.OAUTH_CONFIG,
+                        STORAGE_KEYS.AUTH_METHOD,
+                        STORAGE_KEYS.AUTHORIZATION_MODE,
+                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
                         STORAGE_KEYS.DRAFT_CLIENT_ID,
                         STORAGE_KEYS.DRAFT_CLIENT_SECRET,
                         STORAGE_KEYS.CACHED_USER,
@@ -719,91 +800,17 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
                         STORAGE_KEYS.CACHED_HIERARCHY,
                         STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
                         STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
-                        STORAGE_KEYS.RATE_GOVERNOR_STATE,
                         STORAGE_KEYS.REAUTH_REQUIRED,
                     ]);
+                    clickupAPI = null;
                     currentUserValidatedAt = 0;
+                    taskSearchCaches.clear();
                     dashboardSnapshotCache.clear();
-                    await initializeAPI();
+                    await chrome.action.setBadgeText({ text: '' });
                 });
-                const user = await getFreshAuthenticatedUser();
-                await getTeams(true);
-                logoutInProgress = false;
-                if (meetPrioritySession && meetPrioritySession.status !== 'ignored') {
-                    await refreshMeetPriorityBadge().catch(() => undefined);
-                } else {
-                    await restoreNormalTimerBadge().catch(() => undefined);
-                }
-                scheduleFocusedTimerEvaluation('authenticated');
-                recordDiagnostic('auth_state', { stage: 'oauth', outcome: 'success' });
-
-                return { success: true, user, authMethod: 'oauth' as ClickUpAuthMethod };
-            } catch (e) {
-                recordDiagnostic('auth_state', {
-                    stage: 'oauth',
-                    outcome: 'failure',
-                    failureClass: classifyDiagnosticFailure(e),
-                });
-                Logger.error('AUTH_FAILED', e);
-                return { success: false, error: Logger.sanitizeError(e) };
-            }
-
-        case 'saveOAuthConfig':
-            // SEC-C1: Use encrypted storage for OAuth config
-            await saveSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG, data);
-            await chrome.storage.local.remove([STORAGE_KEYS.DRAFT_CLIENT_ID, STORAGE_KEYS.DRAFT_CLIENT_SECRET]);
-            if (!await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG)) {
-                throw new Error('OAuth configuration was not stored securely');
-            }
-            return { success: true };
-
-        case 'logout':
-            logoutInProgress = true;
-            await runTimerWrite(async () => {
-                try {
-                    await endMeetSession('logout');
-                } catch {
-                    Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
-                }
-                try {
-                    await stopRunningTimerBeforeLogout();
-                } catch {
-                    Logger.warn('LOGOUT_REMOTE_TIMER_UNVERIFIED');
-                }
+                return { success: true };
             });
-            await runAuthenticationStateMutation(async () => {
-                meetPrioritySession = null;
-                await chrome.storage.session.remove([
-                    MEET_SESSION_KEY,
-                    MEET_CONFLICT_KEY,
-                    FOCUSED_TIMER_SESSION_KEY,
-                    AUTO_START_SUPPRESSED_TASK_SESSION_KEY,
-                    CLICKUP_TASK_TAB_INDEX_SESSION_KEY,
-                ]);
-                await clearTrackedClickUpTaskTabIndex();
-                await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN);
-                await removeSecureToken(STORAGE_KEYS.REFRESH_TOKEN);
-                await chrome.storage.local.remove([
-                    STORAGE_KEYS.OAUTH_CONFIG,
-                    STORAGE_KEYS.AUTH_METHOD,
-                    STORAGE_KEYS.AUTHORIZATION_MODE,
-                    STORAGE_KEYS.RATE_GOVERNOR_STATE,
-                    STORAGE_KEYS.DRAFT_CLIENT_ID,
-                    STORAGE_KEYS.DRAFT_CLIENT_SECRET,
-                    STORAGE_KEYS.CACHED_USER,
-                    STORAGE_KEYS.CACHED_TEAMS,
-                    STORAGE_KEYS.CACHED_HIERARCHY,
-                    STORAGE_KEYS.HIERARCHY_PRELOAD_STATUS,
-                    STORAGE_KEYS.CURRENT_USER_VALIDATED_AT,
-                    STORAGE_KEYS.REAUTH_REQUIRED,
-                ]);
-                clickupAPI = null;
-                currentUserValidatedAt = 0;
-                taskSearchCaches.clear();
-                dashboardSnapshotCache.clear();
-            });
-            await chrome.action.setBadgeText({ text: '' });
-            return { success: true };
+        }
 
         case 'checkAuth':
             return await getAuthenticationStatus();
@@ -812,18 +819,29 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
             return await getAuthenticationStatus();
 
         case 'getLocalConnectionStatus': {
-            const oauthConfigured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+            await ensureClickUpTokenOnlyMigration();
             const credentialPresent = await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN);
             const localAuthState = await chrome.storage.local.get([
                 STORAGE_KEYS.REAUTH_REQUIRED,
                 STORAGE_KEYS.AUTH_METHOD,
             ]);
             return {
-                configured: oauthConfigured || credentialPresent,
+                configured: credentialPresent,
                 credentialPresent,
                 requiresReauth: localAuthState[STORAGE_KEYS.REAUTH_REQUIRED] === true,
-                authMethod: resolveClickUpAuthMethod(localAuthState[STORAGE_KEYS.AUTH_METHOD], oauthConfigured),
+                authMethod: resolveClickUpAuthMethod(localAuthState[STORAGE_KEYS.AUTH_METHOD], credentialPresent),
             };
+        }
+
+        case 'getUiLanguage': {
+            const languageStore = await chrome.storage.local.get(UI_LANGUAGE_STORAGE_KEY);
+            return { language: normalizeUiLanguage(languageStore[UI_LANGUAGE_STORAGE_KEY]) };
+        }
+
+        case 'setUiLanguage': {
+            const language = normalizeUiLanguage(data.language);
+            await chrome.storage.local.set({ [UI_LANGUAGE_STORAGE_KEY]: language });
+            return { language };
         }
 
         // DEV-H1: Functions moved to module level (lines 624+)
@@ -1218,6 +1236,9 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         case 'assignMeetTask':
             return await runTimerWrite(() => assignMeetTask(data.taskId, data.teamId, data.remember));
 
+        case 'createMeetTask':
+            return await runTimerWrite(() => createTaskForMeet(data.title, data.parentTaskId, data.remember));
+
         case 'ignoreMeetSession':
             return await runTimerWrite(() => ignoreMeetSession());
 
@@ -1360,7 +1381,8 @@ async function getAuthenticationStatus(): Promise<{
     authUnavailable?: boolean;
     user?: ClickUpUserResponse;
 }> {
-    const configured = await hasSecureOAuthConfig(STORAGE_KEYS.OAUTH_CONFIG);
+    await ensureClickUpTokenOnlyMigration();
+    const configured = await hasSecureToken(STORAGE_KEYS.AUTH_TOKEN);
     const authState = await chrome.storage.local.get([
         STORAGE_KEYS.REAUTH_REQUIRED,
         STORAGE_KEYS.AUTH_METHOD,
@@ -1448,7 +1470,7 @@ async function restoreMeetPrioritySession(): Promise<void> {
 }
 
 async function handleMeetSessionEvent(
-    data: { event: 'candidate' | 'joined' | 'left' | 'heartbeat'; roomKey: string },
+    data: { event: 'candidate' | 'joined' | 'left' | 'heartbeat'; roomKey: string; title?: string },
     sender: chrome.runtime.MessageSender,
 ): Promise<{ success: boolean; status?: string }> {
     await meetPriorityReady;
@@ -1462,6 +1484,8 @@ async function handleMeetSessionEvent(
     if (data.event === 'heartbeat' && meetPrioritySession?.roomKey === data.roomKey
         && meetPrioritySession.tabId === sender.tab.id) {
         meetPrioritySession.lastSeenAt = Date.now();
+        const title = sanitizeMeetTitle(data.title);
+        if (title) meetPrioritySession.title = title;
         await persistMeetPrioritySession();
         return { success: true, status: meetPrioritySession.status };
     }
@@ -1487,6 +1511,8 @@ async function handleMeetSessionEvent(
     }
     if (authority === 'continue') {
         meetPrioritySession!.lastSeenAt = Date.now();
+        const title = sanitizeMeetTitle(data.title);
+        if (title) meetPrioritySession!.title = title;
         await persistMeetPrioritySession();
         return { success: true, status: meetPrioritySession!.status };
     }
@@ -1503,6 +1529,7 @@ async function handleMeetSessionEvent(
         previousTeamId: previous.teamId || undefined,
         joinedAt: Date.now(),
         lastSeenAt: Date.now(),
+        title: sanitizeMeetTitle(data.title) || undefined,
     };
     await chrome.storage.session.remove(MEET_CONFLICT_KEY);
     await persistMeetPrioritySession();
@@ -1552,6 +1579,78 @@ async function assignMeetTask(taskId: string, teamId: string, remember: boolean)
         }
     }
     return { success: true, mappingSaved };
+}
+
+async function createTaskForMeet(
+    requestedTitle: string,
+    parentTaskId: string | undefined,
+    remember: boolean,
+): Promise<{ success: true; task: { id: string; name: string }; mappingSaved: boolean }> {
+    await meetPriorityReady;
+    const session = meetPrioritySession;
+    if (!session || !['awaiting-task', 'tracking', 'paused'].includes(session.status)
+        || !await isMeetSessionTabAlive(session)) {
+        throw new Error('MEET_SESSION_UNAVAILABLE');
+    }
+    const title = sanitizeMeetTitle(requestedTitle);
+    if (!title) throw new Error('MEET_TASK_TITLE_INVALID');
+    if (meetTaskCreateInFlight.has(session.roomKey)) throw new Error('MEET_TASK_CREATE_IN_FLIGHT');
+    meetTaskCreateInFlight.add(session.roomKey);
+
+    try {
+        await ensureAPI();
+        const teamId = await resolveFocusedTimerTeamId();
+        if (!teamId) throw new Error('MEET_TEAM_UNAVAILABLE');
+        const selection = await getCalendarTaskTypeConfig();
+        if (!selection) throw new Error('MEET_TASK_TYPE_UNAVAILABLE');
+        const types = await getClickUpCustomTaskTypes();
+        const type = findCustomTaskType(types, selection.customItemId);
+        if (!type || type.name !== selection.name) throw new Error('MEET_TASK_TYPE_INVALID');
+
+        const destinationStore = await chrome.storage.local.get([
+            STORAGE_KEYS.CACHED_HIERARCHY,
+            'defaultListConfig',
+        ]);
+        const teamCache = getTeamHierarchyCache(destinationStore[STORAGE_KEYS.CACHED_HIERARCHY], teamId);
+        const destination = resolveAuthorizedDestination(
+            sanitizeDefaultListConfig(destinationStore.defaultListConfig),
+            flattenHierarchySpaces(teamCache?.data?.spaces),
+        );
+        if (!destination?.listId) throw new Error('MEET_DESTINATION_UNAVAILABLE');
+        if (parentTaskId && !await validateFocusedTask(parentTaskId, teamId)) {
+            throw new Error('MEET_PARENT_TASK_INVALID');
+        }
+        const liveList = await clickupAPI!.getList(destination.listId);
+        if (String(liveList?.id || '') !== destination.listId || liveList.archived === true) {
+            throw new Error('MEET_DESTINATION_UNAVAILABLE');
+        }
+        const currentUserId = await getValidatedCurrentUserId();
+        if (!currentUserId) throw new Error('MEET_CURRENT_USER_UNAVAILABLE');
+
+        const now = new Date();
+        const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const dueDate = dateToClickUpDueDate(day);
+        if (dueDate === null) throw new Error('MEET_TASK_DATE_INVALID');
+
+        const task = await clickupAPI!.createTask(destination.listId, {
+            name: title,
+            assignees: [currentUserId],
+            start_date: dueDate,
+            start_date_time: false,
+            due_date: dueDate,
+            due_date_time: false,
+            ...(parentTaskId ? { parent: parentTaskId } : {}),
+            custom_item_id: selection.customItemId,
+        });
+        const assignment = await assignMeetTask(task.id, teamId, remember);
+        return {
+            success: true,
+            task: { id: task.id, name: task.name },
+            mappingSaved: assignment.mappingSaved,
+        };
+    } finally {
+        meetTaskCreateInFlight.delete(session.roomKey);
+    }
 }
 
 async function getMeetTaskPromptState(sender: chrome.runtime.MessageSender): Promise<Record<string, unknown>> {
@@ -1715,6 +1814,7 @@ async function getMeetPriorityStatus(): Promise<Record<string, unknown>> {
         joinedAt: meetPrioritySession.joinedAt,
         previousTaskId: meetPrioritySession.previousTaskId,
         previousTeamId: meetPrioritySession.previousTeamId,
+        title: meetPrioritySession.title,
     };
 }
 

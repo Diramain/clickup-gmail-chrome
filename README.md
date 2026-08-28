@@ -2,20 +2,26 @@
 
 > 🤖 **Built with AI**: This extension was developed by [**Leandro Iramain**](https://leandroiramain.com.ar) with the assistance of AI.
 
-A Chrome extension that connects Gmail, Google Calendar, Google Meet, and ClickUp for task creation, linking, agenda planning, and time tracking.
+A Chrome and Firefox extension that connects Gmail, Google Meet, and ClickUp for task creation, linking, and time tracking. Google Calendar is visible as an integration under development but is not available at runtime.
 
 ![Chrome](https://img.shields.io/badge/Chrome-MV3-green.svg)
 ![ClickUp](https://img.shields.io/badge/ClickUp-API%20v2-7B68EE.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-blue.svg)
 ![CI](https://github.com/Diramain/taskbridge-for-clickup/actions/workflows/ci.yml/badge.svg)
-![Version](https://img.shields.io/badge/Version-2.1.0-blue.svg)
+![Version](https://img.shields.io/badge/Version-2.2.0-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ---
 
 ![TaskBridge dashboard](store-assets/taskbridge-screenshot-01-dashboard-1280x800.png)
 
-## What's New in v2.1.0
+## What's New in v2.2.0
+
+- **ClickUp token-only authentication** - Chrome and Firefox use validated personal tokens without requesting an OAuth Client Secret.
+- **Safe legacy migration** - Existing personal tokens remain available; retired OAuth sessions require an explicit personal-token reconnect.
+- **Narrower Firefox permissions** - Firefox no longer requests `identity` while Calendar remains disabled.
+
+### Also included from v2.1.0
 
 - **Native Gmail integration** - InboxSDK remnants are removed from source and release artifacts.
 - **Broader attachments** - Explicitly select supported images, PDF, Office, text, ZIP, and RAR files from individual thread messages.
@@ -47,7 +53,7 @@ Meet Priority remains opt-in and off by default. Calendar access is read-only an
 - **Auto-Stop** - Stop when another ClickUp task is opened or the last tab representing the running task is closed
 - **Toggle Settings** - Enable/disable auto-tracking per preference
 - **Google Meet Priority** - Optionally link a confirmed Meet session to a ClickUp task without capturing meeting content
-- **Google Calendar Agenda** - View seven days as agenda or week and create/link ClickUp tasks from events
+- **Google Calendar Agenda** - Planned read-only integration, currently in development and unavailable
 - **Work Schedule** - Configure workdays and daily/weekly hour goals
 
 ### Performance
@@ -64,16 +70,16 @@ Meet Priority remains opt-in and off by default. Calendar access is read-only an
 
 ## 🔐 Security
 
-This extension reduces common local-extension risks but is not a security boundary against a compromised browser profile, machine, or malicious extension. Personal tokens, OAuth credentials, and OAuth tokens are handled locally; credential storage uses Web Crypto helpers to reduce accidental exposure, not to provide absolute protection if the local profile is compromised.
+This extension reduces common local-extension risks but is not a security boundary against a compromised browser profile, machine, or malicious extension. ClickUp personal-token storage uses Web Crypto helpers to reduce accidental exposure, not to provide absolute protection if the local profile is compromised. Google Calendar OAuth remains browser-managed in Chrome.
 
 | Feature | Description |
 |---------|-------------|
-| **Local token handling** | Personal tokens, OAuth tokens, and OAuth client secrets are encrypted with local Web Crypto helpers before persistence |
+| **Local token handling** | Personal ClickUp tokens are validated before encrypted local persistence; Google Calendar tokens remain browser-managed |
 | **Production-safe logger** | Debug and sensitive payload logging is suppressed in normal builds |
 | **Message validation** | Runtime messages are checked by sender origin and expected shape |
 | **Sanitized Gmail HTML** | Email HTML is sanitized before being attached or rendered through extension flows |
 | **Narrower permissions** | Runtime hosts are limited to Gmail, ClickUp API/app, Meet, and Google APIs required by the read-only Calendar scope |
-| **Meet data minimization** | Only a namespaced SHA-256 room hash and ClickUp mapping metadata are stored; multimedia and meeting content are not captured |
+| **Meet data minimization** | Persistent mappings contain only a namespaced SHA-256 room hash and ClickUp metadata; a sanitized visible title is session-only and multimedia or meeting content is not captured |
 | **Trusted local storage** | Host content scripts cannot read extension local storage directly |
 | **No analytics** | No telemetry or analytics code is included |
 
@@ -160,12 +166,11 @@ are complete. Legacy shell packaging scripts are not supported.
 
 1. Open [ClickUp API settings](https://app.clickup.com/settings/apps) and generate your own personal token.
 2. Click the extension icon, paste the token under **Conexión rápida**, and connect. The token is validated before encrypted local persistence and is never saved as a draft.
-3. For an administrator-managed deployment, expand **Configuración avanzada con OAuth**, create a ClickUp OAuth app, and enter its Client ID and Client Secret.
-4. Select your preferred workspace (optional).
-5. Connect Google Calendar from the full app if you want Agenda and Week views.
-6. To use Meet Priority, enable **Detectar sesiones Google Meet** and choose a task when a confirmed session is detected.
+3. Select your preferred workspace (optional).
+4. Google Calendar appears as **In development** and cannot be connected in the current release.
+5. To use Meet Priority, enable **Detectar sesiones Google Meet** and choose a task when a confirmed session is detected.
 
-Use one personal token per ClickUp user. Do not share a workspace-wide token. OAuth client secrets remain best-effort protected local credentials; use an author-managed backend OAuth exchange for broad public distribution that must keep a client secret outside browser profiles.
+Use one personal token per ClickUp user. Do not share a workspace-wide token. ClickUp OAuth configuration inside the extension is no longer supported; upgrades remove legacy OAuth configuration and require a personal-token reconnect without disconnecting users who already have a valid personal token.
 
 Chrome 102 or newer is required. Meet Priority is off by default and the extension is not allowed in incognito mode.
 
@@ -214,7 +219,7 @@ taskbridge-for-clickup/
 │                   background.ts (Service Worker)            │
 ├─────────────────────────────────────────────────────────────┤
 │  ClickUpAPIWrapper                                          │
-│  - Personal token and advanced OAuth flows                  │
+│  - Validated personal-token authentication                  │
 │  - Validate before encrypted credential persistence         │
 │  - API retry, rate governor, and bounded timeout             │
 │  - Explicit reconnection after confirmed authentication loss │

@@ -53,8 +53,8 @@ describe('CGC-CALENDAR-014 read-only agenda local canary', () => {
         expect(identity.GOOGLE_CALENDAR_CORE_SCOPES).toEqual(expected);
         expect(manifest.host_permissions).toContain('https://www.googleapis.com/*');
         const capability = loadTsModule('src/calendar/calendar-capability.ts');
-        expect(capability.GOOGLE_CALENDAR_RUNTIME_ENABLED).toBe(true);
-        expect(capability.isGoogleCalendarRuntimeSupported('chrome-extension://extension-id/')).toBe(true);
+        expect(capability.GOOGLE_CALENDAR_RUNTIME_ENABLED).toBe(false);
+        expect(capability.isGoogleCalendarRuntimeSupported('chrome-extension://extension-id/')).toBe(false);
         expect(capability.isGoogleCalendarRuntimeSupported('moz-extension://extension-id/')).toBe(false);
     });
 

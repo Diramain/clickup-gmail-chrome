@@ -104,8 +104,8 @@ describe('FASE D release metadata, safe data, and preflight', () => {
         const firefoxManifest = JSON.parse(source('manifest.firefox.json'));
         expect(RELEASE_TARGETS.chrome.directory).toBe('dist/chrome');
         expect(RELEASE_TARGETS.firefox.directory).toBe('dist/firefox');
-        expect(releaseArchiveName('chrome', packageJson.version)).toBe('taskbridge-for-clickup-chrome-2.1.0.zip');
-        expect(releaseArchiveName('firefox', packageJson.version)).toBe('taskbridge-for-clickup-firefox-2.1.0.zip');
+        expect(releaseArchiveName('chrome', packageJson.version)).toBe('taskbridge-for-clickup-chrome-2.2.0.zip');
+        expect(releaseArchiveName('firefox', packageJson.version)).toBe('taskbridge-for-clickup-firefox-2.2.0.zip');
         expect(RELEASE_FILES_BY_TARGET.chrome).toEqual(RELEASE_FILES);
         expect(RELEASE_FILES_BY_TARGET.firefox).toEqual(RELEASE_FILES);
         expect(RELEASE_SOURCE_OVERRIDES.chrome['icons/icon-128.png']).toBe('store-assets/taskbridge-icon-128x128.png');
@@ -135,6 +135,61 @@ describe('FASE D release metadata, safe data, and preflight', () => {
             strict_min_version: '140.0',
         });
         expect(firefoxManifest.browser_specific_settings.gecko.data_collection_permissions.required).toContain('personallyIdentifyingInfo');
+    });
+
+    test('release security policy rejects legacy ClickUp OAuth without blocking Google Calendar metadata', () => {
+        const { calendarManifestPolicyErrors, findBlockedClickUpOAuthMarker } = require('../scripts/release-security-policy');
+        const chromeManifest = JSON.parse(source('manifest.json'));
+        const firefoxManifest = JSON.parse(source('manifest.firefox.json'));
+
+        expect(findBlockedClickUpOAuthMarker('fetch("https://api.clickup.com/api/v2/oauth/token")')).toBe('token endpoint');
+        expect(findBlockedClickUpOAuthMarker('const action = "authenticate"')).toBe('legacy auth action');
+        expect(findBlockedClickUpOAuthMarker('saveOAuthConfig(data)')).toBe('credential action');
+        expect(findBlockedClickUpOAuthMarker('const clientId = form.clientId; const clientSecret = form.clientSecret')).toBe('legacy OAuth credential fields');
+        expect(findBlockedClickUpOAuthMarker('const oauthConfig = {}')).toBe('legacy OAuth config variable');
+        expect(findBlockedClickUpOAuthMarker("['oauth', 'Config'].join('')")).toBe('assembled legacy OAuth marker');
+        expect(findBlockedClickUpOAuthMarker('https://app.clickup.com/api?client_id=legacy')).toBe('authorization endpoint');
+        expect(findBlockedClickUpOAuthMarker('chrome.identity.launchWebAuthFlow({})')).toBe('legacy browser auth flow');
+        expect(findBlockedClickUpOAuthMarker('const clientId = google.oauth2.client_id')).toBeNull();
+        expect(findBlockedClickUpOAuthMarker("const legacyCleanupKey = 'oauthConfig'")).toBeNull();
+        expect(findBlockedClickUpOAuthMarker(JSON.stringify(chromeManifest.oauth2))).toBeNull();
+        expect(chromeManifest.permissions).toContain('identity');
+        expect(chromeManifest.host_permissions).toContain('https://www.googleapis.com/*');
+        expect(chromeManifest.oauth2.scopes).toEqual(['https://www.googleapis.com/auth/calendar.events.owned.readonly']);
+        expect(calendarManifestPolicyErrors(chromeManifest, 'chrome')).toEqual([]);
+        expect(calendarManifestPolicyErrors(firefoxManifest, 'firefox')).toEqual([]);
+
+        for (const mutation of [
+            (manifest) => { manifest.permissions = manifest.permissions.filter((permission) => permission !== 'identity'); },
+            (manifest) => { manifest.host_permissions = manifest.host_permissions.filter((host) => host !== 'https://www.googleapis.com/*'); },
+            (manifest) => { manifest.oauth2.client_id = 'wrong-client'; },
+            (manifest) => { manifest.oauth2.scopes = ['https://www.googleapis.com/auth/calendar.readonly']; },
+        ]) {
+            const damaged = JSON.parse(JSON.stringify(chromeManifest));
+            mutation(damaged);
+            expect(calendarManifestPolicyErrors(damaged, 'chrome')).not.toEqual([]);
+        }
+
+        for (const mutation of [
+            (manifest) => { manifest.permissions.push('identity'); },
+            (manifest) => { manifest.host_permissions.push('https://www.googleapis.com/*'); },
+            (manifest) => { manifest.optional_permissions = ['identity']; },
+            (manifest) => { manifest.optional_host_permissions = ['https://www.googleapis.com/calendar/*']; },
+            (manifest) => { manifest.optional_host_permissions = ['*://www.googleapis.com/*']; },
+            (manifest) => { manifest.optional_host_permissions = ['https://*.googleapis.com/*']; },
+            (manifest) => { manifest.optional_host_permissions = ['http://www.googleapis.com/*']; },
+            (manifest) => { manifest.optional_host_permissions = ['https://calendar.googleapis.com/*']; },
+            (manifest) => { manifest.optional_host_permissions = ['https://content.googleapis.com/*']; },
+            (manifest) => { manifest.content_scripts[0].matches.push('https://calendar.googleapis.com/*'); },
+            (manifest) => { manifest.web_accessible_resources[0].matches.push('https://content.googleapis.com/*'); },
+            (manifest) => { manifest.externally_connectable = { matches: ['*://*.googleapis.com/*'] }; },
+            (manifest) => { manifest.optional_host_permissions = ['<all_urls>']; },
+            (manifest) => { manifest.oauth2 = chromeManifest.oauth2; },
+        ]) {
+            const damaged = JSON.parse(JSON.stringify(firefoxManifest));
+            mutation(damaged);
+            expect(calendarManifestPolicyErrors(damaged, 'firefox')).not.toEqual([]);
+        }
     });
 
     test('standalone modal uses explicit document mode and product typography', () => {

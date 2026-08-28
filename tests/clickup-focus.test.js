@@ -444,7 +444,7 @@ describe('Focused timer integration guardrails', () => {
 
     test('logout suspends focus automation and attempts remote stop before token removal', () => {
         const background = source('background.ts');
-        expect(background).toMatch(/case 'logout':[\s\S]{0,100}logoutInProgress = true/);
+        expect(background).toMatch(/case 'logout':[\s\S]{0,220}logoutInProgress = true/);
         expect(background.indexOf('await stopRunningTimerBeforeLogout()')).toBeLessThan(background.indexOf("await removeSecureToken(STORAGE_KEYS.AUTH_TOKEN)", background.indexOf("case 'logout':")));
         expect(background).toMatch(/revision !== focusedTimerRevision \|\| logoutInProgress/);
     });

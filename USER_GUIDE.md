@@ -1,7 +1,7 @@
 # TaskBridge for ClickUp
 ## User Guide
 
-**Version:** 2.1.0
+**Version:** 2.2.0
 **Last Updated:** August 2026
 
 ---
@@ -20,22 +20,12 @@
 
 For the simplest setup, generate your own token in [ClickUp API settings](https://app.clickup.com/settings/apps). Personal tokens are long-lived credentials with the same ClickUp access as their owner. Do not share a token between users.
 
-For an administrator-managed deployment, create an OAuth app in ClickUp and use the advanced setup. Only a Workspace owner or admin can create that app.
-
 ### Step 2: Connect the Extension
 
 1. Click the extension icon
 2. Paste your personal token under **Conexión rápida**
 3. Click **Conectar con token personal**
 4. Wait for ClickUp validation; invalid or unavailable credentials are not persisted
-
-To use OAuth instead:
-
-1. Expand **Configuración avanzada con OAuth**
-2. Copy the Redirect URL into your ClickUp OAuth app
-3. Paste its **Client ID** and **Client Secret**
-4. Save the encrypted local configuration and click **Iniciar sesión con ClickUp**
-5. Authorize the required Workspaces
 
 ---
 
@@ -110,7 +100,7 @@ Tasks linked to an email appear:
 ## 📅 Google Calendar and Meet
 
 1. Open the full app from the extension icon.
-2. Connect Google Calendar from **Agenda**.
+2. Google Calendar is currently marked **En desarrollo** and cannot be connected.
 3. Switch between Agenda and Week views.
 4. Create a task using an explicit ClickUp List, or link an existing task.
 5. Choose occurrence or series scope for recurring events.
@@ -204,8 +194,8 @@ Safe Diagnostics uses separate controls and is not included in the regular data 
 ## "Not authenticated" Error
 
 1. Open **Conexión** in the full application.
-2. Confirm that your personal token is current, or that your advanced OAuth app configuration is still valid.
-3. Reconnect explicitly. TaskBridge does not invent or silently refresh unsupported ClickUp OAuth grants.
+2. Confirm that your personal token is current.
+3. Reconnect explicitly with a new personal token.
 
 ## Tasks Not Appearing in Gmail
 
@@ -246,8 +236,7 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 
 | Data | Location | Encryption |
 |------|----------|------------|
-| Personal or OAuth Access Token | Local | AES-256-GCM best-effort local encryption |
-| OAuth Client Secret | Local | AES-256-GCM best-effort local encryption |
+| ClickUp Personal Token | Local | AES-256-GCM best-effort local encryption |
 | Email-Task Links | Local | No |
 | User Info | Local | No |
 | Safe Diagnostics (opt-in) | Browser session memory | Allowlisted fields only |
@@ -262,7 +251,7 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 | Permission | Why Needed |
 |------------|------------|
 | storage | Store settings and tokens |
-| identity | OAuth authentication flow |
+| identity | Chrome only: browser-managed Google Calendar OAuth; Firefox does not request it while Calendar is disabled |
 | tabs | Coordinate active Gmail, ClickUp, and exact Meet tabs without browsing-history access |
 | host access | Gmail, ClickUp API/app, and `https://meet.google.com/*` for the opt-in minimal Meet detector |
 
@@ -271,7 +260,7 @@ El diagnóstico está apagado por defecto y conserva como máximo 200 eventos t�
 # FAQ
 
 **Q: Can I use this without an OAuth app?**
-A: Yes. Use your own ClickUp personal token under **Conexión rápida**. OAuth remains available as an advanced option for owners or admins who manage their own app.
+A: Yes. Use your own ClickUp personal token under **Conexión rápida**. ClickUp OAuth inside the extension is no longer supported.
 
 **Q: Does this work with Google Workspace?**
 A: Yes, as long as you have access to Gmail.

@@ -94,8 +94,7 @@ describe('Spanish runtime UI copy', () => {
         expect(source('src/message-security.ts')).toContain("'searchTasks'");
         expect(source('src/data-management.ts')).toContain("'CLEAR DATA'");
         expect(source('src/data-management.ts')).toContain("'BORRAR DATOS'");
-        expect(source('popup/popup.html')).toContain('ID de cliente (Client ID)');
-        expect(source('popup/popup.html')).toContain('Secreto de cliente (Client Secret)');
-        expect(source('popup/popup.html')).toContain('URL de redirección (Redirect URL)');
+        expect(source('popup/popup.html')).toContain('Token personal de ClickUp');
+        expect(source('popup/popup.html')).not.toMatch(/Client ID|Client Secret|Redirect URL/);
     });
 });

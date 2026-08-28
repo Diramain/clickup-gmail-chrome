@@ -132,15 +132,17 @@ describe('B1 privacy hardening', () => {
         expect(policy).not.toMatch(/automatic 90[- ]day purge|purged? automatically after 90 days/i);
     });
 
-    test('security docs describe client secret best-effort local encryption without unsafe obsolete claim', () => {
+    test('security docs describe token-only migration and best-effort local encryption', () => {
         const security = source('SECURITY.md');
 
-        expect(security).toMatch(/encrypted locally with \*\*AES-256-GCM\*\* through `saveSecureOAuthConfig`/);
+        expect(security).toMatch(/personal token is encrypted at rest using \*\*AES-256-GCM\*\*/i);
         expect(security).toMatch(/best-effort at-rest protection/i);
         expect(security).toMatch(/key is stored in the same browser profile/i);
         expect(security).toMatch(/does not protect against a compromised host or compromised browser profile/i);
-        expect(security).toMatch(/decrypted only when needed for OAuth or token exchange with ClickUp/i);
-        expect(security).toMatch(/backend OAuth proxy remains recommended/i);
+        expect(security).toMatch(/no longer requests or stores ClickUp Client IDs or Client Secrets/i);
+        expect(security).toMatch(/removes legacy ClickUp OAuth configuration/i);
+        expect(security).toMatch(/Existing valid personal tokens are preserved/i);
+        expect(security).not.toMatch(/saveSecureOAuthConfig|token exchange with ClickUp/i);
         expect(security).toMatch(/validates it against ClickUp's `\/user` endpoint before persistence/i);
         expect(security).toMatch(/must not be shared as an organization-wide credential/i);
         expect(security).toMatch(/Google Meet Priority Boundary/);

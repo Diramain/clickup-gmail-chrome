@@ -3,6 +3,7 @@ import { isConfirmedThreadId } from './link-hardening';
 import { isValidBulkTaskChange } from './bulk-task-update';
 import { isValidGmailAttachmentUploadPayload } from './gmail-attachment-security';
 import { normalizePersonalToken } from './clickup-auth';
+import { sanitizeMeetTitle } from './meet/meet-task-prompt';
 
 export interface MessageValidationResult {
     ok: boolean;
@@ -22,12 +23,12 @@ const MEET_ACTIONS = new Set([
 ]);
 const DIAGNOSTIC_ACTIONS = new Set(['getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics']);
 const EXTENSION_ACTIONS = new Set([
-    'authenticate', 'authenticatePersonalToken', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
-    'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'createTaskSimple', 'saveOAuthConfig', 'savePreferredTeam',
+    'authenticatePersonalToken', 'logout', 'checkAuth', 'getStatus', 'getLocalConnectionStatus', 'getTeams', 'getHierarchy', 'getUser', 'getSpaces', 'getFolders',
+    'getLists', 'getFolderlessLists', 'getMembers', 'getList', 'createTaskSimple', 'savePreferredTeam',
     'getPreferredTeam', 'getTaskById', 'preloadFullHierarchy', 'getHierarchyCache', 'getEmailTasksSyncStatus', 'findLinkedTasks',
     'searchTasks', 'syncEmailTasks', 'clearLocalData', 'getTimeEntries',
     'getMeetPriorityStatus', 'getMeetMappings', 'assignMeetTask', 'ignoreMeetSession', 'endMeetSession', 'resumeMeetSession',
-    'deleteMeetMapping', 'setMeetMappingEnabled', 'setMeetPriorityEnabled',
+    'createMeetTask', 'deleteMeetMapping', 'setMeetMappingEnabled', 'setMeetPriorityEnabled',
     'getDiagnosticStatus', 'setDiagnosticEnabled', 'exportDiagnostics', 'clearDiagnostics',
     'getMeetingLinkUiState', 'previewMeetingLink', 'beginMeetingLinkCreate', 'resumeMeetingOperation', 'repairMeetingOperation',
     // CGC-UX-V2-D2: sólo para la app en pestaña. Fuera de GMAIL_ACTIONS y
@@ -35,9 +36,10 @@ const EXTENSION_ACTIONS = new Set([
     'getDestinationOptions', 'setDefaultDestination', 'getDashboardSummary', 'refreshDashboardSummary', 'applyBulkTaskChange',
     'getGoogleCalendarAgenda', 'connectGoogleCalendar', 'refreshGoogleCalendarAgenda', 'disconnectGoogleCalendar',
     'linkGoogleCalendarEventTask', 'createGoogleCalendarEventTask', 'getCalendarTaskTypeConfig', 'getClickUpCustomTaskTypes',
-    'setCalendarTaskTypeConfig', 'openGoogleCalendarMeet', 'getGmailIntegrationPreference', 'setGmailIntegrationPreference'
+    'setCalendarTaskTypeConfig', 'openGoogleCalendarMeet', 'getGmailIntegrationPreference', 'setGmailIntegrationPreference',
+    'getUiLanguage', 'setUiLanguage'
 ]);
-const CREDENTIAL_ACTIONS = new Set(['authenticate', 'authenticatePersonalToken', 'saveOAuthConfig']);
+const CREDENTIAL_ACTIONS = new Set(['authenticatePersonalToken']);
 
 const MAX_SUBJECT = 500;
 const MAX_FROM = 320;
@@ -111,11 +113,6 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && hasOnlyDataKeys(data, ['token'])
                 && normalizePersonalToken(data.token) !== null;
-        case 'saveOAuthConfig':
-            return hasOnlyRootKeys(message, ['action', 'data'])
-                && hasOnlyDataKeys(data, ['clientId', 'clientSecret'])
-                && isShortString(data.clientId, 300)
-                && isShortString(data.clientSecret, 1000);
         case 'savePreferredTeam':
             return isShortString(data.teamId, 100);
         case 'setDefaultDestination':
@@ -151,6 +148,10 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && hasOnlyDataKeys(data, ['enabled'])
                 && typeof data.enabled === 'boolean';
+        case 'setUiLanguage':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && hasOnlyDataKeys(data, ['language'])
+                && ['es', 'en'].includes(data.language);
         case 'createTaskFull':
             return isValidCreateTaskFull(message);
         case 'createTaskSimple':
@@ -180,8 +181,9 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
         case 'getMeetDetectionEnabled':
         case 'getMeetTaskPromptState':
         case 'getEmailTaskMappings':
-            case 'getDefaultListConfig':
-            case 'getGmailIntegrationPreference':
+        case 'getDefaultListConfig':
+        case 'getGmailIntegrationPreference':
+        case 'getUiLanguage':
         case 'getDashboardSummary':
         case 'refreshDashboardSummary':
         case 'getGoogleCalendarAgenda':
@@ -234,7 +236,8 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && ['candidate', 'joined', 'left', 'heartbeat'].includes(data.event)
                 && isHexRoomKey(data.roomKey)
-                && Object.keys(data).every((key) => ['event', 'roomKey'].includes(key));
+                && (data.title === undefined || isSanitizedMeetTitle(data.title))
+                && Object.keys(data).every((key) => ['event', 'roomKey', 'title'].includes(key));
         case 'getMeetPriorityStatus':
         case 'getMeetMappings':
         case 'endMeetSession':
@@ -247,6 +250,12 @@ export function hasValidSchema(message: ExtensionMessage): boolean {
                 && isShortString(data.teamId, 100)
                 && typeof data.remember === 'boolean'
                 && Object.keys(data).every((key) => ['taskId', 'teamId', 'remember'].includes(key));
+        case 'createMeetTask':
+            return hasOnlyRootKeys(message, ['action', 'data'])
+                && isSanitizedMeetTitle(data.title)
+                && (data.parentTaskId === undefined || isShortString(data.parentTaskId, 100))
+                && typeof data.remember === 'boolean'
+                && Object.keys(data).every((key) => ['title', 'parentTaskId', 'remember'].includes(key));
         case 'setMeetPriorityEnabled':
             return hasOnlyRootKeys(message, ['action', 'data'])
                 && typeof data.enabled === 'boolean'
@@ -382,4 +391,10 @@ function isValidDuration(value: unknown): boolean {
 
 function isShortString(value: unknown, max: number): boolean {
     return typeof value === 'string' && value.length > 0 && value.length <= max;
+}
+
+function isSanitizedMeetTitle(value: unknown): value is string {
+    if (typeof value !== 'string') return false;
+    const normalized = sanitizeMeetTitle(value);
+    return normalized.length > 0 && normalized === value;
 }

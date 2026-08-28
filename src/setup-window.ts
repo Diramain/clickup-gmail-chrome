@@ -1,5 +1,5 @@
 export const SETUP_MODE_QUERY = 'mode=setup';
-export const SETUP_WINDOW_ID_KEY = 'oauthSetupWindowId';
+export const SETUP_WINDOW_ID_KEY = 'clickupSetupWindowId';
 export const SETUP_WINDOW_PATH = `popup/popup.html?${SETUP_MODE_QUERY}`;
 
 export function isSetupStandalone(search: string = window.location.search): boolean {

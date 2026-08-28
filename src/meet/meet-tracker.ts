@@ -1,6 +1,7 @@
 import { createMeetRoomKey, hasConfirmedMeetSession, resolveMeetPageContext } from './meet-room';
 import { advanceMeetDetector, INITIAL_MEET_DETECTOR_STATE, type MeetDetectorState } from './meet-detector';
 import { MeetTaskPromptController } from './meet-task-prompt-ui';
+import { sanitizeMeetTitle } from './meet-task-prompt';
 
 const POLL_MS = 1_000;
 let detectorState: MeetDetectorState = { ...INITIAL_MEET_DETECTOR_STATE };
@@ -24,7 +25,11 @@ async function evaluateMeetState(): Promise<void> {
 }
 
 async function notify(event: 'candidate' | 'joined' | 'left' | 'heartbeat', roomKey: string): Promise<void> {
-    await chrome.runtime.sendMessage({ action: 'meetSessionEvent', data: { event, roomKey } }).catch(() => undefined);
+    const title = event === 'left' ? '' : sanitizeMeetTitle(document.title);
+    await chrome.runtime.sendMessage({
+        action: 'meetSessionEvent',
+        data: { event, roomKey, ...(title ? { title } : {}) },
+    }).catch(() => undefined);
 }
 
 async function getConfirmedRoomKey(): Promise<string | null> {

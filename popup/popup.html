@@ -39,82 +39,29 @@
 
         <!-- ClickUp connection -->
         <div id="login-required" class="section hidden">
+            <label class="language-setting"><span data-i18n="language.label">Idioma</span><select data-language-selector><option value="es" data-i18n="language.spanish">Español</option><option value="en" data-i18n="language.english">English</option></select></label>
             <div class="card auth-primary-card">
                 <span class="connection-badge">Recomendado</span>
-                <h2>Conexión rápida</h2>
-                <p class="help-text">Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil del navegador.</p>
+                <h2 data-i18n="auth.quick">Conexión rápida</h2>
+                <p class="help-text" data-i18n="auth.tokenDetail">Usá tu token personal de ClickUp. Se valida antes de guardarse y queda cifrado sólo en este perfil del navegador.</p>
                 <div class="form-group">
-                    <label for="personalToken">Token personal de ClickUp</label>
+                    <label for="personalToken" data-i18n="auth.tokenLabel">Token personal de ClickUp</label>
                     <input type="password" id="personalToken" placeholder="pk_…" autocomplete="new-password" spellcheck="false">
                 </div>
-                <button id="connectPersonalToken" class="btn btn-primary" type="button" disabled>Conectar con token personal</button>
+                <button id="connectPersonalToken" class="btn btn-primary" type="button" disabled data-i18n="auth.connect">Conectar con token personal</button>
                 <p id="personalTokenStatus" class="hint" role="status" aria-live="polite"></p>
-                <p class="credential-note">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
-                <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer">Abrir Tokens de API en ClickUp</a>
+                <p class="credential-note" data-i18n="auth.credentialNote">No se guarda mientras escribís, nunca vuelve a mostrarse y no se incluye en exports ni diagnósticos.</p>
+                <a href="https://app.clickup.com/settings/apps" target="_blank" rel="noopener noreferrer" data-i18n="auth.openTokens">Abrir Tokens de API en ClickUp</a>
             </div>
-
-            <details class="card auth-advanced-card">
-                <summary>Configuración avanzada con OAuth</summary>
-                <p class="help-text">Para owners o admins que administran su propia app OAuth. El secreto se cifra localmente, pero un navegador comprometido puede acceder al perfil.</p>
-
-                <!-- Step 1: Redirect URL -->
-                <div class="step-card">
-                    <span class="step-number">1</span>
-                    <div class="step-content">
-                        <p>Copiá esta <strong>URL de redirección (Redirect URL)</strong>:</p>
-                        <div class="url-box">
-                            <input type="text" id="redirectUrl" readonly aria-label="URL de redirección OAuth">
-                            <button id="copyUrl" class="btn-icon" title="Copiar URL" aria-label="Copiar URL de redirección">📋</button>
-                        </div>
-                        <p class="hint">Usá el botón 📋 para copiarla</p>
-                    </div>
-                </div>
-
-                <!-- Step 2: Create App -->
-                <div class="step-card">
-                    <span class="step-number">2</span>
-                    <div class="step-content">
-                        <p>Andá a <a href="https://app.clickup.com/settings/integrations" target="_blank" rel="noopener noreferrer">Integraciones de ClickUp</a></p>
-                        <p class="hint">Elegí crear una app y pegá la URL de redirección</p>
-                    </div>
-                </div>
-
-                <!-- Step 3: Enter credentials -->
-                <div class="step-card">
-                    <span class="step-number">3</span>
-                    <div class="step-content">
-                        <p>Ingresá las credenciales abajo:</p>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="clientId">ID de cliente (Client ID)</label>
-                    <input type="text" id="clientId" placeholder="Ingresá el Client ID">
-                </div>
-
-                <div class="form-group">
-                    <label for="clientSecret">Secreto de cliente (Client Secret)</label>
-                    <input type="password" id="clientSecret" placeholder="Ingresá el Client Secret">
-                </div>
-
-                <div class="btn-row">
-                    <button id="saveConfig" class="btn btn-secondary">Guardar configuración</button>
-                    <button id="discardOAuthChanges" class="btn btn-link" type="button">Descartar cambios</button>
-                </div>
-                <p id="oauthConfigStatus" class="hint" aria-live="polite" data-success-message="Configuración guardada de forma segura. El secreto se borró del campo intencionalmente."></p>
-                <button id="signIn" class="btn btn-primary" disabled>
-                    Iniciar sesión con ClickUp
-                </button>
-            </details>
 
             <div class="card connection-preview-card google-connection-card" aria-labelledby="googleCalendarSetupTitle">
                 <div class="connection-heading">
                     <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                     <div class="connection-title">
-                        <h3 id="googleCalendarSetupTitle">Google Calendar</h3>
-                        <p>Integración opcional para próximos eventos del calendario principal</p>
+                        <h3 id="googleCalendarSetupTitle" data-i18n="calendar.title">Google Calendar</h3>
+                        <p data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                     </div>
-                    <span class="connection-badge">Opcional</span>
+                    <span class="connection-badge" data-i18n="calendar.development">En desarrollo</span>
                 </div>
                 <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
                     <li>Eventos del calendario principal en modo lectura</li>
@@ -123,9 +70,9 @@
                 </ul>
                 <button id="connectGoogleCalendarSetup" class="btn btn-google" type="button"
                     aria-describedby="googleOAuthSetupStatus" aria-disabled="true" disabled>
-                    Conectar Google Calendar
+                    <span data-i18n="calendar.button">Próximamente</span>
                 </button>
-                <p id="googleOAuthSetupStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
+                <p id="googleOAuthSetupStatus" class="connection-status" role="status" data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                 <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
             </div>
 
@@ -326,6 +273,7 @@
 
                 <div class="card connections-card" aria-labelledby="connectionsTitle">
                     <h3 id="connectionsTitle">Conexiones</h3>
+                    <label class="language-setting"><span data-i18n="language.label">Idioma</span><select data-language-selector><option value="es" data-i18n="language.spanish">Español</option><option value="en" data-i18n="language.english">English</option></select></label>
                     <p class="help-text">Cada servicio mantiene su autorización por separado.</p>
 
                     <div class="connection-row">
@@ -341,10 +289,10 @@
                     <div class="connection-row connection-row-google">
                         <span class="connection-provider connection-provider-google" aria-hidden="true">G</span>
                         <div class="connection-title">
-                            <strong>Google Calendar</strong>
-                            <span>Próximos eventos del calendario principal</span>
+                            <strong data-i18n="calendar.title">Google Calendar</strong>
+                            <span data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</span>
                         </div>
-                        <span class="connection-badge">Opcional</span>
+                        <span class="connection-badge" data-i18n="calendar.development">En desarrollo</span>
                     </div>
                     <ul class="connection-permissions" aria-label="Permisos previstos de Google Calendar">
                         <li>Eventos del calendario principal en modo lectura</li>
@@ -353,9 +301,9 @@
                     </ul>
                     <button id="connectGoogleCalendarConfig" class="btn btn-google" type="button"
                         aria-describedby="googleOAuthConfigStatus" aria-disabled="true" disabled>
-                        Conectar Google Calendar
+                        <span data-i18n="calendar.button">Próximamente</span>
                     </button>
-                    <p id="googleOAuthConfigStatus" class="connection-status" role="status">Agenda Calendar preparada en modo lectura. OAuth permanece desactivado hasta el canario autorizado.</p>
+                    <p id="googleOAuthConfigStatus" class="connection-status" role="status" data-i18n="calendar.developmentDetail">Google Calendar está en desarrollo y todavía no está disponible.</p>
                     <p class="connection-privacy">No lee Gmail, Drive, audio, video, chat ni participantes de Meet.</p>
                 </div>
 
